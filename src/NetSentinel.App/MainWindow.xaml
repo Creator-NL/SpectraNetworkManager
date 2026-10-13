@@ -397,6 +397,46 @@
                             <Button Content="Save settings" Click="OnDnsSave" Foreground="{StaticResource Cyan}" HorizontalAlignment="Left" Margin="0,0,0,14"
                                     ToolTip="Saves, and restarts the DNS server if it is running."/>
 
+                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
+
+                            <TextBlock Text="POINT THIS PC TO NETSENTINEL" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,4"/>
+                            <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="One click points your network adapters to NetSentinel (127.0.0.1 / ::1) to block ads and trackers across your entire PC. Backs up your existing DNS first, with an automatic 60-second rollback if unconfirmed."/>
+
+                            <!-- Status banner -->
+                            <Border x:Name="DnsSwitchBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,10" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock x:Name="DnsSwitchStatus" FontWeight="SemiBold" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="DnsSwitchDetails" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="Select network adapters to point at NetSentinel:" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4"/>
+                            <ItemsControl x:Name="DnsAdaptersList" Margin="0,0,0,6">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2,0,2">
+                                            <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" FontSize="11"/>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="True" Margin="0,0,0,8"
+                                      ToolTip="Recommended. If NetSentinel is stopped, your computer can still reach your previous DNS servers."/>
+
+                            <WrapPanel Margin="0,0,0,12">
+                                <Button x:Name="DnsApplySwitchButton" Content="Point PC to NetSentinel..." Click="OnDnsSwitchApply" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
+                                <Button x:Name="DnsRestoreSwitchButton" Content="Restore original DNS" Click="OnDnsSwitchRestore" Margin="0,0,8,6"/>
+                                <Button Content="Refresh adapters" Click="OnDnsRefreshAdapters" Margin="0,0,8,6"/>
+                            </WrapPanel>
+
+                            <TextBlock Text="BROWSER SECURE DNS (DoH) NOTICE" FontWeight="SemiBold" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,0,0,2"/>
+                            <TextBlock Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12"
+                                       Text="Browsers (Chrome, Edge) sometimes bypass Windows DNS with built-in DNS-over-HTTPS. In Chrome/Edge settings under Privacy &amp; Security -> Use secure DNS, select 'With your current service provider' (or disable it)."/>
+
+                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Margin="0,0,0,12"/>
+
                             <TextBlock Text="OTHER DEVICES ON YOUR NETWORK" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,6"/>
                             <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
                                        Text="Set the listen address to 0.0.0.0, then allow DNS requests from your local network in Windows Firewall (only your home network, never public networks). Then point your router's DNS (or a device's DNS) at this PC."/>

@@ -54,8 +54,11 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _dnsSwitch = new SystemDnsSwitchManager(null, null, () => _sink.LocalEndPoint);
         InitializeComponent();
         DataContext = this;
+        DnsAdaptersList.ItemsSource = DnsAdapters;
+        _dnsSwitch.StateChanged += _ => Dispatcher.BeginInvoke(new Action(UpdateDnsSwitchUi));
 
         _rowsView = CollectionViewSource.GetDefaultView(Rows);
         _rowsView.Filter = RowFilter;
@@ -76,14 +79,18 @@ public partial class MainWindow : Window
         {
             _signatures.Dispose();
             _sink.Dispose();
+            _dnsSwitch.Dispose();
         };
 
         _timer.Tick += async (_, _) => await TickAsync();
         Loaded += async (_, _) =>
         {
             await RecoverStrictStateAsync();
+            await RecoverDnsSwitchStateAsync();
             LoadDnsSettingsIntoUi();
             if (_sink.Settings.AutoStart) await StartDnsAsync();
+            await RefreshAdaptersListAsync();
+            UpdateDnsSwitchUi();
             await TickAsync();
             _timer.Start();
         };
@@ -663,9 +670,11 @@ public partial class MainWindow : Window
             if (_strict.State.Phase != StrictPhase.Off || _strict.WasUnreadable)
                 await DisableStrictAsync();
 
+            await _dnsSwitch.RestoreAllAsync();
+
             int removed = await Task.Run(() => _enforcer.RemoveAll());
             int cleared = _rules.RemoveWhere(r => r.Action == RuleAction.Block);
-            StatusText.Text = $"Removed {removed} firewall rules and cleared {cleared} block decisions. Strict mode is off.";
+            StatusText.Text = $"Removed {removed} firewall rules and cleared {cleared} block decisions. Strict mode & system DNS restored.";
         }
         catch (Exception ex)
         {
@@ -1037,6 +1046,8 @@ public partial class MainWindow : Window
     // ---- DNS sinkhole ----------------------------------------------------------------------
 
     private readonly DnsService _sink = DnsService.CreateDefault();
+    private readonly SystemDnsSwitchManager _dnsSwitch;
+    public ObservableCollection<AdapterListItem> DnsAdapters { get; } = new();
     private DnsLogEntry? _dnsLastTop;
     private bool _dnsBusy;
 
@@ -1366,6 +1377,167 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---- System DNS switch (point this PC to NetSentinel) -----------------------------------
+
+    private async Task RecoverDnsSwitchStateAsync()
+    {
+        try
+        {
+            if (await _dnsSwitch.CheckStartupRecoveryAsync())
+            {
+                AddAlert(DateTimeOffset.Now, "Recovered from unexpected shutdown: original system DNS restored.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AddAlert(DateTimeOffset.Now, "Could not check DNS recovery state: " + ex.Message);
+        }
+    }
+
+    private async Task RefreshAdaptersListAsync()
+    {
+        try
+        {
+            var adapters = await Task.Run(() => new WindowsSystemDnsSwitch().GetAdaptersAsync());
+
+            DnsAdapters.Clear();
+            foreach (var a in adapters)
+            {
+                string dnsDesc = a.Ipv4Servers.Count > 0 ? string.Join(", ", a.Ipv4Servers) : (a.Ipv4IsDhcp ? "DHCP" : "None");
+                if (a.Ipv6Servers.Count > 0) dnsDesc += $" / IPv6: {string.Join(", ", a.Ipv6Servers)}";
+
+                DnsAdapters.Add(new AdapterListItem
+                {
+                    InterfaceIndex = a.InterfaceIndex,
+                    Name = a.Name,
+                    Description = a.Description,
+                    CurrentDns = dnsDesc,
+                    IsSelected = a.Status.Equals("Up", StringComparison.OrdinalIgnoreCase) && !a.IsVirtual,
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            AddAlert(DateTimeOffset.Now, "Could not query network adapters: " + ex.Message);
+        }
+    }
+
+    private void UpdateDnsSwitchUi()
+    {
+        bool isActive = _dnsSwitch.IsActive;
+        bool isPending = _dnsSwitch.IsPending;
+
+        DnsApplySwitchButton.IsEnabled = !isActive && !isPending && _sink.IsRunning;
+        DnsRestoreSwitchButton.IsEnabled = isActive || isPending;
+
+        if (isPending)
+        {
+            DnsSwitchBanner.Visibility = Visibility.Visible;
+            DnsSwitchBanner.BorderBrush = (Brush)FindResource("Amber");
+            DnsSwitchStatus.Text = "System DNS switch is PENDING confirmation (60-second safety window)";
+            DnsSwitchDetails.Text = $"Confirming connection to {_sink.LocalEndPoint}. Reverting automatically if unconfirmed.";
+        }
+        else if (isActive)
+        {
+            DnsSwitchBanner.Visibility = Visibility.Visible;
+            DnsSwitchBanner.BorderBrush = (Brush)FindResource("Cyan");
+            DnsSwitchStatus.Text = "This PC's DNS is pointing to NetSentinel (Active)";
+            DnsSwitchDetails.Text = $"Protected adapters: {string.Join(", ", _dnsSwitch.State.Backups.Select(b => b.Name))}";
+        }
+        else
+        {
+            DnsSwitchBanner.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async void OnDnsRefreshAdapters(object sender, RoutedEventArgs e)
+    {
+        await RefreshAdaptersListAsync();
+        UpdateDnsSwitchUi();
+    }
+
+    private async void OnDnsSwitchApply(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin)
+        {
+            Info("Changing Windows system DNS requires Administrator rights.\n\nClose NetSentinel and start it again with 'Run as administrator'.");
+            return;
+        }
+
+        if (!_sink.IsRunning)
+        {
+            Info("Please start the NetSentinel DNS server first before pointing Windows to it.");
+            return;
+        }
+
+        var selected = DnsAdapters.Where(a => a.IsSelected).Select(a => a.InterfaceIndex).ToList();
+        if (selected.Count == 0)
+        {
+            Info("Please tick at least one network adapter to change.");
+            return;
+        }
+
+        bool onlyLocal = DnsFallbackModeBox.IsChecked != true;
+
+        try
+        {
+            StatusText.Text = "Pointing selected network adapters to NetSentinel...";
+            await _dnsSwitch.ApplyAsync(selected, onlyLocal);
+            UpdateDnsSwitchUi();
+
+            var confirm = new SystemDnsConfirmDialog(this, _dnsSwitch, SystemDnsSwitchManager.ConfirmTimeoutSeconds);
+            if (confirm.ShowDialog() == true)
+            {
+                _dnsSwitch.Confirm();
+                AddAlert(DateTimeOffset.Now, "System DNS confirmed. Windows is now using NetSentinel for DNS.");
+                StatusText.Text = "System DNS is pointing to NetSentinel.";
+            }
+            else
+            {
+                StatusText.Text = "System DNS switch was cancelled. Reverting to original DNS...";
+                await _dnsSwitch.RevertAsync();
+                AddAlert(DateTimeOffset.Now, "System DNS switch cancelled: original DNS restored.");
+                StatusText.Text = "Original system DNS restored.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Could not change system DNS settings", ex);
+            try { await _dnsSwitch.RevertAsync(); } catch { }
+        }
+        finally
+        {
+            await RefreshAdaptersListAsync();
+            UpdateDnsSwitchUi();
+        }
+    }
+
+    private async void OnDnsSwitchRestore(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin)
+        {
+            Info("Restoring Windows system DNS requires Administrator rights.\n\nClose NetSentinel and start it again with 'Run as administrator'.");
+            return;
+        }
+
+        try
+        {
+            StatusText.Text = "Restoring original DNS on all adapters...";
+            await _dnsSwitch.RestoreAllAsync();
+            AddAlert(DateTimeOffset.Now, "Restored original DNS settings on all network adapters.");
+            StatusText.Text = "Original system DNS restored.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not restore system DNS settings", ex);
+        }
+        finally
+        {
+            await RefreshAdaptersListAsync();
+            UpdateDnsSwitchUi();
+        }
+    }
+
     // The badge is cheap and always current; the rest only matters while the DNS tab is visible.
     private void RefreshDnsUi()
     {
@@ -1376,6 +1548,7 @@ public partial class MainWindow : Window
         DnsStopButton.IsEnabled = _sink.IsRunning;
         DnsPauseButton.IsEnabled = _sink.IsRunning;
         DnsTestButton.IsEnabled = _sink.IsRunning && !_dnsBusy;
+        UpdateDnsSwitchUi();
 
         if (_sink.IsBlockingPaused)
         {

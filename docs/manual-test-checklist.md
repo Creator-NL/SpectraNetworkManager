@@ -71,13 +71,30 @@ This checklist covers Windows-specific platform features that cannot be fully ve
 
 ---
 
-## 6. Teardown & Verification
+## 6. System DNS Switch & Safety Rollback
 
 | Step | Action | Expected Result | Pass/Fail |
 | :--- | :--- | :--- | :--- |
-| **6.1** | Stop the DNS server in NetSentinel. | Sockets released; port is freed. | [ ] |
-| **6.2** | Inspect `wf.msc` rules. | No orphaned rules. | [ ] |
-| **6.3** | Revert VM snapshot. | VM restored to clean baseline state for next test cycle. | [ ] |
+| **6.1** | Open DNS tab -> scroll to **POINT THIS PC TO NETSENTINEL**. Click **Refresh adapters**. | Active physical adapters (Ethernet, Wi-Fi) appear checked. Disconnected, loopback, and virtual adapters are skipped or unchecked. | [ ] |
+| **6.2** | Verify pre-switch DNS settings:<br>`Get-DnsClientServerAddress -InterfaceIndex <idx>` | Record current DNS servers and DHCP status. | [ ] |
+| **6.3** | Ensure NetSentinel DNS server is RUNNING, then click **Point PC to NetSentinel...**. | 60-second confirmation dialog appears. Status banner shows **PENDING**. `%LocalAppData%\NetSentinel\dns-switch.json` and `dns-backup.json` are written. | [ ] |
+| **6.4** | Check connectivity probe in confirmation dialog. | Reports `Connection check: OK. Both local NetSentinel DNS and Windows system resolver verified successfully.` | [ ] |
+| **6.5** | While confirmation dialog is open, run in cmd/PowerShell:<br>`nslookup doubleclick.net`<br>*(do not specify server address)* | Resolves through `127.0.0.1` and returns `0.0.0.0` (ad blocked system-wide). | [ ] |
+| **6.6** | Click **Keep NetSentinel DNS**. | Dialog closes. Status banner changes to **Active** (Cyan) showing protected adapters. | [ ] |
+| **6.7** | Click **Restore original DNS**. | Sockets and adapters restored. `Get-DnsClientServerAddress` returns original servers and DHCP flag. Banner disappears. | [ ] |
+| **6.8** | **Safety Test A (Timeout Rollback):** Click **Point PC to NetSentinel...** and **wait 60 seconds without clicking**. | Timer expires: NetSentinel automatically restores original adapter DNS settings. Internet connectivity maintained. | [ ] |
+| **6.9** | **Safety Test B (Crash Recovery):** Click **Point PC to NetSentinel...**, and while countdown is ticking, force-kill NetSentinel:<br>`taskkill /f /im NetSentinel.exe` | Relaunch NetSentinel: Startup recovery detects unconfirmed pending state and automatically restores original adapter DNS settings. Alert displayed in activity feed. | [ ] |
+| **6.10** | **Safety Test C (Panic Button):** Point PC to NetSentinel, confirm it, then click **PANIC: undo all NetSentinel changes**. | Immediately restores original system DNS on all adapters, removes temporary firewall rules, and turns off strict mode. | [ ] |
+
+---
+
+## 7. Teardown & Verification
+
+| Step | Action | Expected Result | Pass/Fail |
+| :--- | :--- | :--- | :--- |
+| **7.1** | Stop the DNS server in NetSentinel. | Sockets released; port is freed. | [ ] |
+| **7.2** | Inspect `wf.msc` rules. | No orphaned rules. | [ ] |
+| **7.3** | Revert VM snapshot. | VM restored to clean baseline state for next test cycle. | [ ] |
 
 ---
 
@@ -85,3 +102,4 @@ This checklist covers Windows-specific platform features that cannot be fully ve
 **Date:** `____________________`  
 **OS Build:** `____________________`  
 **Result:** `[  ] PASS    [  ] FAIL`
+
