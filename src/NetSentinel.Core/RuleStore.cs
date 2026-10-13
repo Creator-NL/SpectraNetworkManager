@@ -32,8 +32,7 @@ public sealed class RuleStore
         Load();
     }
 
-    public static string DefaultPath => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "rules.json");
+    public static string DefaultPath => EngineStoragePaths.RulesPath;
 
     public IReadOnlyCollection<ProgramRule> All => _rules.Values;
 

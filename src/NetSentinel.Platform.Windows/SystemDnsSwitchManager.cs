@@ -38,6 +38,9 @@ public sealed class SystemDnsSwitchManager : IDisposable
     public bool IsActive => State.Phase == DnsSwitchPhase.Active;
     public bool IsPending => State.Phase == DnsSwitchPhase.Pending;
 
+    public Task<IReadOnlyList<NetworkAdapterDnsInfo>> GetAdaptersAsync(CancellationToken ct = default) =>
+        _switch.GetAdaptersAsync(ct);
+
     public event Action<SystemDnsSwitchState>? StateChanged;
 
     /// <summary>

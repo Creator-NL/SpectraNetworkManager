@@ -21,8 +21,7 @@ public sealed class BlocklistManager
         _handler = handler;
     }
 
-    public static string DefaultFolder => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "blocklists");
+    public static string DefaultFolder => NetSentinel.Core.EngineStoragePaths.BlocklistsDirectory;
 
     private string FileFor(BlocklistSource list)
     {

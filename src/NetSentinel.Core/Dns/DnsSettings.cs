@@ -159,8 +159,7 @@ public sealed class DnsSettingsStore
 
     public DnsSettingsStore(string file) => _file = file;
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "dns-settings.json");
+    public static string DefaultPath => NetSentinel.Core.EngineStoragePaths.DnsSettingsPath;
 
     public DnsSettings Load()
     {

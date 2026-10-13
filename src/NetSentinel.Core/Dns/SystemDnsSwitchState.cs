@@ -50,9 +50,8 @@ public sealed class SystemDnsSwitchStore
 
     public SystemDnsSwitchStore(string? stateFile = null, string? backupFile = null)
     {
-        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel");
-        _stateFile = stateFile ?? Path.Combine(dir, "dns-switch.json");
-        _backupFile = backupFile ?? Path.Combine(dir, "dns-backup.json");
+        _stateFile = stateFile ?? Path.Combine(NetSentinel.Core.EngineStoragePaths.BaseDirectory, "dns-switch.json");
+        _backupFile = backupFile ?? NetSentinel.Core.EngineStoragePaths.DnsBackupPath;
         State = Load();
     }
 

@@ -46,8 +46,7 @@ public sealed class StrictModeStore
         State = Load();
     }
 
-    public static string DefaultPath => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "strict-mode.json");
+    public static string DefaultPath => EngineStoragePaths.StrictModePath;
 
     public StrictModeState State { get; private set; }
 

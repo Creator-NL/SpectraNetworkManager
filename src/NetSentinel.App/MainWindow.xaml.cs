@@ -13,6 +13,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using NetSentinel.Core;
+using NetSentinel.Core.Ipc;
 using NetSentinel.Platform.Windows;
 using NetSentinel.Sinkhole;
 
@@ -44,6 +45,7 @@ public partial class MainWindow : Window
     private ProgramSummary? _askCurrent;
 
     private IReadOnlyList<ConnectionView> _lastConnections = Array.Empty<ConnectionView>();
+    private IpcClient? _engineClient;
     private bool _busy;
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
@@ -79,6 +81,7 @@ public partial class MainWindow : Window
         _signatures.Verified += OnSignatureVerified;
         Closed += (_, _) =>
         {
+            _engineClient?.Dispose();
             _signatures.Dispose();
             _sink.Dispose();
             _dnsSwitch.Dispose();
@@ -87,15 +90,69 @@ public partial class MainWindow : Window
         _timer.Tick += async (_, _) => await TickAsync();
         Loaded += async (_, _) =>
         {
+            await TryConnectEngineAsync();
             await RecoverStrictStateAsync();
             await RecoverDnsSwitchStateAsync();
             LoadDnsSettingsIntoUi();
-            if (_sink.Settings.AutoStart) await StartDnsAsync();
+            if (_sink.Settings.AutoStart && _engineClient == null) await StartDnsAsync();
             await RefreshAdaptersListAsync();
             UpdateDnsSwitchUi();
             await TickAsync();
             _timer.Start();
         };
+    }
+
+    private async Task TryConnectEngineAsync()
+    {
+        try
+        {
+            var client = new IpcClient(IpcConstants.PipeName);
+            await client.ConnectAsync(TimeSpan.FromMilliseconds(250));
+            _engineClient = client;
+            _engineClient.EventReceived += OnEngineEventReceived;
+            _engineClient.Disconnected += OnEngineDisconnected;
+            StatusText.Text = "Connected to NetSentinel Engine service (LocalSystem).";
+        }
+        catch
+        {
+            _engineClient = null;
+            StatusText.Text = "Running Standalone (Local Process) — Engine service not active.";
+        }
+    }
+
+    private void OnEngineEventReceived(IpcMessage msg)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            switch (msg.Action)
+            {
+                case IpcConstants.Events.MonitorTick:
+                    var tick = msg.DeserializePayload<MonitorTick>();
+                    if (tick != null) Apply(tick);
+                    break;
+                case IpcConstants.Events.StrictModeChanged:
+                    UpdateStrictUi();
+                    break;
+                case IpcConstants.Events.DnsQuery:
+                    var entry = msg.DeserializePayload<DnsLogEntry>();
+                    if (entry != null)
+                    {
+                        var row = DnsRow.From(entry);
+                        DnsRows.Insert(0, row);
+                        while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
+                    }
+                    break;
+            }
+        });
+    }
+
+    private void OnEngineDisconnected()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            _engineClient = null;
+            StatusText.Text = "Engine service disconnected. Switched to standalone monitoring.";
+        });
     }
 
     // ---- polling ---------------------------------------------------------------------------
@@ -652,9 +709,9 @@ public partial class MainWindow : Window
 
     private async void OnPanic(object sender, RoutedEventArgs e)
     {
-        if (!_isAdmin)
+        if (!_isAdmin && _engineClient?.IsConnected != true)
         {
-            Info("Undoing firewall changes needs Administrator rights.\n\nClose NetSentinel and start it again with 'Run as administrator'.");
+            Info("Undoing firewall changes needs Administrator rights or an active NetSentinel Engine service.\n\nClose NetSentinel and start it again with 'Run as administrator'.");
             return;
         }
 
@@ -665,6 +722,22 @@ public partial class MainWindow : Window
             "Your 'Allowed' decisions stay in NetSentinel's list; block decisions are cleared.",
             "Panic: undo all changes", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes) return;
+
+        if (_engineClient?.IsConnected == true)
+        {
+            try
+            {
+                await _engineClient.SendRequestAsync(IpcConstants.Actions.Panic);
+                StatusText.Text = "Panic command executed via NetSentinel Engine service. All defaults restored.";
+                UpdateStrictUi();
+                AfterDecision();
+                return;
+            }
+            catch (Exception ex)
+            {
+                Error("Engine panic request failed", ex);
+            }
+        }
 
         try
         {

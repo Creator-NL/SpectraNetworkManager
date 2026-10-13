@@ -21,8 +21,7 @@ public sealed class DnsHistoryDatabase : IDisposable
 
     public string DatabasePath => _dbPath;
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "dns-history.db");
+    public static string DefaultPath => NetSentinel.Core.EngineStoragePaths.DnsHistoryPath;
 
     public DnsHistoryDatabase(string dbPath)
     {
