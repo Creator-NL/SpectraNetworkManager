@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- net8.0 builds in Visual Studio 2022. To move to .NET 10 later, change only this line. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Company>Biohazard Corp</Company>
+  </PropertyGroup>
+</Project>

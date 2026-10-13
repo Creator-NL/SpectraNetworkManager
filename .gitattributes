@@ -1,0 +1,10 @@
+# Normalise line endings so Windows and Linux CI see identical files.
+* text=auto
+*.cs     text diff=csharp
+*.xaml   text
+*.csproj text
+*.sln    text eol=crlf
+*.md     text
+*.png    binary
+*.ico    binary
+*.zip    binary

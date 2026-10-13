@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>NetSentinel.Ui</RootNamespace>
+    <AssemblyName>NetSentinel</AssemblyName>
+    <!-- XAML tooling can emit harmless warnings; don't fail the build on them. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NetSentinel.Core\NetSentinel.Core.csproj" />
+    <ProjectReference Include="..\NetSentinel.Platform.Windows\NetSentinel.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

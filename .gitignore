@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+publish/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Test results
+TestResults/
+*.trx
+coverage*.xml
+
+# Local data
+*.db

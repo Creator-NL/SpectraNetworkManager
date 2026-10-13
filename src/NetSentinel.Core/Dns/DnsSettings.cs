@@ -1,0 +1,127 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace NetSentinel.Sinkhole;
+
+public enum BlockMode
+{
+    /// <summary>Answer blocked names with 0.0.0.0 / :: (programs fail immediately, no waiting).</summary>
+    NullAddress = 0,
+    /// <summary>Answer blocked names with "does not exist" (NXDOMAIN).</summary>
+    NxDomain = 1,
+}
+
+public sealed record BlocklistSource(string Name, string Url, bool Enabled = true);
+
+public sealed class DnsSettings
+{
+    /// <summary>Start the DNS server automatically when NetSentinel starts.</summary>
+    public bool AutoStart { get; set; }
+
+    /// <summary>127.0.0.1 = only this PC. 0.0.0.0 = every address of this PC, so other devices on your network can use it too.</summary>
+    public string ListenAddress { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 53;
+
+    public List<string> Upstreams { get; set; } = new() { "9.9.9.9", "1.1.1.1" };
+    public BlockMode BlockMode { get; set; } = BlockMode.NullAddress;
+
+    /// <summary>Also block a name when it is only an alias (CNAME) for a blocked name, e.g. a tracker hiding behind a harmless-looking name.</summary>
+    public bool InspectCnames { get; set; } = true;
+
+    /// <summary>Answer Firefox's "use-application-dns.net" check with "does not exist", which tells Firefox not to bypass this DNS server with its own DNS-over-HTTPS.</summary>
+    public bool BlockBrowserDoh { get; set; } = true;
+
+    public int CacheEntries { get; set; } = 10000;
+
+    public List<BlocklistSource> Lists { get; set; } = new()
+    {
+        new("StevenBlack unified hosts", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
+    };
+
+    /// <summary>One rule per entry: "example.com" (also blocks subdomains), "*.example.com", or a regular expression between slashes: /^ad[0-9]+\./</summary>
+    public List<string> CustomBlock { get; set; } = new();
+    public List<string> CustomAllow { get; set; } = new();
+
+    public bool Validate(out string error)
+    {
+        error = "";
+        if (!IPAddress.TryParse(ListenAddress, out _)) { error = $"'{ListenAddress}' is not a valid IP address to listen on."; return false; }
+        if (Port is < 1 or > 65535) { error = "The port must be between 1 and 65535."; return false; }
+        if (Upstreams.Count == 0) { error = "Add at least one upstream DNS server."; return false; }
+
+        foreach (var u in Upstreams)
+            if (!TryParseUpstream(u, out _)) { error = $"'{u}' is not a valid upstream server (use an IP address like 9.9.9.9, optionally with :port)."; return false; }
+
+        return true;
+    }
+
+    public IReadOnlyList<IPEndPoint> UpstreamEndpoints() =>
+        Upstreams.Select(u => TryParseUpstream(u, out var ep) ? ep : null).Where(ep => ep is not null).Select(ep => ep!).ToList();
+
+    public static bool TryParseUpstream(string text, out IPEndPoint endpoint)
+    {
+        endpoint = new IPEndPoint(IPAddress.Any, 53);
+        text = text.Trim();
+        if (text.Length == 0) return false;
+
+        // Forms: "9.9.9.9", "9.9.9.9:5353", "2620:fe::fe", "[2620:fe::fe]:5353".
+        // Careful: IPAddress.TryParse accepts "[2620:fe::fe]:5353" but silently throws the port away, so look for a port first.
+        bool hasPort = text.StartsWith('[') || text.Count(c => c == ':') == 1;
+        if (hasPort)
+        {
+            if (IPEndPoint.TryParse(text, out var withPort) && withPort.Port is > 0 and <= 65535)
+            {
+                endpoint = withPort;
+                return true;
+            }
+            return false;
+        }
+
+        if (IPAddress.TryParse(text, out var plain))
+        {
+            endpoint = new IPEndPoint(plain, 53);
+            return true;
+        }
+        return false;
+    }
+}
+
+public sealed class DnsSettingsStore
+{
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    private readonly string _file;
+
+    public DnsSettingsStore(string file) => _file = file;
+
+    public static string DefaultPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "dns-settings.json");
+
+    public DnsSettings Load()
+    {
+        try
+        {
+            if (!File.Exists(_file)) return new DnsSettings();
+            return JsonSerializer.Deserialize<DnsSettings>(File.ReadAllText(_file), Json) ?? new DnsSettings();
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            try { File.Move(_file, _file + ".bad", overwrite: true); } catch (Exception) { /* nothing more to do */ }
+            return new DnsSettings();
+        }
+    }
+
+    public void Save(DnsSettings settings)
+    {
+        var dir = Path.GetDirectoryName(_file);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        string temp = _file + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(settings, Json));
+        File.Move(temp, _file, overwrite: true);
+    }
+}
