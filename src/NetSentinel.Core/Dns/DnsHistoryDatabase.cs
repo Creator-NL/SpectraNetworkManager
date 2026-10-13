@@ -32,8 +32,7 @@ public sealed class DnsHistoryDatabase : IDisposable
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            Mode = SqliteOpenMode.ReadWriteCreate
         }.ToString();
 
         InitializeDatabase();
@@ -133,6 +132,7 @@ public sealed class DnsHistoryDatabase : IDisposable
                 if (batch.Count > 0)
                 {
                     WriteBatch(batch);
+                    batch.Clear();
                 }
 
                 // Brief pause to batch rapidly arriving queries
@@ -141,6 +141,7 @@ public sealed class DnsHistoryDatabase : IDisposable
         }
         catch (OperationCanceledException)
         {
+            batch.Clear();
             // Drain remaining
             while (reader.TryRead(out var item))
             {
@@ -319,5 +320,6 @@ public sealed class DnsHistoryDatabase : IDisposable
         _cts.Cancel();
         try { _writerTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
         _cts.Dispose();
+        SqliteConnection.ClearAllPools();
     }
 }

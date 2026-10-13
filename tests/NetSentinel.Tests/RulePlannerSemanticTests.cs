@@ -1,5 +1,6 @@
 using System.Net;
 using NetSentinel.Core;
+using Xunit;
 
 namespace NetSentinel.Tests;
 
@@ -28,13 +29,14 @@ public class RulePlannerSemanticTests
     }
 
     [Fact]
-    public void RandomisedSemanticTest_ZeroMismatches()
+    public void RandomisedSemanticTest_ZeroMismatches_DualStack()
     {
         // Fixed seed so the test is completely deterministic and reproducible.
         var rnd = new Random(424242);
 
         var sampleAddresses = new[]
         {
+            // IPv4
             IPAddress.Parse("127.0.0.1"),      // loopback (LocalNetwork)
             IPAddress.Parse("192.168.1.10"),   // private (LocalNetwork)
             IPAddress.Parse("10.0.0.5"),       // private (LocalNetwork)
@@ -42,12 +44,20 @@ public class RulePlannerSemanticTests
             IPAddress.Parse("1.1.1.1"),        // public
             IPAddress.Parse("93.184.216.34"),  // public (example.com)
             IPAddress.Parse("142.250.190.46"), // public
+
+            // IPv6
+            IPAddress.Parse("::1"),                        // IPv6 loopback (LocalNetwork)
+            IPAddress.Parse("fe80::1"),                    // IPv6 link-local (LocalNetwork)
+            IPAddress.Parse("fc00::1234"),                 // IPv6 ULA (LocalNetwork)
+            IPAddress.Parse("2001:4860:4860::8888"),       // IPv6 public (Google DNS)
+            IPAddress.Parse("2606:4700:4700::1111"),       // IPv6 public (Cloudflare)
+            IPAddress.Parse("2a00:1450:400e:802::200e"),   // IPv6 public
         };
 
         var samplePorts = new[] { 53, 80, 443, 8080, 12345 };
         var sampleProtocols = new[] { TrafficProtocol.Tcp, TrafficProtocol.Udp };
 
-        for (int iteration = 0; iteration < 200; iteration++)
+        for (int iteration = 0; iteration < 250; iteration++)
         {
             var mode = rnd.Next(2) == 0 ? ScopeMode.BlockMatching : ScopeMode.AllowOnly;
             var proto = (TrafficProtocol)rnd.Next(3); // Any, Tcp, Udp
@@ -60,11 +70,13 @@ public class RulePlannerSemanticTests
                 _ => "1-1024, 8000-9000",
             };
 
-            string? addrStr = rnd.Next(3) switch
+            string? addrStr = rnd.Next(5) switch
             {
                 0 => null,
                 1 => "8.8.8.8, 1.1.1.1",
-                _ => "192.168.0.0/16, 93.184.216.0/24",
+                2 => "192.168.0.0/16, 93.184.216.0/24",
+                3 => "2001:4860:4860::8888, 2606:4700:4700::1111",
+                _ => "10.0.0.0/8, 2001:4860:4860::/48",
             };
 
             var scope = new TrafficScope(mode, proto, portStr ?? "", addrStr ?? "", keepLocal);

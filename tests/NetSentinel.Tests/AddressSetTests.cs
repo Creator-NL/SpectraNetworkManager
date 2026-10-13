@@ -79,9 +79,22 @@ public class AddressSetTests
         Assert.True(AddressSet.TryParse("LocalSubnet, 2001:db8::1", out var set, out var err), err);
         Assert.NotNull(set);
         Assert.True(set.HasNonIpv4);
+        Assert.True(set.HasKeywords);
         Assert.Throws<InvalidOperationException>(() => set.Complement());
         Assert.Contains("LocalSubnet", set.ToFirewallString());
         Assert.Contains("2001:db8::1", set.ToFirewallString());
+    }
+
+    [Fact]
+    public void Ipv6_WithoutKeywords_CanBeInverted()
+    {
+        Assert.True(AddressSet.TryParse("2001:db8::1", out var set, out var err), err);
+        Assert.True(set.HasIpv6);
+        Assert.False(set.HasKeywords);
+        var comp = set.Complement();
+        Assert.NotNull(comp);
+        Assert.False(comp.Contains(IPAddress.Parse("2001:db8::1")));
+        Assert.True(comp.Contains(IPAddress.Parse("2001:db8::2")));
     }
 
     [Theory]

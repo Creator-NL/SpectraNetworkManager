@@ -48,9 +48,9 @@ public sealed record TrafficScope(
             return false;
         }
 
-        if (Mode == ScopeMode.AllowOnly && addresses.HasNonIpv4)
+        if (Mode == ScopeMode.AllowOnly && addresses.HasKeywords)
         {
-            error = "'Allow only' works with IPv4 addresses, blocks and ranges. IPv6 addresses and keywords like LocalSubnet only work with 'Block only matching traffic'.";
+            error = "'Allow only' works with IPv4 and IPv6 addresses, blocks and ranges. Windows keywords like LocalSubnet only work with 'Block only matching traffic'.";
             return false;
         }
 

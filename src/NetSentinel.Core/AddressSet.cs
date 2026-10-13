@@ -5,26 +5,29 @@ using System.Net.Sockets;
 namespace NetSentinel.Core;
 
 /// <summary>
-/// A set of remote addresses: IPv4 addresses, CIDR blocks (10.0.0.0/8) and ranges (1.2.3.4-1.2.3.9).
-/// IPv6 addresses and Windows keywords (LocalSubnet, DNS, DHCP, DefaultGateway, WINS) are kept as typed.
-/// Only IPv4 sets can be inverted (<see cref="Complement"/>).
+/// A set of remote addresses: IPv4 addresses, CIDR blocks (10.0.0.0/8) and ranges (1.2.3.4-1.2.3.9),
+/// IPv6 addresses, CIDR blocks (2001:db8::/32) and ranges (fe80::1-fe80::ff).
+/// Windows keywords (LocalSubnet, DNS, DHCP, DefaultGateway, WINS) are kept as typed.
+/// Both IPv4 and IPv6 sets can be inverted (<see cref="Complement"/>). Sets with keywords cannot be inverted.
 /// </summary>
 public sealed class AddressSet
 {
     private static readonly string[] Keywords = { "LocalSubnet", "DNS", "DHCP", "DefaultGateway", "WINS" };
 
     private readonly List<(uint Start, uint End)> _v4;
-    private readonly List<string> _other;
+    private readonly Ipv6AddressSet _v6;
+    private readonly List<string> _keywords;
 
-    private AddressSet(List<(uint, uint)> v4, List<string> other)
+    private AddressSet(List<(uint, uint)> v4, Ipv6AddressSet v6, List<string> keywords)
     {
         _v4 = v4;
-        _other = other;
+        _v6 = v6;
+        _keywords = keywords;
     }
 
-    public static AddressSet Empty { get; } = new(new List<(uint, uint)>(), new List<string>());
+    public static AddressSet Empty { get; } = new(new List<(uint, uint)>(), Ipv6AddressSet.Empty, new List<string>());
 
-    /// <summary>Loopback, private, link-local, multicast and broadcast: traffic that stays on your machine or LAN.</summary>
+    /// <summary>Loopback, private, link-local, multicast and broadcast for both IPv4 and IPv6: traffic that stays on your machine or LAN.</summary>
     public static AddressSet LocalNetwork { get; } = new(Merge(new List<(uint, uint)>
     {
         (Ip("10.0.0.0"), Ip("10.255.255.255")),
@@ -33,12 +36,25 @@ public sealed class AddressSet
         (Ip("172.16.0.0"), Ip("172.31.255.255")),
         (Ip("192.168.0.0"), Ip("192.168.255.255")),
         (Ip("224.0.0.0"), Ip("255.255.255.255")),
-    }), new List<string>());
+    }), Ipv6AddressSet.LocalNetwork, new List<string>());
 
-    public bool IsEmpty => _v4.Count == 0 && _other.Count == 0;
+    public bool IsEmpty => _v4.Count == 0 && _v6.IsEmpty && _keywords.Count == 0;
 
-    /// <summary>True if the set contains IPv6 addresses or keywords, which cannot be inverted.</summary>
-    public bool HasNonIpv4 => _other.Count > 0;
+    /// <summary>True if the set contains Windows keywords, which cannot be inverted.</summary>
+    public bool HasKeywords => _keywords.Count > 0;
+
+    /// <summary>True if the set contains IPv6 addresses or keywords.</summary>
+    public bool HasNonIpv4 => !_v6.IsEmpty || _keywords.Count > 0;
+
+    public bool HasIpv4 => _v4.Count > 0;
+
+    public bool HasIpv6 => !_v6.IsEmpty;
+
+    public IReadOnlyList<(uint Start, uint End)> V4Ranges => _v4;
+
+    public Ipv6AddressSet V6 => _v6;
+
+    public IReadOnlyList<string> Other => _keywords;
 
     public static bool TryParse(string? text, out AddressSet set, out string error)
     {
@@ -47,19 +63,22 @@ public sealed class AddressSet
         if (string.IsNullOrWhiteSpace(text)) return true;
 
         var v4 = new List<(uint, uint)>();
-        var other = new List<string>();
+        var v6Ranges = new List<(UInt128, UInt128)>();
+        var keywords = new List<string>();
 
         foreach (var token in text.Split(new[] { ',', ';' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             var keyword = Keywords.FirstOrDefault(k => k.Equals(token, StringComparison.OrdinalIgnoreCase));
-            if (keyword is not null) { other.Add(keyword); continue; }
+            if (keyword is not null) { keywords.Add(keyword); continue; }
 
             if (token.Contains(':'))
             {
-                string addr = token.Split('/')[0];
-                bool prefixOk = !token.Contains('/') || (int.TryParse(token.Split('/')[1], NumberStyles.None, CultureInfo.InvariantCulture, out int p) && p is >= 0 and <= 128);
-                if (IPAddress.TryParse(addr, out var v6) && v6.AddressFamily == AddressFamily.InterNetworkV6 && prefixOk) { other.Add(token); continue; }
-                error = $"'{token}' is not a valid IPv6 address.";
+                if (Ipv6AddressSet.TryParseToken(token, out var v6Range, out string v6Err))
+                {
+                    v6Ranges.Add(v6Range);
+                    continue;
+                }
+                error = v6Err;
                 return false;
             }
 
@@ -71,7 +90,10 @@ public sealed class AddressSet
             v4.Add(range);
         }
 
-        set = new AddressSet(Merge(v4), other.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        set = new AddressSet(
+            Merge(v4),
+            new Ipv6AddressSet(Ipv6AddressSet.Merge(v6Ranges)),
+            keywords.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         return true;
     }
 
@@ -107,7 +129,6 @@ public sealed class AddressSet
     private static bool TryIp(string s, out uint value)
     {
         value = 0;
-        // Require four dotted decimal parts: IPAddress.TryParse would also accept things like "1" or "1.2".
         var parts = s.Split('.');
         if (parts.Length != 4) return false;
         foreach (var part in parts)
@@ -136,35 +157,59 @@ public sealed class AddressSet
     }
 
     public AddressSet Union(AddressSet other) =>
-        new(Merge(_v4.Concat(other._v4).ToList()), _other.Concat(other._other).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        new(Merge(_v4.Concat(other._v4).ToList()), _v6.Union(other._v6), _keywords.Concat(other._keywords).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
-    /// <summary>Every IPv4 address NOT in this set. Throws if the set contains IPv6 addresses or keywords.</summary>
+    /// <summary>Every address NOT in this set across IPv4 and IPv6. Throws if the set contains Windows keywords.</summary>
     public AddressSet Complement()
     {
-        if (HasNonIpv4) throw new InvalidOperationException("Only IPv4 address sets can be inverted.");
+        if (HasKeywords) throw new InvalidOperationException("Address sets with Windows keywords (e.g. LocalSubnet) cannot be inverted.");
 
-        var result = new List<(uint, uint)>();
+        var resultV4 = new List<(uint, uint)>();
         ulong next = 0;
         foreach (var (s, e) in _v4)
         {
-            if (s > next) result.Add(((uint)next, s - 1));
+            if (s > next) resultV4.Add(((uint)next, s - 1));
             next = (ulong)e + 1;
         }
-        if (next <= uint.MaxValue) result.Add(((uint)next, uint.MaxValue));
-        return new AddressSet(result, new List<string>());
+        if (next <= uint.MaxValue) resultV4.Add(((uint)next, uint.MaxValue));
+
+        var resultV6 = _v6.Complement();
+
+        return new AddressSet(resultV4, resultV6, new List<string>());
     }
 
     public bool Contains(IPAddress ip)
     {
-        if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
-        var b = ip.GetAddressBytes();
-        uint v = ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
-        return _v4.Any(r => v >= r.Start && v <= r.End);
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var b = ip.GetAddressBytes();
+            uint v = ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
+            return _v4.Any(r => v >= r.Start && v <= r.End);
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return _v6.Contains(ip);
+        }
+
+        return false;
     }
 
     /// <summary>Normalised text for Windows Firewall, e.g. "1.2.3.4,10.0.0.0-10.255.255.255,fe80::1".</summary>
-    public string ToFirewallString() => string.Join(",",
-        _v4.Select(r => r.Start == r.End ? Format(r.Start) : $"{Format(r.Start)}-{Format(r.End)}").Concat(_other));
+    public string ToFirewallString()
+    {
+        var parts = new List<string>();
+        foreach (var r in _v4)
+        {
+            parts.Add(r.Start == r.End ? Format(r.Start) : $"{Format(r.Start)}-{Format(r.End)}");
+        }
+        if (!_v6.IsEmpty)
+        {
+            parts.Add(_v6.ToFirewallString());
+        }
+        parts.AddRange(_keywords);
+        return string.Join(",", parts);
+    }
 
     public override string ToString() => ToFirewallString();
 }
