@@ -23,6 +23,9 @@ public sealed class DnsService : IDisposable
 
     public static DnsService CreateDefault() => new(DnsSettingsStore.DefaultPath, BlocklistManager.DefaultFolder);
 
+    private DateTimeOffset _blockingPausedUntil = DateTimeOffset.MinValue;
+    private CancellationTokenSource? _pauseTimerCts;
+
     public DnsSettings Settings { get; private set; }
     public DnsActivity Activity { get; } = new();
     public DnsCache Cache { get; private set; }
@@ -32,10 +35,56 @@ public sealed class DnsService : IDisposable
     public IPEndPoint? LocalEndPoint => _server?.LocalEndPoint;
     public int BlockedDomainCount => _filter.BlockedDomainCount;
 
+    public bool IsBlockingPaused => _blockingPausedUntil > DateTimeOffset.UtcNow;
+    public DateTimeOffset? BlockingPausedUntil => IsBlockingPaused ? _blockingPausedUntil : null;
+    public TimeSpan? BlockingPauseRemaining => IsBlockingPaused ? _blockingPausedUntil - DateTimeOffset.UtcNow : null;
+
     public BlocklistManager Lists => _lists;
 
     /// <summary>Raised for every answered query (on a background thread).</summary>
     public event Action<DnsLogEntry>? Queried;
+
+    /// <summary>Raised when blocking pause status changes (true = paused, false = resumed).</summary>
+    public event Action<bool>? BlockingPauseChanged;
+
+    /// <summary>Temporarily disables DNS domain blocking for the specified duration.</summary>
+    public void PauseBlocking(TimeSpan duration)
+    {
+        _pauseTimerCts?.Cancel();
+        _pauseTimerCts?.Dispose();
+
+        _blockingPausedUntil = DateTimeOffset.UtcNow + duration;
+        Cache.Clear();
+
+        var cts = new CancellationTokenSource();
+        _pauseTimerCts = cts;
+        _ = Task.Delay(duration, cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCompletedSuccessfully)
+            {
+                _blockingPausedUntil = DateTimeOffset.MinValue;
+                Cache.Clear();
+                BlockingPauseChanged?.Invoke(false);
+            }
+        }, TaskScheduler.Default);
+
+        BlockingPauseChanged?.Invoke(true);
+    }
+
+    /// <summary>Resumes DNS domain blocking immediately.</summary>
+    public void ResumeBlocking()
+    {
+        _pauseTimerCts?.Cancel();
+        _pauseTimerCts?.Dispose();
+        _pauseTimerCts = null;
+
+        if (_blockingPausedUntil > DateTimeOffset.UtcNow)
+        {
+            _blockingPausedUntil = DateTimeOffset.MinValue;
+            Cache.Clear();
+            BlockingPauseChanged?.Invoke(false);
+        }
+    }
 
     /// <summary>Loads the block lists, then starts answering. Throws if the settings are invalid or the port is already in use.</summary>
     public async Task StartAsync()
@@ -47,7 +96,7 @@ public sealed class DnsService : IDisposable
 
         Cache = new DnsCache(Settings.CacheEntries);
         var resolver = new NetworkUpstreamResolver(Settings.UpstreamEndpoints());
-        var server = new DnsServer(Settings, () => _filter, resolver, Cache, Activity);
+        var server = new DnsServer(Settings, () => _filter, resolver, Cache, Activity, () => IsBlockingPaused);
         server.Queried += e => Queried?.Invoke(e);
         server.Start();
         _server = server;
@@ -59,7 +108,13 @@ public sealed class DnsService : IDisposable
         _server = null;
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        _pauseTimerCts?.Cancel();
+        _pauseTimerCts?.Dispose();
+        _pauseTimerCts = null;
+        Stop();
+    }
 
     private void ReloadFilter()
     {

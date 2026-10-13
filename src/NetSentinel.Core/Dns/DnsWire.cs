@@ -6,7 +6,7 @@ namespace NetSentinel.Sinkhole;
 
 public static class DnsType
 {
-    public const ushort A = 1, NS = 2, CNAME = 5, SOA = 6, PTR = 12, MX = 15, TXT = 16, AAAA = 28, SRV = 33, OPT = 41, HTTPS = 65, ANY = 255;
+    public const ushort A = 1, NS = 2, CNAME = 5, SOA = 6, PTR = 12, HINFO = 13, MX = 15, TXT = 16, AAAA = 28, SRV = 33, OPT = 41, HTTPS = 65, ANY = 255;
 }
 
 public static class DnsRcode
@@ -215,6 +215,10 @@ public static class DnsWire
         DnsType.AAAA => BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.AAAA, new byte[16]) }, ttl),
         _ => BuildResponse(q, DnsRcode.NoError),
     };
+
+    /// <summary>RFC 8482 minimal answer for ANY queries: returns an HINFO record with CPU "RFC8482" and empty OS.</summary>
+    public static byte[] BuildRfc8482Hinfo(DnsQuery q, uint ttl = 300) =>
+        BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.HINFO, new byte[] { 7, 0x52, 0x46, 0x43, 0x38, 0x34, 0x38, 0x32, 0 }) }, ttl);
 
     public static byte[] BuildError(DnsQuery q, int rcode) => BuildResponse(q, rcode);
 

@@ -39,6 +39,15 @@ public sealed class DnsSettings
         new("StevenBlack unified hosts", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
     };
 
+    /// <summary>Only allow queries from loopback and private/local network ranges, preventing open resolver abuse when listening on 0.0.0.0.</summary>
+    public bool RestrictClientsToLocalNetwork { get; set; } = true;
+
+    /// <summary>Additional CIDR ranges permitted to query this server (e.g. "10.200.0.0/16").</summary>
+    public List<string> AllowedClientRanges { get; set; } = new();
+
+    /// <summary>Maximum queries per second allowed per client IP (0 = unlimited). Protects against DNS amplification floods.</summary>
+    public int RateLimitPerSecond { get; set; } = 50;
+
     /// <summary>One rule per entry: "example.com" (also blocks subdomains), "*.example.com", or a regular expression between slashes: /^ad[0-9]+\./</summary>
     public List<string> CustomBlock { get; set; } = new();
     public List<string> CustomAllow { get; set; } = new();
@@ -48,10 +57,14 @@ public sealed class DnsSettings
         error = "";
         if (!IPAddress.TryParse(ListenAddress, out _)) { error = $"'{ListenAddress}' is not a valid IP address to listen on."; return false; }
         if (Port is < 1 or > 65535) { error = "The port must be between 1 and 65535."; return false; }
+        if (RateLimitPerSecond < 0) { error = "Rate limit cannot be negative."; return false; }
         if (Upstreams.Count == 0) { error = "Add at least one upstream DNS server."; return false; }
 
         foreach (var u in Upstreams)
             if (!TryParseUpstream(u, out _)) { error = $"'{u}' is not a valid upstream server (use an IP address like 9.9.9.9, optionally with :port)."; return false; }
+
+        foreach (var range in AllowedClientRanges)
+            if (!IPNetwork.TryParse(range.Trim(), out _)) { error = $"'{range}' is not a valid CIDR network (e.g. 192.168.1.0/24)."; return false; }
 
         return true;
     }

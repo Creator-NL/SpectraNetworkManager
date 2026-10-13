@@ -5,8 +5,10 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Principal;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using NetSentinel.Core;
 using NetSentinel.Platform.Windows;
@@ -1049,6 +1051,8 @@ public partial class MainWindow : Window
         InspectCnameBox.IsChecked = c.InspectCnames;
         BlockDohBox.IsChecked = c.BlockBrowserDoh;
         AutoStartDnsBox.IsChecked = c.AutoStart;
+        RestrictClientsBox.IsChecked = c.RestrictClientsToLocalNetwork;
+        DnsRateLimitBox.Text = c.RateLimitPerSecond.ToString(CultureInfo.InvariantCulture);
         ListsBox.Text = string.Join("\r\n", c.Lists.Select(l => (l.Enabled ? "" : "# ") + l.Name + " | " + l.Url));
         CustomBlockBox.Text = string.Join("\r\n", c.CustomBlock);
         CustomAllowBox.Text = string.Join("\r\n", c.CustomAllow);
@@ -1062,6 +1066,12 @@ public partial class MainWindow : Window
         if (!int.TryParse(DnsPortBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int port))
         {
             error = "The port must be a number.";
+            return false;
+        }
+
+        if (!int.TryParse(DnsRateLimitBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int rateLimit) || rateLimit < 0)
+        {
+            error = "The rate limit must be a number of queries per second (0 or greater).";
             return false;
         }
 
@@ -1088,6 +1098,8 @@ public partial class MainWindow : Window
         settings = new DnsSettings
         {
             AutoStart = AutoStartDnsBox.IsChecked == true,
+            RestrictClientsToLocalNetwork = RestrictClientsBox.IsChecked == true,
+            RateLimitPerSecond = rateLimit,
             ListenAddress = DnsListenBox.Text.Trim(),
             Port = port,
             Upstreams = DnsUpstreamsBox.Text.Split(new[] { ',', ';', ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
@@ -1142,6 +1154,37 @@ public partial class MainWindow : Window
         _sink.Stop();
         StatusText.Text = "DNS server stopped.";
         RefreshDnsUi();
+    }
+
+    private void OnDnsPauseClick(object sender, RoutedEventArgs e)
+    {
+        if (_sink.IsBlockingPaused)
+        {
+            _sink.ResumeBlocking();
+            StatusText.Text = "DNS domain blocking resumed.";
+            RefreshDnsUi();
+            return;
+        }
+
+        var cm = new ContextMenu();
+        void AddItem(string header, TimeSpan duration)
+        {
+            var mi = new MenuItem { Header = header };
+            mi.Click += (_, _) =>
+            {
+                _sink.PauseBlocking(duration);
+                StatusText.Text = $"DNS domain blocking paused for {duration.TotalMinutes:F0} minutes.";
+                RefreshDnsUi();
+            };
+            cm.Items.Add(mi);
+        }
+
+        AddItem("Pause for 5 minutes", TimeSpan.FromMinutes(5));
+        AddItem("Pause for 15 minutes", TimeSpan.FromMinutes(15));
+        AddItem("Pause for 30 minutes", TimeSpan.FromMinutes(30));
+
+        cm.PlacementTarget = (UIElement)sender;
+        cm.IsOpen = true;
     }
 
     private async void OnDnsSelfTest(object sender, RoutedEventArgs e)
@@ -1331,11 +1374,24 @@ public partial class MainWindow : Window
 
         DnsStartButton.IsEnabled = !_sink.IsRunning && !_dnsBusy;
         DnsStopButton.IsEnabled = _sink.IsRunning;
+        DnsPauseButton.IsEnabled = _sink.IsRunning;
         DnsTestButton.IsEnabled = _sink.IsRunning && !_dnsBusy;
 
-        DnsStatus.Text = _sink.IsRunning
-            ? $"DNS server is RUNNING on {_sink.LocalEndPoint}"
-            : "DNS server is stopped. Point your DNS at it to start blocking.";
+        if (_sink.IsBlockingPaused)
+        {
+            var remaining = _sink.BlockingPauseRemaining ?? TimeSpan.Zero;
+            DnsPauseButton.Content = $"Resume ({remaining:mm\\:ss})";
+            DnsPauseButton.Foreground = (Brush)FindResource("Amber");
+            DnsStatus.Text = $"DNS server is RUNNING on {_sink.LocalEndPoint}  (Blocking paused: {remaining:mm\\:ss} left)";
+        }
+        else
+        {
+            DnsPauseButton.Content = "Pause blocking";
+            DnsPauseButton.Foreground = (Brush)FindResource("Text");
+            DnsStatus.Text = _sink.IsRunning
+                ? $"DNS server is RUNNING on {_sink.LocalEndPoint}"
+                : "DNS server is stopped. Point your DNS at it to start blocking.";
+        }
 
         var stats = _sink.Activity.Snapshot();
         DnsCounters.Text =

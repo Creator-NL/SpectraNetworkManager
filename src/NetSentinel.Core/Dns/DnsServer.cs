@@ -19,20 +19,37 @@ public sealed class DnsServer : IDisposable
     private readonly IUpstreamResolver _upstream;
     private readonly DnsCache _cache;
     private readonly DnsActivity _activity;
+    private readonly Func<bool>? _isBlockingPaused;
+    private readonly ClientAccessPolicy _clientAccessPolicy;
+    private readonly DnsRateLimiter _rateLimiter;
     private readonly SemaphoreSlim _slots = new(MaxParallel, MaxParallel);
 
     private CancellationTokenSource? _cts;
     private UdpClient? _udp;
     private TcpListener? _tcp;
 
-    public DnsServer(DnsSettings settings, Func<DomainFilter> filter, IUpstreamResolver upstream, DnsCache cache, DnsActivity activity)
+    public DnsServer(
+        DnsSettings settings,
+        Func<DomainFilter> filter,
+        IUpstreamResolver upstream,
+        DnsCache cache,
+        DnsActivity activity,
+        Func<bool>? isBlockingPaused = null,
+        ClientAccessPolicy? clientAccessPolicy = null,
+        DnsRateLimiter? rateLimiter = null)
     {
         _settings = settings;
         _filter = filter;
         _upstream = upstream;
         _cache = cache;
         _activity = activity;
+        _isBlockingPaused = isBlockingPaused;
+        _clientAccessPolicy = clientAccessPolicy ?? new ClientAccessPolicy(settings.RestrictClientsToLocalNetwork, settings.AllowedClientRanges);
+        _rateLimiter = rateLimiter ?? new DnsRateLimiter(settings.RateLimitPerSecond);
     }
+
+    public ClientAccessPolicy ClientAccess => _clientAccessPolicy;
+    public DnsRateLimiter RateLimiter => _rateLimiter;
 
     public bool IsRunning => _cts is not null;
     public IPEndPoint? LocalEndPoint { get; private set; }
@@ -113,6 +130,9 @@ public sealed class DnsServer : IDisposable
             catch (ObjectDisposedException) { return; }
             catch (SocketException) { continue; }                   // e.g. a client vanished; keep serving
 
+            if (!_rateLimiter.TryAcquireQuery(packet.RemoteEndPoint.Address))
+                continue;                                           // rate limited: drop silently to prevent amplification
+
             if (!_slots.Wait(0)) continue;                          // overloaded: drop, the client will retry
 
             _ = Task.Run(async () =>
@@ -141,7 +161,20 @@ public sealed class DnsServer : IDisposable
             catch (ObjectDisposedException) { return; }
             catch (SocketException) { continue; }
 
-            _ = Task.Run(() => TcpClientAsync(client, ct), ct);
+            var remoteAddress = client.Client.RemoteEndPoint is IPEndPoint rep ? rep.Address : IPAddress.Loopback;
+            if (!_rateLimiter.TryAcquireTcp(remoteAddress, out var lease) || lease is null)
+            {
+                client.Dispose();
+                continue;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                using (lease)
+                {
+                    await TcpClientAsync(client, ct);
+                }
+            }, ct);
         }
     }
 
@@ -166,6 +199,9 @@ public sealed class DnsServer : IDisposable
 
                     var query = new byte[len];
                     await stream.ReadExactlyAsync(query, idle.Token);
+
+                    if (!_rateLimiter.TryAcquireQuery(remote.Address))
+                        return;                                     // client flooding queries over TCP: disconnect
 
                     byte[]? answer = await HandleAsync(query, remote, tcp: true, ct);
                     if (answer is null) return;
@@ -201,6 +237,12 @@ public sealed class DnsServer : IDisposable
             Queried?.Invoke(entry);
         }
 
+        if (!_clientAccessPolicy.IsAllowed(client.Address))
+        {
+            Log(DnsOutcome.Refused, "query from public/untrusted client IP refused");
+            return DnsWire.BuildError(q, DnsRcode.Refused);
+        }
+
         if (q.Opcode != 0)
         {
             Log(DnsOutcome.Refused, "unsupported request type");
@@ -219,12 +261,20 @@ public sealed class DnsServer : IDisposable
             return Fit(DnsWire.BuildError(q, DnsRcode.NxDomain), q, tcp);
         }
 
+        bool paused = _isBlockingPaused?.Invoke() == true;
         var filter = _filter();
-        var decision = filter.Decide(domain);
+        var decision = paused ? new FilterDecision(FilterAction.Allowed, "blocking paused") : filter.Decide(domain);
         if (decision.Action == FilterAction.Blocked)
         {
             Log(DnsOutcome.Blocked, decision.Reason);
             return Fit(BlockedAnswer(q), q, tcp);
+        }
+
+        // RFC 8482: return minimal HINFO response for ANY queries to mitigate amplification abuse
+        if (q.Question.Type == DnsType.ANY)
+        {
+            Log(DnsOutcome.Forwarded, "RFC 8482 ANY minimal response");
+            return Fit(DnsWire.BuildRfc8482Hinfo(q), q, tcp);
         }
 
         string key = DnsCache.Key(q.Question);
@@ -248,8 +298,8 @@ public sealed class DnsServer : IDisposable
             return Fit(DnsWire.BuildError(q, DnsRcode.ServFail), q, tcp);
         }
 
-        // A harmless-looking name that is only an alias for a blocked name is blocked too (unless you allowed the name itself).
-        if (_settings.InspectCnames && decision.Action != FilterAction.Allowed)
+        // A harmless-looking name that is only an alias for a blocked name is blocked too (unless you allowed the name itself or blocking is paused).
+        if (_settings.InspectCnames && !paused && decision.Action != FilterAction.Allowed)
         {
             foreach (var target in DnsWire.CnameTargets(answer))
             {
