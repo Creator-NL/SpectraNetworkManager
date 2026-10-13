@@ -97,6 +97,15 @@ public sealed class IpcClient : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// Sends a request and deserializes the response payload to T.
+    /// </summary>
+    public async Task<T?> SendRequestAsync<T>(string action, object? payload = null, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var resp = await SendRequestAsync(action, payload, timeout, ct).ConfigureAwait(false);
+        return resp.DeserializePayload<T>();
+    }
+
     private async Task ReadLoopAsync()
     {
         try

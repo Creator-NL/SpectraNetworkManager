@@ -48,6 +48,13 @@ public partial class MainWindow : Window
     private IpcClient? _engineClient;
     private bool _busy;
 
+    private readonly NetworkHistoryDatabase _historyDb = new();
+    private readonly EtwBandwidthMonitor _etw = new();
+    private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private bool _isExiting;
+    private bool _trayBalloonShown;
+    private int _trafficHours = 1;
+
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
     public ObservableCollection<RuleRow> RuleRows { get; } = new();
@@ -55,6 +62,8 @@ public partial class MainWindow : Window
     public ObservableCollection<DnsRow> DnsRows { get; } = new();
     public ObservableCollection<EventLine> Events { get; } = new();
     public ObservableCollection<BlockRow> Blocks { get; } = new();
+    public ObservableCollection<TopTalkerViewModel> TopTalkers { get; } = new();
+    public ObservableCollection<ConnectionHistoryViewModel> ConnectionHistory { get; } = new();
 
     public MainWindow()
     {
@@ -63,6 +72,12 @@ public partial class MainWindow : Window
         DataContext = this;
         DnsAdaptersList.ItemsSource = DnsAdapters;
         _dnsSwitch.StateChanged += _ => Dispatcher.BeginInvoke(new Action(UpdateDnsSwitchUi));
+
+        InitSystemTray();
+        if (_isAdmin)
+        {
+            _etw.TryStart();
+        }
 
         _rowsView = CollectionViewSource.GetDefaultView(Rows);
         _rowsView.Filter = RowFilter;
@@ -81,6 +96,9 @@ public partial class MainWindow : Window
         _signatures.Verified += OnSignatureVerified;
         Closed += (_, _) =>
         {
+            _trayIcon?.Dispose();
+            _etw.Dispose();
+            _historyDb.Dispose();
             _engineClient?.Dispose();
             _signatures.Dispose();
             _sink.Dispose();
@@ -142,6 +160,10 @@ public partial class MainWindow : Window
                         while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
                     }
                     break;
+                case IpcConstants.Events.BandwidthUpdate:
+                    var samples = msg.DeserializePayload<List<ProcessBandwidthSample>>();
+                    if (samples != null) UpdateBandwidthDisplay(samples);
+                    break;
             }
         });
     }
@@ -166,6 +188,24 @@ public partial class MainWindow : Window
             var tick = await Task.Run(_monitor.Poll);
             Apply(tick);
 
+            if (_engineClient == null && _etw.IsRunning)
+            {
+                var bwSamples = _etw.HarvestInterval(1.0);
+                if (bwSamples.Count > 0)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    foreach (var sample in bwSamples.Values)
+                    {
+                        var proc = tick.Connections.FirstOrDefault(c => c.Connection.ProcessId == sample.Pid)?.Process;
+                        if (proc?.Path != null)
+                        {
+                            _historyDb.RecordBandwidth(now, proc.Path, sample.BytesReceivedPerSec, sample.BytesSentPerSec);
+                        }
+                    }
+                    UpdateBandwidthDisplay(bwSamples.Values.ToList());
+                }
+            }
+
             _tickCount++;
             if (StrictActive && _isAdmin && _tickCount % 2 == 0) _ = PollBlockedAsync();
             RefreshDnsUi();
@@ -182,6 +222,23 @@ public partial class MainWindow : Window
 
     private void Apply(MonitorTick tick)
     {
+        if (_engineClient == null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var conn in tick.Connections)
+            {
+                if (conn.Process?.Path != null && conn.Connection.Remote != null)
+                {
+                    _historyDb.RecordConnection(
+                        conn.Process.Path,
+                        conn.Connection.Remote.Address.ToString(),
+                        conn.Connection.Remote.Port,
+                        conn.Connection.Protocol.ToString(),
+                        now);
+                }
+            }
+        }
+
         foreach (var closed in tick.Closed)
         {
             var key = ConnectionKey.From(closed.Connection);
@@ -404,6 +461,10 @@ public partial class MainWindow : Window
         AskTrustButton.Content = canTrust ? $"Trust {standing.Signature!.Publisher}" : "Trust publisher";
         AskTrustButton.Visibility = canTrust ? Visibility.Visible : Visibility.Collapsed;
         DecisionBar.Visibility = Visibility.Visible;
+        if (Visibility != Visibility.Visible || WindowState == WindowState.Minimized || !IsActive)
+        {
+            _trayIcon?.ShowBalloonTip(4000, "NetSentinel: Network Prompt", $"{s.Name} wants to reach the network. Click to review.", System.Windows.Forms.ToolTipIcon.Warning);
+        }
     }
 
     private string DescribePeers(ProgramSummary s)
@@ -1855,6 +1916,7 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         ConnectionsPanel.Visibility = ConnectionsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ProgramsPanel.Visibility = ProgramsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        TrafficPanel.Visibility = TrafficTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -1863,6 +1925,7 @@ public partial class MainWindow : Window
         if (StrictTab.IsChecked == true) UpdateStrictUi();
         if (DnsTab.IsChecked == true) RefreshDnsUi();
         if (RulesTab.IsChecked == true) await RefreshRulesAsync();
+        if (TrafficTab.IsChecked == true) await RefreshTrafficAsync();
         if (BlocksTab.IsChecked == true) await LoadBlocksAsync();
     }
 
@@ -1895,6 +1958,299 @@ public partial class MainWindow : Window
         finally
         {
             RefreshBlocksButton.IsEnabled = true;
+        }
+    }
+
+    // ---- system tray & notifications --------------------------------------------------------
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_isExiting)
+        {
+            e.Cancel = true;
+            Hide();
+            if (!_trayBalloonShown && _trayIcon != null)
+            {
+                _trayBalloonShown = true;
+                _trayIcon.ShowBalloonTip(3000, "NetSentinel", "NetSentinel is minimized to your system tray.", System.Windows.Forms.ToolTipIcon.Info);
+            }
+            return;
+        }
+        base.OnClosing(e);
+    }
+
+    private void InitSystemTray()
+    {
+        try
+        {
+            _trayIcon = new System.Windows.Forms.NotifyIcon
+            {
+                Text = "NetSentinel - Network Monitor",
+                Visible = true,
+                Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "") ?? System.Drawing.SystemIcons.Shield
+            };
+
+            var menu = new System.Windows.Forms.ContextMenuStrip();
+            menu.Items.Add("Show NetSentinel", null, (_, _) => RestoreFromTray());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+            var pauseDns = new System.Windows.Forms.ToolStripMenuItem("Pause DNS Blocking");
+            pauseDns.DropDownItems.Add("5 Minutes", null, async (_, _) => await PauseDnsBlockingAsync(5));
+            pauseDns.DropDownItems.Add("30 Minutes", null, async (_, _) => await PauseDnsBlockingAsync(30));
+            pauseDns.DropDownItems.Add("1 Hour", null, async (_, _) => await PauseDnsBlockingAsync(60));
+            menu.Items.Add(pauseDns);
+
+            menu.Items.Add("Resume DNS Blocking", null, async (_, _) => await ResumeDnsBlockingAsync());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+            menu.Items.Add("Panic: Revert All Changes", null, async (_, _) => await TriggerPanicAsync());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+            menu.Items.Add("Exit NetSentinel", null, (_, _) =>
+            {
+                _isExiting = true;
+                Close();
+            });
+
+            _trayIcon.ContextMenuStrip = menu;
+            _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
+            _trayIcon.BalloonTipClicked += (_, _) => RestoreFromTray();
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogError("Failed to initialize system tray icon", ex);
+        }
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private async Task PauseDnsBlockingAsync(int minutes)
+    {
+        if (_engineClient?.IsConnected == true)
+        {
+            await _engineClient.SendRequestAsync(IpcConstants.Actions.PauseDnsBlocking, minutes);
+        }
+        else
+        {
+            _sink.PauseBlocking(TimeSpan.FromMinutes(minutes));
+        }
+        RefreshDnsUi();
+    }
+
+    private async Task ResumeDnsBlockingAsync()
+    {
+        if (_engineClient?.IsConnected == true)
+        {
+            await _engineClient.SendRequestAsync(IpcConstants.Actions.ResumeDnsBlocking);
+        }
+        else
+        {
+            _sink.ResumeBlocking();
+        }
+        RefreshDnsUi();
+    }
+
+    private async Task TriggerPanicAsync()
+    {
+        if (_engineClient?.IsConnected == true)
+        {
+            await _engineClient.SendRequestAsync(IpcConstants.Actions.Panic);
+        }
+        else
+        {
+            if (_strict.State.Phase != StrictPhase.Off || _strict.WasUnreadable)
+                await DisableStrictAsync();
+
+            await _dnsSwitch.RestoreAllAsync();
+
+            await Task.Run(() => _enforcer.RemoveAll());
+            _rules.RemoveWhere(r => r.Action == RuleAction.Block);
+        }
+        UpdateStrictUi();
+        AfterDecision();
+    }
+
+    // ---- bandwidth & traffic ----------------------------------------------------------------
+
+    private void UpdateBandwidthDisplay(IReadOnlyList<ProcessBandwidthSample> samples)
+    {
+        if (samples == null || samples.Count == 0) return;
+
+        var byPid = samples.ToDictionary(s => s.Pid);
+
+        foreach (var row in _rows.Values)
+        {
+            if (byPid.TryGetValue(row.Pid, out var s))
+            {
+                row.UpdateSpeed(s.BytesReceivedPerSec, s.BytesSentPerSec);
+            }
+            else
+            {
+                row.UpdateSpeed(0, 0);
+            }
+        }
+
+        foreach (var pRow in _programRows.Values)
+        {
+            long inTotal = 0;
+            long outTotal = 0;
+            foreach (var s in samples)
+            {
+                var connMatch = _lastConnections.FirstOrDefault(c => c.Connection.ProcessId == s.Pid);
+                if (connMatch != null && string.Equals(connMatch.Process.Path ?? connMatch.Process.Name, pRow.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    inTotal += s.BytesReceivedPerSec;
+                    outTotal += s.BytesSentPerSec;
+                }
+            }
+            pRow.UpdateSpeed(inTotal, outTotal);
+        }
+    }
+
+    private async void OnTrafficRangeChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (TrafficRange1h.IsChecked == true) _trafficHours = 1;
+        else if (TrafficRange24h.IsChecked == true) _trafficHours = 24;
+        else if (TrafficRange7d.IsChecked == true) _trafficHours = 168;
+
+        await RefreshTrafficAsync();
+    }
+
+    private async void OnRefreshTraffic(object sender, RoutedEventArgs e) => await RefreshTrafficAsync();
+
+    private async Task RefreshTrafficAsync()
+    {
+        try
+        {
+            IReadOnlyList<ProgramTrafficSummary> topList;
+            IReadOnlyList<ConnectionHistoryRecord> connList;
+
+            if (_engineClient?.IsConnected == true)
+            {
+                topList = await _engineClient.SendRequestAsync<List<ProgramTrafficSummary>>(
+                    IpcConstants.Actions.GetTopTalkers, _trafficHours) ?? (IReadOnlyList<ProgramTrafficSummary>)Array.Empty<ProgramTrafficSummary>();
+
+                connList = await _engineClient.SendRequestAsync<List<ConnectionHistoryRecord>>(
+                    IpcConstants.Actions.GetConnectionHistory, 300) ?? (IReadOnlyList<ConnectionHistoryRecord>)Array.Empty<ConnectionHistoryRecord>();
+            }
+            else
+            {
+                topList = await _historyDb.GetTopTalkersAsync(TimeSpan.FromHours(_trafficHours));
+                connList = await _historyDb.GetRecentConnectionsAsync(300);
+            }
+
+            TopTalkers.Clear();
+            foreach (var t in topList)
+            {
+                TopTalkers.Add(new TopTalkerViewModel(t.Program, t.TotalBytesIn, t.TotalBytesOut, t.LastActivity));
+            }
+
+            ConnectionHistory.Clear();
+            foreach (var c in connList)
+            {
+                ConnectionHistory.Add(new ConnectionHistoryViewModel(c.Program, c.Remote, c.Port, c.Proto, c.FirstSeen, c.LastSeen));
+            }
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogError("Failed to refresh traffic stats", ex);
+        }
+    }
+
+    private void OnExportTrafficCsv(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"netsentinel-traffic-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+                DefaultExt = ".csv",
+                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*"
+            };
+
+            if (sfd.ShowDialog(this) == true)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("Program,BytesIn,BytesOut,TotalBytes,LastActive");
+                foreach (var t in TopTalkers)
+                {
+                    sb.AppendLine($"\"{t.Program.Replace("\"", "\"\"")}\",{t.BytesIn},{t.BytesOut},{t.TotalBytes},\"{t.LastActive:O}\"");
+                }
+                sb.AppendLine();
+                sb.AppendLine("Program,Remote,Port,Protocol,FirstSeen,LastSeen");
+                foreach (var c in ConnectionHistory)
+                {
+                    sb.AppendLine($"\"{c.Program.Replace("\"", "\"\"")}\",\"{c.Remote}\",{c.Port},\"{c.Proto}\",\"{c.FirstSeen:O}\",\"{c.LastSeen:O}\"");
+                }
+                File.WriteAllText(sfd.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                Info($"Traffic data exported to {sfd.FileName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Info($"Failed to export traffic CSV: {ex.Message}");
+        }
+    }
+
+    private void OnExportTrafficJson(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"netsentinel-traffic-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+                DefaultExt = ".json",
+                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
+            };
+
+            if (sfd.ShowDialog(this) == true)
+            {
+                var payload = new
+                {
+                    ExportedAt = DateTimeOffset.UtcNow,
+                    TopTalkers = TopTalkers,
+                    RecentConnections = ConnectionHistory
+                };
+                string json = System.Text.Json.JsonSerializer.Serialize(payload, IndentedJsonOptions);
+                File.WriteAllText(sfd.FileName, json, System.Text.Encoding.UTF8);
+                Info($"Traffic data exported to {sfd.FileName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Info($"Failed to export traffic JSON: {ex.Message}");
+        }
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+
+    private void OnCopySupportInfo(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string status = _engineClient?.IsConnected == true
+                ? "Connected to Engine Service (LocalSystem)"
+                : "Standalone (Local Process UI)";
+
+            string report = SupportInfoGenerator.Generate(
+                engineStatusSummary: status,
+                ruleCount: _rules.All.Count,
+                blocklistCount: _sink.BlockedDomainCount,
+                options: new SupportInfoOptions(RedactUserPaths: true, RedactDomains: false));
+
+            System.Windows.Clipboard.SetText(report);
+            StatusText.Text = "Support diagnostic report copied to clipboard (personal paths redacted).";
+            Info("Support diagnostic report copied to clipboard!\n\nPersonal user profile paths were automatically redacted (<redacted>).");
+        }
+        catch (Exception ex)
+        {
+            Info($"Failed to copy support report: {ex.Message}");
         }
     }
 

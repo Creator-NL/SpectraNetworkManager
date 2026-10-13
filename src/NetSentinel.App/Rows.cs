@@ -74,6 +74,20 @@ public sealed class ConnectionRow : INotifyPropertyChanged
 
     public string State => Display.State(_state);
 
+    private long _bytesInSec;
+    private long _bytesOutSec;
+    public string SpeedIn => Display.Rate(_bytesInSec);
+    public string SpeedOut => Display.Rate(_bytesOutSec);
+
+    public void UpdateSpeed(long inSec, long outSec)
+    {
+        if (_bytesInSec == inSec && _bytesOutSec == outSec) return;
+        _bytesInSec = inSec;
+        _bytesOutSec = outSec;
+        Raise(nameof(SpeedIn));
+        Raise(nameof(SpeedOut));
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
@@ -133,6 +147,20 @@ public sealed class ProgramRow : INotifyPropertyChanged
         _s = s;
         _standing = standing;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty)); // refresh every property
+    }
+
+    private long _bytesInSec;
+    private long _bytesOutSec;
+    public string SpeedIn => Display.Rate(_bytesInSec);
+    public string SpeedOut => Display.Rate(_bytesOutSec);
+
+    public void UpdateSpeed(long inSec, long outSec)
+    {
+        if (_bytesInSec == inSec && _bytesOutSec == outSec) return;
+        _bytesInSec = inSec;
+        _bytesOutSec = outSec;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SpeedIn)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SpeedOut)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

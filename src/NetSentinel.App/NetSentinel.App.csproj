@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>NetSentinel.Ui</RootNamespace>
     <AssemblyName>NetSentinel</AssemblyName>
     <!-- XAML tooling can emit harmless warnings; don't fail the build on them. -->

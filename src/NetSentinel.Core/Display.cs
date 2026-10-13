@@ -60,4 +60,26 @@ public static class Display
         }
         return false;
     }
+
+    /// <summary>Formats a byte count into a compact human-readable string (e.g. 1.2 MB, 450 KB, 12 B).</summary>
+    public static string Bytes(long bytes)
+    {
+        if (bytes < 0) bytes = 0;
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double val = bytes;
+        int i = 0;
+        while (val >= 1024 && i < units.Length - 1)
+        {
+            val /= 1024;
+            i++;
+        }
+        return i == 0 ? $"{bytes.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} B" : $"{val.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} {units[i]}";
+    }
+
+    /// <summary>Formats transfer speed into a compact human-readable string (e.g. 1.2 MB/s, 45 KB/s).</summary>
+    public static string Rate(long bytesPerSec)
+    {
+        if (bytesPerSec <= 0) return "\u2014";
+        return $"{Bytes(bytesPerSec)}/s";
+    }
 }

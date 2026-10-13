@@ -35,6 +35,19 @@ public static class EngineStoragePaths
     public static string DnsHistoryPath => Path.Combine(BaseDirectory, "dns-history.db");
     public static string NetworkHistoryPath => Path.Combine(BaseDirectory, "network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");
+    public static string LogsDirectory
+    {
+        get
+        {
+            string dir = Path.Combine(BaseDirectory, "logs");
+            if (!Directory.Exists(dir))
+            {
+                try { Directory.CreateDirectory(dir); } catch { }
+            }
+            return dir;
+        }
+    }
+    public static string LogFilePath => Path.Combine(LogsDirectory, "netsentinel.log");
     public static string BlocklistsDirectory
     {
         get

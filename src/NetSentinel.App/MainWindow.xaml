@@ -36,6 +36,8 @@
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="ProgramsTab" Content="Programs" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+            <RadioButton x:Name="TrafficTab" Content="Traffic" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
@@ -108,6 +110,8 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="70"/>
                     <DataGridTextColumn Header="PROGRAM" Binding="{Binding Program, Mode=OneWay}" Width="190"/>
+                    <DataGridTextColumn Header="IN/s" Binding="{Binding SpeedIn, Mode=OneWay}" Width="75"/>
+                    <DataGridTextColumn Header="OUT/s" Binding="{Binding SpeedOut, Mode=OneWay}" Width="75"/>
                     <DataGridTextColumn Header="PID" Binding="{Binding Pid, Mode=OneWay}" Width="64"/>
                     <DataGridTextColumn Header="LOCAL" Binding="{Binding Local, Mode=OneWay}" Width="200"/>
                     <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="220"/>
@@ -185,7 +189,9 @@
                 </DataGrid.RowStyle>
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="PROGRAM" Binding="{Binding Name, Mode=OneWay}" Width="200"/>
-                    <DataGridTextColumn Header="DECISION" Binding="{Binding Verdict, Mode=OneWay}" Width="190"/>
+                    <DataGridTextColumn Header="DECISION" Binding="{Binding Verdict, Mode=OneWay}" Width="160"/>
+                    <DataGridTextColumn Header="IN/s" Binding="{Binding SpeedIn, Mode=OneWay}" Width="75"/>
+                    <DataGridTextColumn Header="OUT/s" Binding="{Binding SpeedOut, Mode=OneWay}" Width="75"/>
                     <DataGridTextColumn Header="INTERNET PEERS" Binding="{Binding InternetPeers, Mode=OneWay}" Width="130"/>
                     <DataGridTextColumn Header="ESTABLISHED" Binding="{Binding Established, Mode=OneWay}" Width="110"/>
                     <DataGridTextColumn Header="LISTENING" Binding="{Binding Listening, Mode=OneWay}" Width="95"/>
@@ -195,6 +201,75 @@
                     <DataGridTextColumn Header="PATH" Binding="{Binding Path, Mode=OneWay}" Width="*"/>
                 </DataGrid.Columns>
             </DataGrid>
+        </Grid>
+
+        <!-- Traffic & Bandwidth view -->
+        <Grid x:Name="TrafficPanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Traffic Toolbar & Controls -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <TextBlock Text="Time range:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
+                    <RadioButton x:Name="TrafficRange1h" Content="1 Hour" GroupName="trafficRange" IsChecked="True"
+                                 Margin="0,0,12,0" VerticalAlignment="Center" Checked="OnTrafficRangeChanged"/>
+                    <RadioButton x:Name="TrafficRange24h" Content="24 Hours" GroupName="trafficRange"
+                                 Margin="0,0,12,0" VerticalAlignment="Center" Checked="OnTrafficRangeChanged"/>
+                    <RadioButton x:Name="TrafficRange7d" Content="7 Days" GroupName="trafficRange"
+                                 Margin="0,0,20,0" VerticalAlignment="Center" Checked="OnTrafficRangeChanged"/>
+                    <Button Content="Refresh" Padding="14,3" Margin="0,0,10,0" Click="OnRefreshTraffic"/>
+                    <Button Content="Export CSV" Padding="14,3" Margin="0,0,10,0" Click="OnExportTrafficCsv"/>
+                    <Button Content="Export JSON" Padding="14,3" Margin="0,0,10,0" Click="OnExportTrafficJson"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                    <Button Content="Copy Support Info" Padding="12,3" Foreground="{StaticResource Cyan}" Click="OnCopySupportInfo"
+                            ToolTip="Copies a sanitized system and NetSentinel diagnostics report to clipboard with personal user paths redacted."/>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Splitter: Top Talkers vs Connection History -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Top Talkers -->
+                <GroupBox Grid.Column="0" Header="TOP TALKERS" Foreground="{StaticResource Cyan}" BorderBrush="{StaticResource Line}">
+                    <DataGrid x:Name="TopTalkersGrid" ItemsSource="{Binding TopTalkers}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="150"/>
+                            <DataGridTextColumn Header="IN" Binding="{Binding DownloadFormatted, Mode=OneWay}" Width="90"/>
+                            <DataGridTextColumn Header="OUT" Binding="{Binding UploadFormatted, Mode=OneWay}" Width="90"/>
+                            <DataGridTextColumn Header="TOTAL" Binding="{Binding TotalFormatted, Mode=OneWay}" Width="90"/>
+                            <DataGridTextColumn Header="LAST ACTIVE" Binding="{Binding LastActiveFormatted, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="PATH" Binding="{Binding Program, Mode=OneWay}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </GroupBox>
+
+                <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
+
+                <!-- Right: Connection History -->
+                <GroupBox Grid.Column="2" Header="RECENT CONNECTION HISTORY" Foreground="{StaticResource Magenta}" BorderBrush="{StaticResource Line}">
+                    <DataGrid x:Name="ConnectionHistoryGrid" ItemsSource="{Binding ConnectionHistory}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="140"/>
+                            <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="140"/>
+                            <DataGridTextColumn Header="PORT" Binding="{Binding Port, Mode=OneWay}" Width="60"/>
+                            <DataGridTextColumn Header="PROTO" Binding="{Binding Proto, Mode=OneWay}" Width="60"/>
+                            <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastSeenFormatted, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="FIRST SEEN" Binding="{Binding FirstSeenFormatted, Mode=OneWay}" Width="120"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </GroupBox>
+            </Grid>
         </Grid>
 
         <!-- Rules view: every stored decision, whether or not the program is running -->
@@ -512,6 +587,11 @@
         </Grid>
 
         <!-- Status bar -->
-        <TextBlock x:Name="StatusText" Grid.Row="4" Margin="0,10,0,0" Foreground="{StaticResource Muted}" Text="Starting..."/>
+        <DockPanel Grid.Row="4" Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="Copy Support Info" Padding="10,2" Margin="10,0,0,0" FontSize="11"
+                    Foreground="{StaticResource Cyan}" Click="OnCopySupportInfo"
+                    ToolTip="Copies a sanitized system and NetSentinel diagnostics report to clipboard with personal user paths redacted."/>
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" Text="Starting..." VerticalAlignment="Center"/>
+        </DockPanel>
     </Grid>
 </Window>
