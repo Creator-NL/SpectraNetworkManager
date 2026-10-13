@@ -20,6 +20,8 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
     private readonly FirewallBlockLog _blockLog;
     private readonly DnsService _dns;
     private readonly SystemDnsSwitchManager _dnsSwitch;
+    private readonly NetworkHistoryDatabase _historyDb;
+    private readonly EtwBandwidthMonitor _etw;
     private readonly IpcServer _ipcServer;
 
     private readonly CancellationTokenSource _cts = new();
@@ -59,6 +61,9 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
             null,
             () => _dns.LocalEndPoint);
 
+        _historyDb = new NetworkHistoryDatabase(EngineStoragePaths.NetworkHistoryPath);
+        _etw = new EtwBandwidthMonitor();
+
         _ipcServer = new IpcServer(
             IpcConstants.PipeName,
             pipeName => WindowsPipeSecurityHelper.CreateSecuredServerStream(pipeName));
@@ -81,6 +86,12 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
 
         // Start IPC server listener
         _ipcServer.Start();
+
+        // Start ETW bandwidth monitor if elevated on Windows
+        if (OperatingSystem.IsWindows() && !_safeMode)
+        {
+            _etw.TryStart();
+        }
 
         // Start DNS sinkhole if auto-start is configured and not in safe mode
         if (!_safeMode && _dns.Settings.AutoStart)
@@ -115,10 +126,44 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         {
             try
             {
+                var tick = _monitor.Poll();
+                var bwSamples = _etw.HarvestInterval(1.0);
+                var now = DateTimeOffset.UtcNow;
+
+                // Record connections seen to persistent SQLite
+                foreach (var conn in tick.Connections)
+                {
+                    if (conn.Process?.Path != null && conn.Connection.Remote != null)
+                    {
+                        _historyDb.RecordConnection(
+                            conn.Process.Path,
+                            conn.Connection.Remote.Address.ToString(),
+                            conn.Connection.Remote.Port,
+                            conn.Connection.Protocol.ToString(),
+                            now);
+                    }
+                }
+
+                // Record per-process bandwidth to persistent SQLite
+                if (bwSamples.Count > 0)
+                {
+                    foreach (var sample in bwSamples.Values)
+                    {
+                        var proc = tick.Connections.FirstOrDefault(c => c.Connection.ProcessId == sample.Pid)?.Process;
+                        if (proc?.Path != null)
+                        {
+                            _historyDb.RecordBandwidth(now, proc.Path, sample.BytesReceivedPerSec, sample.BytesSentPerSec);
+                        }
+                    }
+                }
+
                 if (_ipcServer.ConnectedClientCount > 0)
                 {
-                    var tick = _monitor.Poll();
                     await _ipcServer.BroadcastEventAsync(IpcConstants.Events.MonitorTick, tick, _cts.Token);
+                    if (bwSamples.Count > 0)
+                    {
+                        await _ipcServer.BroadcastEventAsync(IpcConstants.Events.BandwidthUpdate, bwSamples.Values.ToList(), _cts.Token);
+                    }
                 }
             }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }
@@ -179,7 +224,11 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
 
                 IpcConstants.Actions.GetDnsSwitchAdapters => await HandleGetDnsAdaptersAsync(request),
                 IpcConstants.Actions.ApplyDnsSwitch => await HandleApplyDnsSwitchAsync(request),
+                IpcConstants.Actions.ConfirmDnsSwitch => HandleConfirmDnsSwitch(request),
                 IpcConstants.Actions.RestoreDnsSwitch => await HandleRestoreDnsSwitchAsync(request),
+
+                IpcConstants.Actions.GetTopTalkers => await HandleGetTopTalkersAsync(request),
+                IpcConstants.Actions.GetConnectionHistory => await HandleGetConnectionHistoryAsync(request),
 
                 _ => IpcMessage.CreateErrorResponse(request, $"Unknown IPC action '{request.Action}'.")
             };
@@ -441,10 +490,32 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         return IpcMessage.CreateResponse(request, true);
     }
 
+    private IpcMessage HandleConfirmDnsSwitch(IpcMessage request)
+    {
+        _dnsSwitch.Confirm();
+        return IpcMessage.CreateResponse(request, true);
+    }
+
     private async Task<IpcMessage> HandleRestoreDnsSwitchAsync(IpcMessage request)
     {
-        await _dnsSwitch.RevertAsync();
+        await _dnsSwitch.RevertAsync().ConfigureAwait(false);
         return IpcMessage.CreateResponse(request, true);
+    }
+
+    private async Task<IpcMessage> HandleGetTopTalkersAsync(IpcMessage request)
+    {
+        var hours = request.DeserializePayload<int>();
+        if (hours <= 0) hours = 24;
+        var top = await _historyDb.GetTopTalkersAsync(TimeSpan.FromHours(hours)).ConfigureAwait(false);
+        return IpcMessage.CreateResponse(request, top);
+    }
+
+    private async Task<IpcMessage> HandleGetConnectionHistoryAsync(IpcMessage request)
+    {
+        var limit = request.DeserializePayload<int>();
+        if (limit <= 0) limit = 300;
+        var list = await _historyDb.GetRecentConnectionsAsync(limit).ConfigureAwait(false);
+        return IpcMessage.CreateResponse(request, list);
     }
 
     public void Dispose()
@@ -453,6 +524,8 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
+        _etw.Dispose();
+        _historyDb.Dispose();
         _ipcServer.Dispose();
         _dns.Dispose();
         _dnsSwitch.Dispose();
@@ -468,6 +541,8 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         if (_blockLogLoopTask != null) try { await _blockLogLoopTask.ConfigureAwait(false); } catch { }
         if (_strictCountdownTask != null) try { await _strictCountdownTask.ConfigureAwait(false); } catch { }
 
+        _etw.Dispose();
+        await _historyDb.DisposeAsync().ConfigureAwait(false);
         await _ipcServer.DisposeAsync().ConfigureAwait(false);
         _dns.Dispose();
         _dnsSwitch.Dispose();

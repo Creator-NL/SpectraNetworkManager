@@ -33,6 +33,7 @@ public static class EngineStoragePaths
     public static string SignatureCachePath => GetMigratedPath("signature-cache.json");
     public static string DnsSettingsPath => GetMigratedPath("dns-settings.json");
     public static string DnsHistoryPath => Path.Combine(BaseDirectory, "dns-history.db");
+    public static string NetworkHistoryPath => Path.Combine(BaseDirectory, "network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");
     public static string BlocklistsDirectory
     {

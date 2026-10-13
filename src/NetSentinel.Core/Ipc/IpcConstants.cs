@@ -34,7 +34,12 @@ public static class IpcConstants
         // System DNS switch
         public const string GetDnsSwitchAdapters = "GetDnsSwitchAdapters";
         public const string ApplyDnsSwitch = "ApplyDnsSwitch";
+        public const string ConfirmDnsSwitch = "ConfirmDnsSwitch";
         public const string RestoreDnsSwitch = "RestoreDnsSwitch";
+
+        // Traffic & Bandwidth
+        public const string GetTopTalkers = "GetTopTalkers";
+        public const string GetConnectionHistory = "GetConnectionHistory";
     }
 
     public static class Events
@@ -45,5 +50,6 @@ public static class IpcConstants
         public const string StrictModeChanged = "StrictModeChanged";
         public const string StrictModeTick = "StrictModeTick";
         public const string DnsSwitchChanged = "DnsSwitchChanged";
+        public const string BandwidthUpdate = "BandwidthUpdate";
     }
 }

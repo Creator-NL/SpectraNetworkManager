@@ -8,4 +8,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="NetSentinel.Platform.Windows.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.8" />
+  </ItemGroup>
 </Project>
