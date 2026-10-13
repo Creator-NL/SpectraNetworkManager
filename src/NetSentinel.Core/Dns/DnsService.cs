@@ -10,13 +10,18 @@ public sealed class DnsService : IDisposable
 {
     private readonly DnsSettingsStore _store;
     private readonly BlocklistManager _lists;
+    private readonly DnsHistoryDatabase _historyDb;
+    private readonly HttpMessageHandler? _httpHandler;
+    private CompositeUpstreamResolver? _compositeResolver;
     private DnsServer? _server;
     private volatile DomainFilter _filter = DomainFilter.Empty;
 
-    public DnsService(string settingsFile, string listsFolder, HttpMessageHandler? handler = null)
+    public DnsService(string settingsFile, string listsFolder, HttpMessageHandler? handler = null, string? historyDbPath = null)
     {
         _store = new DnsSettingsStore(settingsFile);
         _lists = new BlocklistManager(listsFolder, handler);
+        _httpHandler = handler;
+        _historyDb = new DnsHistoryDatabase(historyDbPath ?? DnsHistoryDatabase.DefaultPath);
         Settings = _store.Load();
         Cache = new DnsCache(Settings.CacheEntries);
     }
@@ -94,9 +99,24 @@ public sealed class DnsService : IDisposable
 
         await Task.Run(ReloadFilter).ConfigureAwait(false);       // load the lists first, so no query slips through unfiltered
 
+        if (Settings.QueryHistoryRetentionDays > 0)
+        {
+            _ = Task.Run(() => _historyDb.PruneOlderThanDaysAsync(Settings.QueryHistoryRetentionDays));
+        }
+
         Cache = new DnsCache(Settings.CacheEntries);
-        var resolver = new NetworkUpstreamResolver(Settings.UpstreamEndpoints());
-        var server = new DnsServer(Settings, () => _filter, resolver, Cache, Activity, () => IsBlockingPaused);
+        _compositeResolver?.Dispose();
+        _compositeResolver = CompositeUpstreamResolver.FromStrings(Settings.Upstreams, timeout: TimeSpan.FromSeconds(3), httpHandler: _httpHandler);
+
+        var server = new DnsServer(
+            Settings,
+            () => _filter,
+            _compositeResolver,
+            Cache,
+            Activity,
+            () => IsBlockingPaused,
+            historyDb: _historyDb);
+
         server.Queried += e => Queried?.Invoke(e);
         server.Start();
         _server = server;
@@ -106,6 +126,8 @@ public sealed class DnsService : IDisposable
     {
         _server?.Dispose();
         _server = null;
+        _compositeResolver?.Dispose();
+        _compositeResolver = null;
     }
 
     public void Dispose()
@@ -114,6 +136,7 @@ public sealed class DnsService : IDisposable
         _pauseTimerCts?.Dispose();
         _pauseTimerCts = null;
         Stop();
+        _historyDb.Dispose();
     }
 
     private void ReloadFilter()
@@ -215,4 +238,23 @@ public sealed class DnsService : IDisposable
                 : $"{d} is not on any block list.",
         };
     }
+
+    /// <summary>Direct access to the SQLite DNS history database.</summary>
+    public DnsHistoryDatabase HistoryDb => _historyDb;
+
+    /// <summary>Returns live health and latency metrics for configured upstream resolvers.</summary>
+    public IReadOnlyList<UpstreamStatus> GetUpstreamStatuses() =>
+        _compositeResolver?.GetStatuses() ?? Array.Empty<UpstreamStatus>();
+
+    /// <summary>Loads recent historical queries from the persistent SQLite database.</summary>
+    public Task<IReadOnlyList<DnsLogEntry>> LoadRecentHistoryAsync(int limit = 500, CancellationToken ct = default) =>
+        _historyDb.GetRecentEntriesAsync(limit, ct);
+
+    /// <summary>Exports query history to CSV.</summary>
+    public Task ExportHistoryCsvAsync(TextWriter writer, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default) =>
+        _historyDb.ExportCsvAsync(writer, from, to, ct);
+
+    /// <summary>Prunes historical query log entries older than the specified number of days.</summary>
+    public Task<int> PruneHistoryAsync(int days, CancellationToken ct = default) =>
+        _historyDb.PruneOlderThanDaysAsync(days, ct);
 }

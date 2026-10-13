@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Principal;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -1064,9 +1066,14 @@ public partial class MainWindow : Window
         AutoStartDnsBox.IsChecked = c.AutoStart;
         RestrictClientsBox.IsChecked = c.RestrictClientsToLocalNetwork;
         DnsRateLimitBox.Text = c.RateLimitPerSecond.ToString(CultureInfo.InvariantCulture);
+        AnonymizeIpsBox.IsChecked = c.AnonymizeClientIps;
+        DoNotStoreDomainsBox.IsChecked = c.DoNotStoreDomains;
+        RetentionDaysBox.Text = c.QueryHistoryRetentionDays.ToString(CultureInfo.InvariantCulture);
         ListsBox.Text = string.Join("\r\n", c.Lists.Select(l => (l.Enabled ? "" : "# ") + l.Name + " | " + l.Url));
         CustomBlockBox.Text = string.Join("\r\n", c.CustomBlock);
         CustomAllowBox.Text = string.Join("\r\n", c.CustomAllow);
+        LocalRecordsBox.Text = string.Join("\r\n", c.LocalRecords.Select(r => $"{r.Domain} | {r.RecordType} | {r.Value}"));
+        ConditionalForwardingBox.Text = string.Join("\r\n", c.ConditionalForwarding.Select(f => $"{f.DomainSuffix} | {f.TargetServer}"));
     }
 
     private bool TryReadDnsSettings(out DnsSettings settings, out string error)
@@ -1083,6 +1090,12 @@ public partial class MainWindow : Window
         if (!int.TryParse(DnsRateLimitBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int rateLimit) || rateLimit < 0)
         {
             error = "The rate limit must be a number of queries per second (0 or greater).";
+            return false;
+        }
+
+        if (!int.TryParse(RetentionDaysBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int retentionDays) || retentionDays < 0)
+        {
+            error = "The history retention days must be a number (0 or greater).";
             return false;
         }
 
@@ -1106,11 +1119,38 @@ public partial class MainWindow : Window
         static List<string> Lines(string text) =>
             text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
+        var localRecords = new List<LocalDnsRecord>();
+        foreach (var raw in LocalRecordsBox.Text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            var parts = line.Split('|');
+            if (parts.Length >= 3)
+            {
+                localRecords.Add(new LocalDnsRecord(parts[0].Trim(), parts[1].Trim(), parts[2].Trim()));
+            }
+        }
+
+        var condFwd = new List<ConditionalForwardingRule>();
+        foreach (var raw in ConditionalForwardingBox.Text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            var parts = line.Split('|');
+            if (parts.Length >= 2)
+            {
+                condFwd.Add(new ConditionalForwardingRule(parts[0].Trim(), parts[1].Trim()));
+            }
+        }
+
         settings = new DnsSettings
         {
             AutoStart = AutoStartDnsBox.IsChecked == true,
             RestrictClientsToLocalNetwork = RestrictClientsBox.IsChecked == true,
             RateLimitPerSecond = rateLimit,
+            QueryHistoryRetentionDays = retentionDays,
+            AnonymizeClientIps = AnonymizeIpsBox.IsChecked == true,
+            DoNotStoreDomains = DoNotStoreDomainsBox.IsChecked == true,
             ListenAddress = DnsListenBox.Text.Trim(),
             Port = port,
             Upstreams = DnsUpstreamsBox.Text.Split(new[] { ',', ';', ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
@@ -1121,6 +1161,8 @@ public partial class MainWindow : Window
             Lists = lists,
             CustomBlock = Lines(CustomBlockBox.Text),
             CustomAllow = Lines(CustomAllowBox.Text),
+            LocalRecords = localRecords,
+            ConditionalForwarding = condFwd,
         };
         return settings.Validate(out error);
     }
@@ -1323,7 +1365,84 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnDnsCheck(object sender, RoutedEventArgs e) => DnsCheckResult.Text = _sink.Check(DnsCheckBox.Text);
+    private void OnDnsCheck(object sender, RoutedEventArgs e)
+    {
+        string text = DnsCheckBox.Text.Trim();
+        if (text.Contains(' '))
+        {
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string pattern = parts[0].Trim();
+            string domain = parts[1].Trim();
+
+            var builder = new DomainFilterBuilder();
+            builder.AddCustom(pattern, allow: false);
+            var filter = builder.Build();
+            var dec = filter.Decide(domain);
+            DnsCheckResult.Text = dec.Action == FilterAction.Blocked
+                ? $"MATCH: '{domain}' is BLOCKED by '{pattern}'."
+                : $"NO MATCH: '{domain}' is NOT blocked by '{pattern}'.";
+            return;
+        }
+
+        DnsCheckResult.Text = _sink.Check(text);
+    }
+
+    private void OnPresetQuad9Doh(object sender, RoutedEventArgs e) =>
+        DnsUpstreamsBox.Text = "https://9.9.9.9/dns-query, https://149.112.112.112/dns-query";
+
+    private void OnPresetCloudflareDoh(object sender, RoutedEventArgs e) =>
+        DnsUpstreamsBox.Text = "https://1.1.1.1/dns-query, https://1.0.0.1/dns-query";
+
+    private void OnPresetGoogleDoh(object sender, RoutedEventArgs e) =>
+        DnsUpstreamsBox.Text = "https://8.8.8.8/dns-query, https://8.8.4.4/dns-query";
+
+    private void OnPresetQuad9Dot(object sender, RoutedEventArgs e) =>
+        DnsUpstreamsBox.Text = "tls://9.9.9.9:853, tls://149.112.112.112:853";
+
+    private void OnPresetStandard(object sender, RoutedEventArgs e) =>
+        DnsUpstreamsBox.Text = "9.9.9.9, 1.1.1.1";
+
+    private async void OnDnsExportCsv(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+            FileName = "dns-query-history.csv",
+            DefaultExt = ".csv"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            using var writer = new StreamWriter(dialog.FileName, append: false, Encoding.UTF8);
+            await _sink.ExportHistoryCsvAsync(writer);
+            StatusText.Text = $"Exported query log to {System.IO.Path.GetFileName(dialog.FileName)}.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not export CSV file", ex);
+        }
+    }
+
+    private async Task LoadInitialHistoryAsync()
+    {
+        try
+        {
+            var history = await _sink.LoadRecentHistoryAsync(300);
+            if (history.Count > 0 && DnsRows.Count == 0)
+            {
+                foreach (var item in history)
+                {
+                    DnsRows.Add(DnsRow.From(item));
+                }
+                _dnsLastTop = history[0];
+            }
+        }
+        catch (Exception)
+        {
+            // Non-fatal
+        }
+    }
 
     private void OnDnsAllowLan(object sender, RoutedEventArgs e)
     {
@@ -1549,6 +1668,16 @@ public partial class MainWindow : Window
         DnsPauseButton.IsEnabled = _sink.IsRunning;
         DnsTestButton.IsEnabled = _sink.IsRunning && !_dnsBusy;
         UpdateDnsSwitchUi();
+
+        if (DnsRows.Count == 0)
+        {
+            _ = LoadInitialHistoryAsync();
+        }
+
+        var statuses = _sink.GetUpstreamStatuses();
+        DnsUpstreamStatusText.Text = statuses.Count > 0
+            ? "Upstreams: " + string.Join("  |  ", statuses.Select(s => $"{s.DisplayName}: {(s.IsHealthy ? "OK" : "ERR")}{(s.LastLatencyMs >= 0 ? $" ({s.LastLatencyMs}ms)" : "")}"))
+            : "";
 
         if (_sink.IsBlockingPaused)
         {

@@ -220,6 +220,73 @@ public static class DnsWire
     public static byte[] BuildRfc8482Hinfo(DnsQuery q, uint ttl = 300) =>
         BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.HINFO, new byte[] { 7, 0x52, 0x46, 0x43, 0x38, 0x34, 0x38, 0x32, 0 }) }, ttl);
 
+    /// <summary>Encodes a dotted domain name into RFC 1035 wire label format.</summary>
+    public static byte[] EncodeWireName(string name)
+    {
+        var ms = new List<byte>();
+        foreach (var label in name.Trim('.').Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            byte[] b = Encoding.ASCII.GetBytes(label);
+            ms.Add((byte)b.Length);
+            ms.AddRange(b);
+        }
+        ms.Add(0);
+        return ms.ToArray();
+    }
+
+    /// <summary>Checks whether a query name is a reverse lookup for IPv4 or IPv6 loopback.</summary>
+    public static bool IsLoopbackPtr(string name) =>
+        string.Equals(name, "1.0.0.127.in-addr.arpa", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Builds an authoritative localhost PTR answer for loopback reverse DNS queries.</summary>
+    public static byte[] BuildLoopbackPtrAnswer(DnsQuery q) =>
+        BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.PTR, EncodeWireName("localhost")) }, 3600);
+
+    /// <summary>Builds an authoritative answer for a matched LocalDnsRecord.</summary>
+    public static byte[]? BuildLocalRecordAnswer(DnsQuery q, LocalDnsRecord record)
+    {
+        ushort qtype = q.Question.Type;
+        string recType = record.RecordType.Trim().ToUpperInvariant();
+
+        if (recType == "A" && (qtype == DnsType.A || qtype == DnsType.ANY))
+        {
+            if (IPAddress.TryParse(record.Value.Trim(), out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                return BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.A, ip.GetAddressBytes()) }, record.Ttl);
+        }
+        else if (recType == "AAAA" && (qtype == DnsType.AAAA || qtype == DnsType.ANY))
+        {
+            if (IPAddress.TryParse(record.Value.Trim(), out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                return BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.AAAA, ip.GetAddressBytes()) }, record.Ttl);
+        }
+        else if (recType == "CNAME" && (qtype == DnsType.CNAME || qtype == DnsType.A || qtype == DnsType.AAAA || qtype == DnsType.ANY))
+        {
+            byte[] wireName = EncodeWireName(record.Value.Trim());
+            return BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.CNAME, wireName) }, record.Ttl);
+        }
+        else if (recType == "PTR" && (qtype == DnsType.PTR || qtype == DnsType.ANY))
+        {
+            byte[] wireName = EncodeWireName(record.Value.Trim());
+            return BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.PTR, wireName) }, record.Ttl);
+        }
+        else if (recType == "TXT" && (qtype == DnsType.TXT || qtype == DnsType.ANY))
+        {
+            byte[] txtBytes = Encoding.UTF8.GetBytes(record.Value.Trim());
+            var data = new byte[Math.Min(255, txtBytes.Length) + 1];
+            data[0] = (byte)(data.Length - 1);
+            Buffer.BlockCopy(txtBytes, 0, data, 1, data.Length - 1);
+            return BuildResponse(q, DnsRcode.NoError, new[] { (DnsType.TXT, data) }, record.Ttl);
+        }
+        else
+        {
+            // Name matches but query is for another type (e.g. query AAAA for an A-only record):
+            // Return NOERROR with empty answer section (NODATA)
+            return BuildResponse(q, DnsRcode.NoError, null, record.Ttl);
+        }
+
+        return null;
+    }
+
     public static byte[] BuildError(DnsQuery q, int rcode) => BuildResponse(q, rcode);
 
     /// <summary>An error response when the query itself could not be parsed but its ID is readable.</summary>

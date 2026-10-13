@@ -84,6 +84,27 @@ public sealed class DomainFilter
     }
 
     public static string Normalize(string domain) => domain.Trim().TrimEnd('.').ToLowerInvariant();
+
+    /// <summary>Creates a new filter combining this filter with additional custom block and allow rules.</summary>
+    public DomainFilter WithOverrides(IEnumerable<string> customBlock, IEnumerable<string> customAllow)
+    {
+        var block = new HashSet<string>(_block, StringComparer.Ordinal);
+        var allow = new HashSet<string>(_allow, StringComparer.Ordinal);
+        var blockRegex = new List<(Regex, string)>(_blockRegex);
+        var allowRegex = new List<(Regex, string)>(_allowRegex);
+
+        var builder = new DomainFilterBuilder();
+        foreach (var rule in customBlock) builder.AddCustom(rule, allow: false);
+        foreach (var rule in customAllow) builder.AddCustom(rule, allow: true);
+        var extra = builder.Build();
+
+        foreach (var b in extra._block) block.Add(b);
+        foreach (var a in extra._allow) allow.Add(a);
+        blockRegex.AddRange(extra._blockRegex);
+        allowRegex.AddRange(extra._allowRegex);
+
+        return new DomainFilter(block, allow, blockRegex, allowRegex);
+    }
 }
 
 public sealed record ListParseStats(int Blocked, int Allowed, int Skipped);

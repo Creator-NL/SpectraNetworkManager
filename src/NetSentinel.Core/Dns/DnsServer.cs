@@ -22,6 +22,9 @@ public sealed class DnsServer : IDisposable
     private readonly Func<bool>? _isBlockingPaused;
     private readonly ClientAccessPolicy _clientAccessPolicy;
     private readonly DnsRateLimiter _rateLimiter;
+    private readonly ClientGroupManager _groupManager;
+    private readonly ConditionalForwarder _conditionalForwarder;
+    private readonly DnsHistoryDatabase? _historyDb;
     private readonly SemaphoreSlim _slots = new(MaxParallel, MaxParallel);
 
     private CancellationTokenSource? _cts;
@@ -36,7 +39,10 @@ public sealed class DnsServer : IDisposable
         DnsActivity activity,
         Func<bool>? isBlockingPaused = null,
         ClientAccessPolicy? clientAccessPolicy = null,
-        DnsRateLimiter? rateLimiter = null)
+        DnsRateLimiter? rateLimiter = null,
+        ClientGroupManager? groupManager = null,
+        ConditionalForwarder? conditionalForwarder = null,
+        DnsHistoryDatabase? historyDb = null)
     {
         _settings = settings;
         _filter = filter;
@@ -46,10 +52,15 @@ public sealed class DnsServer : IDisposable
         _isBlockingPaused = isBlockingPaused;
         _clientAccessPolicy = clientAccessPolicy ?? new ClientAccessPolicy(settings.RestrictClientsToLocalNetwork, settings.AllowedClientRanges);
         _rateLimiter = rateLimiter ?? new DnsRateLimiter(settings.RateLimitPerSecond);
+        _groupManager = groupManager ?? new ClientGroupManager(settings.ClientGroups, filter());
+        _conditionalForwarder = conditionalForwarder ?? new ConditionalForwarder(settings.ConditionalForwarding);
+        _historyDb = historyDb;
     }
 
     public ClientAccessPolicy ClientAccess => _clientAccessPolicy;
     public DnsRateLimiter RateLimiter => _rateLimiter;
+    public ClientGroupManager GroupManager => _groupManager;
+    public ConditionalForwarder ConditionalForwarding => _conditionalForwarder;
 
     public bool IsRunning => _cts is not null;
     public IPEndPoint? LocalEndPoint { get; private set; }
@@ -113,7 +124,11 @@ public sealed class DnsServer : IDisposable
         cts.Dispose();
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        _conditionalForwarder.Dispose();
+    }
 
     // ---- transport -------------------------------------------------------------------------
 
@@ -234,6 +249,7 @@ public sealed class DnsServer : IDisposable
         {
             var entry = new DnsLogEntry(DateTimeOffset.Now, clientText, domain, type, outcome, detail, (int)sw.ElapsedMilliseconds);
             _activity.Add(entry);
+            _historyDb?.Enqueue(entry, _settings.AnonymizeClientIps, _settings.DoNotStoreDomains);
             Queried?.Invoke(entry);
         }
 
@@ -254,6 +270,28 @@ public sealed class DnsServer : IDisposable
             return DnsWire.BuildError(q, DnsRcode.Refused);
         }
 
+        // F6: Answer loopback PTR queries locally with "localhost"
+        if (DnsWire.IsLoopbackPtr(domain))
+        {
+            Log(DnsOutcome.Forwarded, "loopback PTR (localhost)");
+            return Fit(DnsWire.BuildLoopbackPtrAnswer(q), q, tcp);
+        }
+
+        // Authoritative custom local records (A, AAAA, CNAME, PTR, TXT)
+        if (_settings.LocalRecords.Count > 0)
+        {
+            var match = _settings.LocalRecords.FirstOrDefault(r => r.Enabled && string.Equals(r.Domain.Trim(), domain, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                byte[]? localAns = DnsWire.BuildLocalRecordAnswer(q, match);
+                if (localAns is not null)
+                {
+                    Log(DnsOutcome.Forwarded, $"local {match.RecordType} record");
+                    return Fit(localAns, q, tcp);
+                }
+            }
+        }
+
         // Firefox asks this name to find out whether it may switch to its own DNS-over-HTTPS (which would bypass us).
         if (_settings.BlockBrowserDoh && domain == FirefoxCanary)
         {
@@ -262,12 +300,17 @@ public sealed class DnsServer : IDisposable
         }
 
         bool paused = _isBlockingPaused?.Invoke() == true;
-        var filter = _filter();
-        var decision = paused ? new FilterDecision(FilterAction.Allowed, "blocking paused") : filter.Decide(domain);
+        var (group, groupFilter, groupBlocking) = _groupManager.GetGroupForClient(client.Address);
+        bool effectiveBlocking = !paused && groupBlocking;
+
+        var decision = effectiveBlocking
+            ? groupFilter.Decide(domain)
+            : new FilterDecision(FilterAction.Allowed, paused ? "blocking paused" : $"blocking disabled for {group.Name}");
+
         if (decision.Action == FilterAction.Blocked)
         {
             Log(DnsOutcome.Blocked, decision.Reason);
-            return Fit(BlockedAnswer(q), q, tcp);
+            return Fit(BlockedAnswer(q, group.BlockModeOverride ?? _settings.BlockMode), q, tcp);
         }
 
         // RFC 8482: return minimal HINFO response for ANY queries to mitigate amplification abuse
@@ -285,10 +328,15 @@ public sealed class DnsServer : IDisposable
             return Fit(cached, q, tcp);
         }
 
-        byte[]? answer;
+        byte[]? answer = null;
         try
         {
-            answer = await _upstream.ResolveAsync(raw, tcp, ct);
+            // Conditional forwarding routes specific domain suffixes directly to local routers
+            answer = await _conditionalForwarder.TryForwardAsync(domain, raw, tcp, ct).ConfigureAwait(false);
+            if (answer is null)
+            {
+                answer = await _upstream.ResolveAsync(raw, tcp, ct).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) { return null; }
 
@@ -299,15 +347,15 @@ public sealed class DnsServer : IDisposable
         }
 
         // A harmless-looking name that is only an alias for a blocked name is blocked too (unless you allowed the name itself or blocking is paused).
-        if (_settings.InspectCnames && !paused && decision.Action != FilterAction.Allowed)
+        if (_settings.InspectCnames && effectiveBlocking && decision.Action != FilterAction.Allowed)
         {
             foreach (var target in DnsWire.CnameTargets(answer))
             {
-                var d = filter.Decide(target);
+                var d = groupFilter.Decide(target);
                 if (d.Action == FilterAction.Blocked)
                 {
                     Log(DnsOutcome.Blocked, $"alias of {target} ({d.Reason})");
-                    return Fit(BlockedAnswer(q), q, tcp);
+                    return Fit(BlockedAnswer(q, group.BlockModeOverride ?? _settings.BlockMode), q, tcp);
                 }
             }
         }
@@ -317,8 +365,8 @@ public sealed class DnsServer : IDisposable
         return Fit(answer, q, tcp);
     }
 
-    private byte[] BlockedAnswer(DnsQuery q) =>
-        _settings.BlockMode == BlockMode.NxDomain ? DnsWire.BuildError(q, DnsRcode.NxDomain) : DnsWire.BuildNullAnswer(q, BlockedTtl);
+    private static byte[] BlockedAnswer(DnsQuery q, BlockMode mode) =>
+        mode == BlockMode.NxDomain ? DnsWire.BuildError(q, DnsRcode.NxDomain) : DnsWire.BuildNullAnswer(q, BlockedTtl);
 
     // UDP answers that do not fit the client's size limit are replaced by a "truncated" answer, so the client retries over TCP.
     private static byte[] Fit(byte[] response, DnsQuery q, bool tcp) =>

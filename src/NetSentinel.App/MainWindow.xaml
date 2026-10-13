@@ -306,7 +306,9 @@
                 <Button Content="Update block lists" Click="OnDnsUpdateLists" Margin="0,0,8,6"
                         ToolTip="Downloads the lists in the settings (needs internet; with strict mode on, NetSentinel itself is allowed)."/>
                 <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
-                <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,20,6"/>
+                <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"/>
+                <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,20,6"
+                        ToolTip="Export persistent SQLite query history to a CSV file."/>
                 <Button Content="Always allow selected" Click="OnDnsAllow" Margin="0,0,8,6" ToolTip="Adds the selected log line's domain to your allow list."/>
                 <Button Content="Always block selected" Click="OnDnsBlock" Margin="0,0,20,6" Foreground="{StaticResource Magenta}"
                         ToolTip="Adds the selected log line's domain to your block list."/>
@@ -363,8 +365,19 @@
                                        Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                             <TextBlock Text="Upstream DNS servers (answer what is not blocked)" Foreground="{StaticResource Muted}"/>
-                            <TextBox x:Name="DnsUpstreamsBox" Margin="0,2,0,8"
-                                     ToolTip="IP addresses separated by commas or spaces, optionally with :port. Tried in this order."/>
+                            <TextBox x:Name="DnsUpstreamsBox" Margin="0,2,0,4"
+                                     ToolTip="IP addresses (9.9.9.9), DoH URLs (https://9.9.9.9/dns-query), or DoT (tls://9.9.9.9:853)."/>
+
+                            <!-- Upstream Presets -->
+                            <WrapPanel Margin="0,0,0,6">
+                                <TextBlock Text="Presets:" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <Button Content="Quad9 DoH" Click="OnPresetQuad9Doh" FontSize="10" Padding="4,1" Margin="0,0,4,2"/>
+                                <Button Content="Cloudflare DoH" Click="OnPresetCloudflareDoh" FontSize="10" Padding="4,1" Margin="0,0,4,2"/>
+                                <Button Content="Google DoH" Click="OnPresetGoogleDoh" FontSize="10" Padding="4,1" Margin="0,0,4,2"/>
+                                <Button Content="Quad9 DoT" Click="OnPresetQuad9Dot" FontSize="10" Padding="4,1" Margin="0,0,4,2"/>
+                                <Button Content="Standard" Click="OnPresetStandard" FontSize="10" Padding="4,1" Margin="0,0,0,2"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="DnsUpstreamStatusText" FontSize="10" Foreground="{StaticResource Cyan}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                             <TextBlock Text="Blocked names get" Foreground="{StaticResource Muted}"/>
                             <RadioButton x:Name="DnsNullRadio" Content="0.0.0.0 / :: (fast, programs fail at once)" GroupName="blockmode" Margin="0,4,0,2"/>
@@ -375,11 +388,23 @@
                             <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when NetSentinel starts" Margin="0,2,0,4"/>
                             <CheckBox x:Name="RestrictClientsBox" Content="Only answer queries from local / private networks" Margin="0,2,0,4"
                                       ToolTip="Protects your PC from acting as an open resolver on the internet if listening on 0.0.0.0."/>
-                            <StackPanel Orientation="Horizontal" Margin="0,2,0,10">
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
                                 <TextBlock Text="Rate limit:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
                                 <TextBox x:Name="DnsRateLimitBox" Width="50" VerticalContentAlignment="Center"
                                          ToolTip="Maximum queries per second per client IP (0 = unlimited). Mitigates DNS amplification floods."/>
                                 <TextBlock Text="queries / sec per IP" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="6,0,0,0" FontSize="11"/>
+                            </StackPanel>
+
+                            <TextBlock Text="LOG PRIVACY &amp; RETENTION" FontWeight="SemiBold" Foreground="{StaticResource Magenta}" FontSize="10" Margin="0,4,0,4"/>
+                            <CheckBox x:Name="AnonymizeIpsBox" Content="Anonymize client IP addresses in query history" Margin="0,2,0,2"
+                                      ToolTip="Masks the last octet of IPv4 and /64 of IPv6 client addresses."/>
+                            <CheckBox x:Name="DoNotStoreDomainsBox" Content="Do not store domain names in history log ([redacted])" Margin="0,2,0,4"
+                                      ToolTip="Prevents domain names from being recorded in the persistent SQLite database."/>
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,10">
+                                <TextBlock Text="History retention:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
+                                <TextBox x:Name="RetentionDaysBox" Width="40" VerticalContentAlignment="Center"
+                                         ToolTip="Number of days to keep query logs in the SQLite database (0 = never delete)."/>
+                                <TextBlock Text="days" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="6,0,0,0" FontSize="11"/>
                             </StackPanel>
 
                             <TextBlock Text="Block lists (one per line:  Name | URL;  start a line with # to switch it off)" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
@@ -391,8 +416,18 @@
                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
 
                             <TextBlock Text="Always allow (wins over every block list)" Foreground="{StaticResource Muted}"/>
-                            <TextBox x:Name="CustomAllowBox" Margin="0,2,0,10" Height="64" AcceptsReturn="True" TextWrapping="NoWrap"
+                            <TextBox x:Name="CustomAllowBox" Margin="0,2,0,8" Height="64" AcceptsReturn="True" TextWrapping="NoWrap"
                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
+
+                            <TextBlock Text="Local DNS records (domain | type | value, e.g. nas.home | A | 192.168.1.100)" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                            <TextBox x:Name="LocalRecordsBox" Margin="0,2,0,8" Height="50" AcceptsReturn="True" TextWrapping="NoWrap"
+                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"
+                                     ToolTip="Authoritative custom records served directly by NetSentinel without upstream lookups."/>
+
+                            <TextBlock Text="Conditional forwarding (domain suffix | target server, e.g. lan | 192.168.1.1)" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                            <TextBox x:Name="ConditionalForwardingBox" Margin="0,2,0,10" Height="50" AcceptsReturn="True" TextWrapping="NoWrap"
+                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"
+                                     ToolTip="Forwards router/LAN domains or reverse PTR zones directly to your router."/>
 
                             <Button Content="Save settings" Click="OnDnsSave" Foreground="{StaticResource Cyan}" HorizontalAlignment="Left" Margin="0,0,0,14"
                                     ToolTip="Saves, and restarts the DNS server if it is running."/>

@@ -52,22 +52,69 @@ public sealed class DnsSettings
     public List<string> CustomBlock { get; set; } = new();
     public List<string> CustomAllow { get; set; } = new();
 
+    /// <summary>How many days of persistent SQLite DNS query logs to keep (0 = do not prune).</summary>
+    public int QueryHistoryRetentionDays { get; set; } = 30;
+
+    /// <summary>Privacy: Mask the last octet of client IPv4 addresses and /64 of IPv6 addresses in query logs.</summary>
+    public bool AnonymizeClientIps { get; set; }
+
+    /// <summary>Privacy: Do not store domain names in persistent query logs (saved as [redacted]).</summary>
+    public bool DoNotStoreDomains { get; set; }
+
+    /// <summary>Custom authoritative local records (A, AAAA, CNAME, PTR, TXT) served directly by NetSentinel.</summary>
+    public List<LocalDnsRecord> LocalRecords { get; set; } = new();
+
+    /// <summary>Conditional forwarding rules for specific domains (e.g. *.home, *.lan, 168.192.in-addr.arpa) to a local router.</summary>
+    public List<ConditionalForwardingRule> ConditionalForwarding { get; set; } = new();
+
+    /// <summary>Client groups allowing per-client/device custom blocklists, rules, and blocking toggles.</summary>
+    public List<ClientGroup> ClientGroups { get; set; } = new();
+
     public bool Validate(out string error)
     {
         error = "";
         if (!IPAddress.TryParse(ListenAddress, out _)) { error = $"'{ListenAddress}' is not a valid IP address to listen on."; return false; }
         if (Port is < 1 or > 65535) { error = "The port must be between 1 and 65535."; return false; }
         if (RateLimitPerSecond < 0) { error = "Rate limit cannot be negative."; return false; }
+        if (QueryHistoryRetentionDays < 0) { error = "History retention days cannot be negative."; return false; }
         if (Upstreams.Count == 0) { error = "Add at least one upstream DNS server."; return false; }
 
         foreach (var u in Upstreams)
-            if (!TryParseUpstream(u, out _)) { error = $"'{u}' is not a valid upstream server (use an IP address like 9.9.9.9, optionally with :port)."; return false; }
+            if (!UpstreamEndpoint.TryParse(u, out _) && !TryParseUpstream(u, out _))
+            {
+                error = $"'{u}' is not a valid upstream server (use an IP address, https:// DoH URL, or tls:// DoT endpoint).";
+                return false;
+            }
 
         foreach (var range in AllowedClientRanges)
             if (!IPNetwork.TryParse(range.Trim(), out _)) { error = $"'{range}' is not a valid CIDR network (e.g. 192.168.1.0/24)."; return false; }
 
+        foreach (var local in LocalRecords)
+        {
+            if (string.IsNullOrWhiteSpace(local.Domain)) { error = "Local record domain cannot be empty."; return false; }
+            string rt = local.RecordType.Trim().ToUpperInvariant();
+            if (rt is not ("A" or "AAAA" or "CNAME" or "PTR" or "TXT")) { error = $"Unsupported local record type '{local.RecordType}'. Supported types: A, AAAA, CNAME, PTR, TXT."; return false; }
+            if (string.IsNullOrWhiteSpace(local.Value)) { error = $"Local record '{local.Domain}' has an empty value."; return false; }
+        }
+
+        foreach (var fwd in ConditionalForwarding)
+        {
+            if (string.IsNullOrWhiteSpace(fwd.DomainSuffix)) { error = "Conditional forwarding domain suffix cannot be empty."; return false; }
+            if (!UpstreamEndpoint.TryParse(fwd.TargetServer, out _) && !TryParseUpstream(fwd.TargetServer, out _))
+            {
+                error = $"'{fwd.TargetServer}' is not a valid forwarding target server for '{fwd.DomainSuffix}'.";
+                return false;
+            }
+        }
+
         return true;
     }
+
+    public IReadOnlyList<UpstreamEndpoint> ParsedUpstreams() =>
+        Upstreams.Select(u => UpstreamEndpoint.TryParse(u, out var ep) ? ep : null)
+                 .Where(ep => ep is not null)
+                 .Select(ep => ep!)
+                 .ToList();
 
     public IReadOnlyList<IPEndPoint> UpstreamEndpoints() =>
         Upstreams.Select(u => TryParseUpstream(u, out var ep) ? ep : null).Where(ep => ep is not null).Select(ep => ep!).ToList();
