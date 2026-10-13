@@ -1,0 +1,30 @@
+# Top-level .editorconfig for NetSentinel
+root = true
+
+[*.cs]
+# DNS record type constants use RFC names (PTR, ANY, etc.)
+dotnet_diagnostic.CA1720.severity = none
+
+# COM and Win32 P/Invoke interop rules
+dotnet_diagnostic.CA1838.severity = none
+dotnet_diagnostic.CA1304.severity = none
+dotnet_diagnostic.CA1305.severity = none
+
+# Keep instance design on Windows service wrappers so they can implement interfaces in future phases
+dotnet_diagnostic.CA1822.severity = none
+
+# Performance suggestions that can be addressed progressively
+dotnet_diagnostic.CA1861.severity = suggestion
+dotnet_diagnostic.CA1870.severity = suggestion
+dotnet_diagnostic.CA1859.severity = suggestion
+dotnet_diagnostic.CA1806.severity = suggestion
+dotnet_diagnostic.CA1001.severity = suggestion
+dotnet_diagnostic.CA2016.severity = suggestion
+dotnet_diagnostic.CA1510.severity = suggestion
+
+# Unit test conventions (Method_Scenario_Expected) use underscores
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA1806.severity = none
+dotnet_diagnostic.CA1816.severity = none

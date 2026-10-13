@@ -750,7 +750,11 @@ public partial class MainWindow : Window
 
     private long LatestBlockId()
     {
-        try { return _blockLog.ReadRecent(TimeSpan.FromDays(1), 1).FirstOrDefault()?.RecordId ?? 0; }
+        try
+        {
+            var recent = _blockLog.ReadRecent(TimeSpan.FromDays(1), 1);
+            return recent.Count > 0 ? recent[0].RecordId : 0;
+        }
         catch (Exception) { return 0; }
     }
 

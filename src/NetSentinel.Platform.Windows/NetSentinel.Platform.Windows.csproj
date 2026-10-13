@@ -5,4 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="..\NetSentinel.Core\NetSentinel.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetSentinel.Platform.Windows.Tests" />
+  </ItemGroup>
 </Project>
