@@ -432,7 +432,7 @@
                             <Button Content="Save settings" Click="OnDnsSave" Foreground="{StaticResource Cyan}" HorizontalAlignment="Left" Margin="0,0,0,14"
                                     ToolTip="Saves, and restarts the DNS server if it is running."/>
 
-                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
+                            <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
 
                             <TextBlock Text="POINT THIS PC TO NETSENTINEL" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,4"/>
                             <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
@@ -470,7 +470,7 @@
                             <TextBlock Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12"
                                        Text="Browsers (Chrome, Edge) sometimes bypass Windows DNS with built-in DNS-over-HTTPS. In Chrome/Edge settings under Privacy &amp; Security -> Use secure DNS, select 'With your current service provider' (or disable it)."/>
 
-                            <Border BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Margin="0,0,0,12"/>
+                            <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,0,0,12"/>
 
                             <TextBlock Text="OTHER DEVICES ON YOUR NETWORK" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,6"/>
                             <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"

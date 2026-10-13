@@ -8,6 +8,7 @@
         <SolidColorBrush x:Key="Panel" Color="#121626"/>
         <SolidColorBrush x:Key="PanelAlt" Color="#161B30"/>
         <SolidColorBrush x:Key="Line" Color="#243055"/>
+        <SolidColorBrush x:Key="Border" Color="#243055"/>
         <SolidColorBrush x:Key="Cyan" Color="#22E8FF"/>
         <SolidColorBrush x:Key="Magenta" Color="#FF2BD6"/>
         <SolidColorBrush x:Key="Text" Color="#D7E3FF"/>
