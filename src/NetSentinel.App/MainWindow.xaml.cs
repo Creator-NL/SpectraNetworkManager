@@ -24,7 +24,7 @@ public partial class MainWindow : Window
     private const int MaxEventLines = 300;
 
     private readonly ConnectionMonitor _monitor = new(new IpHelperConnectionSource(), new ProcessResolver());
-    private readonly FirewallBlockLog _blockLog = new();
+    private readonly IBlockEventSource _blockLog = new NativeWfpBlockEventSubscriber();
     private readonly ReverseDnsCache _dns = new();
     private readonly RuleStore _rules = new(RuleStore.DefaultPath);
     private readonly WindowsFirewallEnforcer _enforcer = new();
@@ -1943,9 +1943,12 @@ public partial class MainWindow : Window
             Blocks.Clear();
             foreach (var ev in events) Blocks.Add(BlockRow.From(ev));
 
+            string wfpStatus = _blockLog.IsNativeSubscribed ? " (real-time WFP active)" : "";
             BlocksHint.Text = events.Count > 0
-                ? $"{events.Count} blocked connections in the last hour (newest first)."
-                : "Nothing blocked in the last hour. If you expected blocks, enable auditing once: see README, section \"Firewall blocks\".";
+                ? $"{events.Count} blocked connections in the last hour (newest first){wfpStatus}."
+                : (_blockLog.IsNativeSubscribed
+                    ? "Nothing blocked in the last hour (real-time WFP active)."
+                    : "Nothing blocked in the last hour. If you expected blocks, enable auditing once: see README, section \"Firewall blocks\".");
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -1976,6 +1979,8 @@ public partial class MainWindow : Window
             }
             return;
         }
+        _blockLog.Dispose();
+        _trayIcon?.Dispose();
         base.OnClosing(e);
     }
 

@@ -14,12 +14,16 @@ namespace NetSentinel.Platform.Windows;
 ///        auditpol /set /subcategory:"Filtering Platform Connection" /failure:enable
 ///        auditpol /set /subcategory:"Filtering Platform Packet Drop" /failure:enable
 ///
-/// A later phase replaces this with a direct WFP net-event subscription, which needs no audit policy.
+/// Serves as the reliable fallback when direct WFP event subscription is unavailable.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class FirewallBlockLog
+public sealed class FirewallBlockLog : IBlockEventSource
 {
     private readonly DevicePathConverter _paths = new();
+
+    public event Action<BlockEvent>? BlockDetected;
+
+    public bool IsNativeSubscribed => false;
 
     public IReadOnlyList<BlockEvent> ReadRecent(TimeSpan window, int max, bool includePacketDrops = false)
     {
@@ -63,6 +67,19 @@ public sealed class FirewallBlockLog
             throw new InvalidOperationException($"wevtutil failed ({proc.ExitCode}): {stderr.Trim()}");
         }
 
-        return BlockEventParser.Parse(stdout, _paths.ToDosPath);
+        var results = BlockEventParser.Parse(stdout, _paths.ToDosPath);
+        if (BlockDetected is not null)
+        {
+            foreach (var b in results)
+            {
+                BlockDetected.Invoke(b);
+            }
+        }
+        return results;
+    }
+
+    public void Dispose()
+    {
+        // No unmanaged resources held
     }
 }

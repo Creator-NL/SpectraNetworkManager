@@ -17,7 +17,7 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
     private readonly RuleStore _rules;
     private readonly WindowsFirewallEnforcer _enforcer;
     private readonly StrictModeStore _strict;
-    private readonly FirewallBlockLog _blockLog;
+    private readonly IBlockEventSource _blockLog;
     private readonly DnsService _dns;
     private readonly SystemDnsSwitchManager _dnsSwitch;
     private readonly NetworkHistoryDatabase _historyDb;
@@ -46,7 +46,26 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         _rules = new RuleStore(EngineStoragePaths.RulesPath);
         _enforcer = new WindowsFirewallEnforcer();
         _strict = new StrictModeStore(EngineStoragePaths.StrictModePath);
-        _blockLog = new FirewallBlockLog();
+        var wfpSource = new NativeWfpBlockEventSubscriber();
+        wfpSource.BlockDetected += ev =>
+        {
+            if (_ipcServer?.ConnectedClientCount > 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var server = _ipcServer;
+                        if (server != null)
+                        {
+                            await server.BroadcastEventAsync(IpcConstants.Events.BlockDetected, new List<BlockEvent> { ev }, _cts.Token);
+                        }
+                    }
+                    catch { }
+                });
+            }
+        };
+        _blockLog = wfpSource;
 
         _monitor = new ConnectionMonitor(new IpHelperConnectionSource(), new ProcessResolver());
 
@@ -179,7 +198,8 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         {
             try
             {
-                if (_ipcServer.ConnectedClientCount > 0)
+                // Only poll fallback if native real-time WFP subscription is not active
+                if (!_blockLog.IsNativeSubscribed && _ipcServer.ConnectedClientCount > 0)
                 {
                     var blocks = _blockLog.ReadRecent(TimeSpan.FromSeconds(5), 10);
                     if (blocks.Count > 0)
@@ -529,6 +549,7 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         _ipcServer.Dispose();
         _dns.Dispose();
         _dnsSwitch.Dispose();
+        _blockLog.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -546,6 +567,7 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         await _ipcServer.DisposeAsync().ConfigureAwait(false);
         _dns.Dispose();
         _dnsSwitch.Dispose();
+        _blockLog.Dispose();
         _cts.Dispose();
     }
 }
