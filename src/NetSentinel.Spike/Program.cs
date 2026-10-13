@@ -6,7 +6,8 @@ using NetSentinel.Platform.Windows;
 //   NetSentinel.Spike            -> print one snapshot (established connections + listeners)
 //   NetSentinel.Spike --all      -> include TIME_WAIT/closing noise too
 //   NetSentinel.Spike --watch    -> stream connections as they open and close (Ctrl+C to stop)
-//   NetSentinel.Spike --dns      -> run the DNS sinkhole without the window (options: --port N, --listen IP, --upstream IP[:port], --block domain[,domain...], --update)
+//   NetSentinel.Spike --dns      -> run the DNS sinkhole without the window (options: --port N, --listen IP, --upstream IP[:port], --block domain[,domain...], --update,
+//                                   --settings file; by default a temp file is used, so the window's own DNS settings are never changed)
 //   NetSentinel.Spike --blocks   -> show what Windows Firewall blocked (needs Administrator + audit policy, see below)
 //   NetSentinel.Spike --blocks --packets   -> also include individual dropped packets (very noisy)
 
@@ -147,12 +148,18 @@ static async Task<int> RunDnsAsync(string[] args)
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
 
-    using var dns = NetSentinel.Sinkhole.DnsService.CreateDefault();
+    // Never touch the window's settings (%LocalAppData%\NetSentinel\dns-settings.json): the console uses its own file.
+    // The downloaded block lists are shared, they are only a cache.
+    string settingsFile = Option("--settings") ?? Path.Combine(Path.GetTempPath(), "NetSentinel-spike-dns-settings.json");
+    using var dns = new NetSentinel.Sinkhole.DnsService(settingsFile, NetSentinel.Sinkhole.BlocklistManager.DefaultFolder);
     var settings = dns.Settings;
     if (Option("--port") is string port && int.TryParse(port, out int p)) settings.Port = p;
     if (Option("--listen") is string listen) settings.ListenAddress = listen;
     if (Option("--upstream") is string upstream) settings.Upstreams = new List<string> { upstream };
-    if (Option("--block") is string block) settings.CustomBlock.AddRange(block.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    if (Option("--block") is string block)
+        foreach (var d in block.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (!settings.CustomBlock.Contains(d, StringComparer.OrdinalIgnoreCase)) settings.CustomBlock.Add(d);
+    Console.WriteLine($"Console settings file: {settingsFile}");
 
     try
     {

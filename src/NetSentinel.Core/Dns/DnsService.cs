@@ -113,6 +113,37 @@ public sealed class DnsService : IDisposable
         Cache.Clear();
     }
 
+    /// <summary>
+    /// Sends real queries to the running server on its configured port: one normal name, and one name the filter blocks.
+    /// Works on any port (Windows' nslookup only uses port 53).
+    /// </summary>
+    public async Task<DnsSelfTestResult> SelfTestAsync(CancellationToken ct = default)
+    {
+        var endpoint = LocalEndPoint;
+        if (endpoint is null)
+            return new DnsSelfTestResult(false, new[] { "The DNS server is not running. Press 'Start DNS server' first." });
+
+        return await DnsSelfTest.RunAsync(endpoint, BlockedSample(), ct: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A name the current filter blocks (for the self-test), or null when nothing is blocked yet.</summary>
+    internal string? BlockedSample()
+    {
+        var filter = _filter;
+        foreach (var candidate in new[] { "doubleclick.net", "googleadservices.com", "ads.example.com" })
+            if (filter.Decide(candidate).Action == FilterAction.Blocked) return candidate;
+
+        foreach (var rule in Settings.CustomBlock)
+        {
+            string r = rule.Trim();
+            if (r.Length == 0 || r.StartsWith('/') || r.StartsWith('#')) continue;   // regex rules have no fixed name to ask for
+            if (r.StartsWith("*.", StringComparison.Ordinal)) r = "test." + r[2..];
+            string d = DomainFilter.Normalize(r);
+            if (d.Length > 0 && filter.Decide(d).Action == FilterAction.Blocked) return d;
+        }
+        return null;
+    }
+
     /// <summary>Says what the filter would do with a domain, without sending any query.</summary>
     public string Check(string domain)
     {

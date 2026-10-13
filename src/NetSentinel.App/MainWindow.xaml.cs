@@ -1118,7 +1118,7 @@ public partial class MainWindow : Window
         {
             Info($"The DNS server could not start: {ex.Message}\n\n" +
                  "Another program already uses this address and port. On Windows, 'Internet Connection Sharing', Hyper-V or WSL sometimes hold port 53. " +
-                 "Try the listen address 127.0.0.1, or another port such as 5353 (test it with: nslookup -port=5353 example.com 127.0.0.1).");
+                 "Try the listen address 127.0.0.1, or another port such as 5353 (then check it with 'Test my DNS server'; Windows' nslookup only talks to port 53).");
         }
         catch (Exception ex)
         {
@@ -1138,6 +1138,31 @@ public partial class MainWindow : Window
         _sink.Stop();
         StatusText.Text = "DNS server stopped.";
         RefreshDnsUi();
+    }
+
+    private async void OnDnsSelfTest(object sender, RoutedEventArgs e)
+    {
+        if (_dnsBusy) return;
+        _dnsBusy = true;
+        DnsTestButton.IsEnabled = false;
+        try
+        {
+            StatusText.Text = "Testing the DNS server...";
+            var result = await _sink.SelfTestAsync();
+            StatusText.Text = result.Ok ? "DNS server test passed." : "DNS server test found a problem.";
+            MessageBox.Show(this, result.Summary, result.Ok ? "DNS server test: OK" : "DNS server test: problem found",
+                MessageBoxButton.OK, result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            Error("The DNS server test could not run", ex);
+        }
+        finally
+        {
+            _dnsBusy = false;
+            DnsTestButton.IsEnabled = true;
+            RefreshDnsUi();
+        }
     }
 
     private async void OnDnsSave(object sender, RoutedEventArgs e)
@@ -1302,6 +1327,7 @@ public partial class MainWindow : Window
 
         DnsStartButton.IsEnabled = !_sink.IsRunning && !_dnsBusy;
         DnsStopButton.IsEnabled = _sink.IsRunning;
+        DnsTestButton.IsEnabled = _sink.IsRunning && !_dnsBusy;
 
         DnsStatus.Text = _sink.IsRunning
             ? $"DNS server is RUNNING on {_sink.LocalEndPoint}"

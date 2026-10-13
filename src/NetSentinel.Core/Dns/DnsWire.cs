@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Net;
 using System.Text;
 
 namespace NetSentinel.Sinkhole;
@@ -307,6 +308,18 @@ public static class DnsWire
             if (TryReadName(response, ref pos, out string target)) targets.Add(target);
         });
         return targets;
+    }
+
+    /// <summary>The IPv4/IPv6 addresses in the A and AAAA records of a response (used by the "Test my DNS server" button).</summary>
+    public static IReadOnlyList<IPAddress> AddressAnswers(byte[] response)
+    {
+        var list = new List<IPAddress>();
+        ForEachRecord(response, (type, _, rdataOffset, rdlen) =>
+        {
+            if ((type == DnsType.A && rdlen == 4) || (type == DnsType.AAAA && rdlen == 16))
+                list.Add(new IPAddress(response.AsSpan(rdataOffset, rdlen)));
+        });
+        return list;
     }
 
     // ---- building queries (used by the upstream resolver tests and the "test a domain" button) ------

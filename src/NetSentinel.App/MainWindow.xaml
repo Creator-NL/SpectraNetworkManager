@@ -299,6 +299,8 @@
             <WrapPanel Grid.Row="1" Margin="0,10,0,10">
                 <Button x:Name="DnsStartButton" Content="Start DNS server" Click="OnDnsStart" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
                 <Button x:Name="DnsStopButton" Content="Stop" Click="OnDnsStop" Margin="0,0,8,6"/>
+                <Button x:Name="DnsTestButton" Content="Test my DNS server" Click="OnDnsSelfTest" Margin="0,0,8,6"
+                        ToolTip="Sends a real query for example.com and for a blocked name to the running server, on its own port."/>
                 <Button Content="Update block lists" Click="OnDnsUpdateLists" Margin="0,0,8,6"
                         ToolTip="Downloads the lists in the settings (needs internet; with strict mode on, NetSentinel itself is allowed)."/>
                 <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
@@ -355,7 +357,7 @@
 
                             <TextBlock Text="Port" Foreground="{StaticResource Muted}"/>
                             <TextBox x:Name="DnsPortBox" Margin="0,2,0,2"/>
-                            <TextBlock Text="53 is the normal DNS port. If it is taken, try 5353 and test with nslookup -port=5353." FontSize="11"
+                            <TextBlock Text="53 is the normal DNS port. If it is taken, try 5353 and use 'Test my DNS server' (Windows' nslookup only talks to port 53)." FontSize="11"
                                        Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                             <TextBlock Text="Upstream DNS servers (answer what is not blocked)" Foreground="{StaticResource Muted}"/>
