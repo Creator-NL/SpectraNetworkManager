@@ -1,4 +1,4 @@
-﻿# SpectraNetworkManager (working name)
+﻿# SpectraNetworkManager
 
 Windows network monitor + per-application firewall + DNS sinkhole, written in C# / .NET 8 (works in Visual Studio 2022 17.8+).
 
