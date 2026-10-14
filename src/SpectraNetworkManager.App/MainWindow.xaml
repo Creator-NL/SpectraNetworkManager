@@ -1,4 +1,4 @@
-﻿<Window x:Class="SpectraNetworkManager.Ui.MainWindow"
+<Window x:Class="SpectraNetworkManager.Ui.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="SpectraNetworkManager" Width="1400" Height="800" MinWidth="960" MinHeight="520"
@@ -115,6 +115,19 @@
             </Grid.ColumnDefinitions>
 
             <DataGrid x:Name="ConnectionsGrid" Grid.Column="0" ItemsSource="{Binding Rows}">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
+                        <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
+                        <MenuItem Header="End Process (Kill)" Click="OnKillConnectionProcess"/>
+                        <Separator/>
+                        <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
+                        <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
+                        <Separator/>
+                        <MenuItem Header="Copy Remote Address" Click="OnCopyConnectionRemote"/>
+                        <MenuItem Header="Open File Location" Click="OnOpenConnectionLocation"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="70"/>
                     <DataGridTextColumn Header="PROGRAM" Binding="{Binding Program, Mode=OneWay}" Width="190"/>
@@ -177,6 +190,8 @@
                         ToolTip="Record that this program is OK. Removes a block if there was one."/>
                 <Button x:Name="BlockButton" Content="Block..." Margin="0,0,8,0" Click="OnBlockProgram"
                         ToolTip="Block this program's inbound and outbound traffic using Windows Firewall."/>
+                <Button x:Name="CloseConnectionsButton" Content="Close connections" Margin="0,0,8,0" Click="OnCloseProgramConnections"
+                        ToolTip="Immediately terminate all open IPv4 TCP connections currently active for the selected program."/>
                 <Button x:Name="ForgetButton" Content="Forget decision" Margin="0,0,8,0" Click="OnForgetProgram"
                         ToolTip="Remove your decision (and the block, if any) for this program."/>
                 <Button x:Name="TrustButton" Content="Trust publisher" Margin="0,0,8,0" Click="OnTrustPublisher"
@@ -186,6 +201,18 @@
                         ToolTip="Switches strict mode off and deletes every Windows Firewall rule SpectraNetworkManager created."/>
             </DockPanel>
             <DataGrid x:Name="ProgramsGrid" Grid.Row="2" ItemsSource="{Binding Programs}" SelectionMode="Single">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Close Open Connections" Click="OnCloseProgramConnections"/>
+                        <MenuItem Header="End Process (Kill)" Click="OnKillProgramProcess"/>
+                        <Separator/>
+                        <MenuItem Header="Block..." Click="OnBlockProgram"/>
+                        <MenuItem Header="Allow" Click="OnAllowProgram"/>
+                        <Separator/>
+                        <MenuItem Header="Open File Location" Click="OnOpenProgramLocation"/>
+                        <MenuItem Header="Copy Program Path" Click="OnCopyProgramPath"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Style.Triggers>

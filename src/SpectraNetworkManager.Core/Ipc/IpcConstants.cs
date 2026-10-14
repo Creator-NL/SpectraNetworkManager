@@ -1,4 +1,4 @@
-﻿namespace SpectraNetworkManager.Core.Ipc;
+namespace SpectraNetworkManager.Core.Ipc;
 
 public static class IpcConstants
 {
@@ -40,6 +40,10 @@ public static class IpcConstants
         // Traffic & Bandwidth
         public const string GetTopTalkers = "GetTopTalkers";
         public const string GetConnectionHistory = "GetConnectionHistory";
+
+        // Connection & Process Control
+        public const string TerminateConnections = "TerminateConnections";
+        public const string TerminateProcess = "TerminateProcess";
     }
 
     public static class Events
@@ -53,3 +57,16 @@ public static class IpcConstants
         public const string BandwidthUpdate = "BandwidthUpdate";
     }
 }
+
+public sealed record TerminateConnectionsRequest(
+    int? Pid = null,
+    string? ProgramPath = null,
+    string? LocalEndPoint = null,
+    string? RemoteEndPoint = null);
+
+public sealed record TerminateConnectionsResult(int Closed, bool Success);
+
+public sealed record TerminateProcessRequest(int Pid);
+
+public sealed record TerminateProcessResult(bool Killed, bool Success);
+

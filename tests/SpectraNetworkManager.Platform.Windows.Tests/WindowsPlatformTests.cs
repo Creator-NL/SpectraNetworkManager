@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
@@ -104,5 +104,28 @@ public class WindowsPlatformTests
         {
             enforcer.Unblock(testApp);
         }
+    }
+
+    [Fact]
+    public void TcpConnectionTerminator_SafeWithInvalidInputs()
+    {
+        var terminator = new TcpConnectionTerminator();
+        Assert.Equal(0, terminator.TerminateConnectionsForPid(-1));
+        Assert.Equal(0, terminator.TerminateConnectionsForPid(0));
+        Assert.Equal(0, terminator.TerminateConnectionsForPid(999999999));
+        Assert.Equal(0, terminator.TerminateConnectionsForProgram(""));
+        Assert.Equal(0, terminator.TerminateConnectionsForProgram("NonExistentFakeProgram_XYZ123.exe"));
+
+        var ep1 = new IPEndPoint(IPAddress.IPv6Loopback, 12345);
+        var ep2 = new IPEndPoint(IPAddress.IPv6Loopback, 54321);
+        Assert.False(terminator.TerminateConnection(ep1, ep2));
+    }
+
+    [Fact]
+    public void TcpConnectionTerminator_KillProcess_SafeWithInvalidPid()
+    {
+        Assert.False(TcpConnectionTerminator.KillProcess(-1));
+        Assert.False(TcpConnectionTerminator.KillProcess(0));
+        Assert.False(TcpConnectionTerminator.KillProcess(999999999));
     }
 }

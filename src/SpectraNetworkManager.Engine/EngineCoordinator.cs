@@ -1,4 +1,5 @@
-﻿using SpectraNetworkManager.Core;
+using System.Net;
+using SpectraNetworkManager.Core;
 using SpectraNetworkManager.Core.Ipc;
 using SpectraNetworkManager.Platform.Windows;
 using SpectraNetworkManager.Sinkhole;
@@ -249,6 +250,9 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
 
                 IpcConstants.Actions.GetTopTalkers => await HandleGetTopTalkersAsync(request),
                 IpcConstants.Actions.GetConnectionHistory => await HandleGetConnectionHistoryAsync(request),
+
+                IpcConstants.Actions.TerminateConnections => HandleTerminateConnections(request),
+                IpcConstants.Actions.TerminateProcess => HandleTerminateProcess(request),
 
                 _ => IpcMessage.CreateErrorResponse(request, $"Unknown IPC action '{request.Action}'.")
             };
@@ -536,6 +540,44 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
         if (limit <= 0) limit = 300;
         var list = await _historyDb.GetRecentConnectionsAsync(limit).ConfigureAwait(false);
         return IpcMessage.CreateResponse(request, list);
+    }
+
+    private IpcMessage HandleTerminateConnections(IpcMessage request)
+    {
+        var terminator = new TcpConnectionTerminator();
+        int closed = 0;
+        var payload = request.DeserializePayload<TerminateConnectionsRequest>();
+        if (payload is not null)
+        {
+            if (payload.Pid.HasValue && payload.Pid.Value > 0)
+            {
+                closed += terminator.TerminateConnectionsForPid(payload.Pid.Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(payload.ProgramPath))
+            {
+                closed += terminator.TerminateConnectionsForProgram(payload.ProgramPath);
+            }
+            else if (!string.IsNullOrWhiteSpace(payload.LocalEndPoint) && !string.IsNullOrWhiteSpace(payload.RemoteEndPoint))
+            {
+                if (IPEndPoint.TryParse(payload.LocalEndPoint, out var local) &&
+                    IPEndPoint.TryParse(payload.RemoteEndPoint, out var remote))
+                {
+                    if (terminator.TerminateConnection(local, remote)) closed++;
+                }
+            }
+        }
+        return IpcMessage.CreateResponse(request, new TerminateConnectionsResult(closed, true));
+    }
+
+    private IpcMessage HandleTerminateProcess(IpcMessage request)
+    {
+        var payload = request.DeserializePayload<TerminateProcessRequest>();
+        bool killed = false;
+        if (payload is not null && payload.Pid > 0)
+        {
+            killed = TcpConnectionTerminator.KillProcess(payload.Pid);
+        }
+        return IpcMessage.CreateResponse(request, new TerminateProcessResult(killed, killed));
     }
 
     public void Dispose()

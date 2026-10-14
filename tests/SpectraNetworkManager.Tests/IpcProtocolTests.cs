@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using SpectraNetworkManager.Core.Ipc;
 using Xunit;
 
@@ -136,6 +136,31 @@ public class IpcProtocolTests
 
         Assert.False(response.Success);
         Assert.Contains("Simulated failure", response.Error ?? "");
+    }
+
+    [Fact]
+    public void TerminateConnectionsRequest_SerializesAndDeserializes()
+    {
+        var req = new TerminateConnectionsRequest(Pid: 1234, ProgramPath: @"C:\Test\App.exe", LocalEndPoint: "127.0.0.1:80", RemoteEndPoint: "127.0.0.1:443");
+        var msg = IpcMessage.CreateRequest(IpcConstants.Actions.TerminateConnections, req);
+
+        var restored = msg.DeserializePayload<TerminateConnectionsRequest>();
+        Assert.NotNull(restored);
+        Assert.Equal(1234, restored.Pid);
+        Assert.Equal(@"C:\Test\App.exe", restored.ProgramPath);
+        Assert.Equal("127.0.0.1:80", restored.LocalEndPoint);
+        Assert.Equal("127.0.0.1:443", restored.RemoteEndPoint);
+    }
+
+    [Fact]
+    public void TerminateProcessRequest_SerializesAndDeserializes()
+    {
+        var req = new TerminateProcessRequest(5678);
+        var msg = IpcMessage.CreateRequest(IpcConstants.Actions.TerminateProcess, req);
+
+        var restored = msg.DeserializePayload<TerminateProcessRequest>();
+        Assert.NotNull(restored);
+        Assert.Equal(5678, restored.Pid);
     }
 
     private static (Stream ClientSide, Stream ServerSide) CreateConnectedStreamPair()

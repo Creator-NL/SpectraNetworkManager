@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -597,6 +597,9 @@ public partial class MainWindow : Window
             var plan = RulePlanner.Plan(dialog.Direction, dialog.Scope);
             _enforcer.Block(path, plan);
 
+            // Automatically sever any existing active TCP connections for this program immediately
+            _ = TerminateConnectionsAsync(path);
+
             var scope = dialog.Scope.IsEverything ? null : dialog.Scope;
             _rules.Set(new ProgramRule(path, RuleAction.Block, DateTimeOffset.Now, null, dialog.Direction, scope));
             StatusText.Text = $"Blocked {name}: {dialog.Scope.Describe()}, {ProgramRule.DescribeDirection(dialog.Direction)} ({plan.Count} firewall rules, group \"{WindowsFirewallEnforcer.Group}\").";
@@ -703,6 +706,261 @@ public partial class MainWindow : Window
     {
         var row = SelectedProgram();
         if (row is not null && TryTrustPublisher(row.Signature)) AfterDecision();
+    }
+
+    // -- Connection & Process termination helpers --
+
+    private async Task<int> TerminateConnectionsAsync(string? programPath, int? pid = null, IPEndPoint? local = null, IPEndPoint? remote = null)
+    {
+        // Try via IPC Engine service first if connected
+        if (_engineClient?.IsConnected == true)
+        {
+            try
+            {
+                var resp = await _engineClient.SendRequestAsync<TerminateConnectionsResult>(
+                    IpcConstants.Actions.TerminateConnections,
+                    new TerminateConnectionsRequest(
+                        Pid: pid,
+                        ProgramPath: programPath,
+                        LocalEndPoint: local?.ToString(),
+                        RemoteEndPoint: remote?.ToString()));
+                if (resp is not null) return resp.Closed;
+            }
+            catch { }
+        }
+
+        // Direct fallback on Windows
+        if (OperatingSystem.IsWindows())
+        {
+            var terminator = new TcpConnectionTerminator();
+            if (pid.HasValue && pid.Value > 0)
+                return terminator.TerminateConnectionsForPid(pid.Value);
+            if (!string.IsNullOrWhiteSpace(programPath))
+                return terminator.TerminateConnectionsForProgram(programPath);
+            if (local is not null && remote is not null)
+                return terminator.TerminateConnection(local, remote) ? 1 : 0;
+        }
+
+        return 0;
+    }
+
+    private async Task<bool> TerminateProcessAsync(int pid)
+    {
+        if (pid <= 0) return false;
+
+        if (_engineClient?.IsConnected == true)
+        {
+            try
+            {
+                var resp = await _engineClient.SendRequestAsync<TerminateProcessResult>(
+                    IpcConstants.Actions.TerminateProcess,
+                    new TerminateProcessRequest(pid));
+                if (resp is not null) return resp.Killed;
+            }
+            catch { }
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            return TcpConnectionTerminator.KillProcess(pid);
+        }
+
+        return false;
+    }
+
+    private async void OnCloseProgramConnections(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null) return;
+
+        int closed = await TerminateConnectionsAsync(row.Path);
+        if (closed > 0)
+        {
+            StatusText.Text = $"Terminated {closed} active TCP connection(s) for {row.Name}.";
+        }
+        else
+        {
+            StatusText.Text = $"No active IPv4 TCP connections found to close for {row.Name}.";
+        }
+        _monitor.Poll();
+        RefreshProgramRows();
+    }
+
+    private async void OnKillProgramProcess(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null) return;
+
+        var answer = MessageBox.Show(this,
+            $"Terminate all running processes for \"{row.Name}\"?\n\nPath: {row.Path}\n\nUnsaved work in this application will be lost.",
+            "End Process", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        int killed = 0;
+        if (!string.IsNullOrWhiteSpace(row.Path))
+        {
+            try
+            {
+                var running = System.Diagnostics.Process.GetProcesses()
+                    .Where(p =>
+                    {
+                        try { return string.Equals(p.MainModule?.FileName, row.Path, StringComparison.OrdinalIgnoreCase); }
+                        catch { return string.Equals(p.ProcessName + ".exe", row.Name, StringComparison.OrdinalIgnoreCase); }
+                    })
+                    .ToList();
+
+                foreach (var p in running)
+                {
+                    if (await TerminateProcessAsync(p.Id)) killed++;
+                }
+            }
+            catch { }
+        }
+
+        StatusText.Text = killed > 0
+            ? $"Terminated {killed} process instance(s) of {row.Name}."
+            : $"Could not terminate process for {row.Name}. It may already have exited or requires Administrator rights.";
+        _monitor.Poll();
+        RefreshProgramRows();
+    }
+
+    private void OnOpenProgramLocation(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        try
+        {
+            if (File.Exists(row.Path))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{row.Path}\"");
+            }
+            else
+            {
+                Info($"The file was not found on disk:\n\n{row.Path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open file location", ex);
+        }
+    }
+
+    private void OnCopyProgramPath(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(row.Path);
+            StatusText.Text = $"Copied path to clipboard: {row.Path}";
+        }
+        catch { }
+    }
+
+    // -- Connection view context menu actions --
+
+    private ConnectionRow? SelectedConnection()
+    {
+        if (ConnectionsGrid.SelectedItem is ConnectionRow row) return row;
+        Info("Select a connection in the list first.");
+        return null;
+    }
+
+    private async void OnCloseSelectedConnection(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null) return;
+
+        if (IPEndPoint.TryParse(row.Local, out var local) && IPEndPoint.TryParse(row.Remote, out var remote))
+        {
+            int closed = await TerminateConnectionsAsync(null, pid: row.Pid, local: local, remote: remote);
+            StatusText.Text = closed > 0
+                ? $"Terminated TCP connection {row.Local} -> {row.Remote} ({row.Program})."
+                : $"Could not close connection {row.Local} -> {row.Remote} (connection may already be closed, or is IPv6/UDP).";
+        }
+        else
+        {
+            int closed = await TerminateConnectionsAsync(null, pid: row.Pid);
+            StatusText.Text = closed > 0
+                ? $"Terminated {closed} TCP connection(s) for PID {row.Pid} ({row.Program})."
+                : $"No active IPv4 TCP connections closed for PID {row.Pid}.";
+        }
+        _monitor.Poll();
+    }
+
+    private async void OnCloseConnectionProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null) return;
+
+        int closed = await TerminateConnectionsAsync(row.Path, pid: row.Pid);
+        StatusText.Text = closed > 0
+            ? $"Terminated {closed} active TCP connection(s) for {row.Program}."
+            : $"No active IPv4 TCP connections found to close for {row.Program}.";
+        _monitor.Poll();
+    }
+
+    private async void OnKillConnectionProcess(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null) return;
+
+        var answer = MessageBox.Show(this,
+            $"Terminate process \"{row.Program}\" (PID {row.Pid})?\n\nPath: {row.Path}\n\nUnsaved work in this application will be lost.",
+            "End Process", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        bool ok = await TerminateProcessAsync(row.Pid);
+        StatusText.Text = ok
+            ? $"Terminated process {row.Program} (PID {row.Pid})."
+            : $"Could not terminate PID {row.Pid} (it may have exited or requires Administrator rights).";
+        _monitor.Poll();
+    }
+
+    private void OnBlockConnectionProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Path) && TryBlock(row.Path, row.Program)) AfterDecision();
+    }
+
+    private void OnAllowConnectionProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Path) && TryAllow(row.Path, row.Program, null)) AfterDecision();
+    }
+
+    private void OnCopyConnectionRemote(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null) return;
+        string text = !string.IsNullOrWhiteSpace(row.Host) ? $"{row.Remote} ({row.Host})" : row.Remote;
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            StatusText.Text = $"Copied remote address to clipboard: {text}";
+        }
+        catch { }
+    }
+
+    private void OnOpenConnectionLocation(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        try
+        {
+            if (File.Exists(row.Path))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{row.Path}\"");
+            }
+            else
+            {
+                Info($"The file was not found on disk:\n\n{row.Path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open file location", ex);
+        }
     }
 
     // -- Rules view buttons --

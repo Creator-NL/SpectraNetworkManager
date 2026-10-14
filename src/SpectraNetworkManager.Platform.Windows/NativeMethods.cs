@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
@@ -35,6 +35,19 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool CloseHandle(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MibTcpRow
+    {
+        public uint State;
+        public uint LocalAddr;
+        public uint LocalPort;
+        public uint RemoteAddr;
+        public uint RemotePort;
+    }
+
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    internal static extern uint SetTcpEntry(ref MibTcpRow pTcpRow);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
