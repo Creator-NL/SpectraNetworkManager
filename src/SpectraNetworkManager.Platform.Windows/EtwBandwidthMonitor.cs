@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
@@ -62,6 +62,11 @@ public sealed class EtwBandwidthMonitor : IDisposable
             session.Source.Kernel.TcpIpRecv += data => RecordRecv(data.ProcessID, data.size);
             session.Source.Kernel.UdpIpSend += data => RecordSend(data.ProcessID, data.size);
             session.Source.Kernel.UdpIpRecv += data => RecordRecv(data.ProcessID, data.size);
+
+            session.Source.Kernel.TcpIpSendIPV6 += data => RecordSend(data.ProcessID, data.size);
+            session.Source.Kernel.TcpIpRecvIPV6 += data => RecordRecv(data.ProcessID, data.size);
+            session.Source.Kernel.UdpIpSendIPV6 += data => RecordSend(data.ProcessID, data.size);
+            session.Source.Kernel.UdpIpRecvIPV6 += data => RecordRecv(data.ProcessID, data.size);
 
             _session = session;
             _processingTask = Task.Run(() =>

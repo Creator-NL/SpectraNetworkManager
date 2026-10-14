@@ -1,4 +1,4 @@
-﻿namespace SpectraNetworkManager.Core;
+namespace SpectraNetworkManager.Core;
 
 /// <summary>Result of one polling cycle: the full current picture plus what changed since last time.</summary>
 public sealed record MonitorTick(
@@ -22,6 +22,8 @@ public sealed class ConnectionMonitor
         _source = source;
         _resolver = resolver;
     }
+
+    public IProcessResolver Resolver => _resolver;
 
     public MonitorTick Poll()
     {

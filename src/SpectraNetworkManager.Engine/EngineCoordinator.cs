@@ -169,7 +169,8 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
                 {
                     foreach (var sample in bwSamples.Values)
                     {
-                        var proc = tick.Connections.FirstOrDefault(c => c.Connection.ProcessId == sample.Pid)?.Process;
+                        var proc = tick.Connections.FirstOrDefault(c => c.Connection.ProcessId == sample.Pid)?.Process
+                                   ?? _monitor.Resolver.Resolve(sample.Pid);
                         if (proc?.Path != null)
                         {
                             _historyDb.RecordBandwidth(now, proc.Path, sample.BytesReceivedPerSec, sample.BytesSentPerSec);

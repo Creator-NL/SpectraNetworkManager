@@ -2379,19 +2379,50 @@ public partial class MainWindow : Window
             }
         }
 
+        // Aggregate bandwidth per program (matching main and all child processes)
+        var programTotals = new Dictionary<string, (long In, long Out)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var s in samples)
+        {
+            var proc = _lastConnections.FirstOrDefault(c => c.Connection.ProcessId == s.Pid)?.Process
+                       ?? _monitor.Resolver.Resolve(s.Pid);
+
+            if (proc != null)
+            {
+                if (!string.IsNullOrWhiteSpace(proc.Path))
+                {
+                    var cur = programTotals.GetValueOrDefault(proc.Path);
+                    programTotals[proc.Path] = (cur.In + s.BytesReceivedPerSec, cur.Out + s.BytesSentPerSec);
+                }
+                if (!string.IsNullOrWhiteSpace(proc.Name))
+                {
+                    var cur = programTotals.GetValueOrDefault(proc.Name);
+                    programTotals[proc.Name] = (cur.In + s.BytesReceivedPerSec, cur.Out + s.BytesSentPerSec);
+                }
+            }
+        }
+
         foreach (var pRow in _programRows.Values)
         {
             long inTotal = 0;
             long outTotal = 0;
-            foreach (var s in samples)
+
+            if (!string.IsNullOrWhiteSpace(pRow.Path) && programTotals.TryGetValue(pRow.Path, out var pathTotals))
             {
-                var connMatch = _lastConnections.FirstOrDefault(c => c.Connection.ProcessId == s.Pid);
-                if (connMatch != null && string.Equals(connMatch.Process.Path ?? connMatch.Process.Name, pRow.Key, StringComparison.OrdinalIgnoreCase))
-                {
-                    inTotal += s.BytesReceivedPerSec;
-                    outTotal += s.BytesSentPerSec;
-                }
+                inTotal = pathTotals.In;
+                outTotal = pathTotals.Out;
             }
+            else if (!string.IsNullOrWhiteSpace(pRow.Name) && programTotals.TryGetValue(pRow.Name, out var nameTotals))
+            {
+                inTotal = nameTotals.In;
+                outTotal = nameTotals.Out;
+            }
+            else if (!string.IsNullOrWhiteSpace(pRow.Key) && programTotals.TryGetValue(pRow.Key, out var keyTotals))
+            {
+                inTotal = keyTotals.In;
+                outTotal = keyTotals.Out;
+            }
+
             pRow.UpdateSpeed(inTotal, outTotal);
         }
     }

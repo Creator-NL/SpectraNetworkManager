@@ -1,4 +1,5 @@
-﻿using System.Net;
+using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 
 namespace SpectraNetworkManager.Core;
@@ -64,16 +65,22 @@ public static class Display
     /// <summary>Formats a byte count into a compact human-readable string (e.g. 1.2 MB, 450 KB, 12 B).</summary>
     public static string Bytes(long bytes)
     {
-        if (bytes < 0) bytes = 0;
-        string[] units = { "B", "KB", "MB", "GB", "TB" };
-        double val = bytes;
-        int i = 0;
-        while (val >= 1024 && i < units.Length - 1)
-        {
-            val /= 1024;
-            i++;
-        }
-        return i == 0 ? $"{bytes.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} B" : $"{val.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} {units[i]}";
+        if (bytes <= 0) return "0 B";
+        const long kb = 1024;
+        const long mb = kb * 1024;
+        const long gb = mb * 1024;
+        const long tb = gb * 1024;
+
+        if (bytes >= tb)
+            return $"{((double)bytes / tb).ToString("F1", CultureInfo.InvariantCulture)} TB";
+        if (bytes >= gb)
+            return $"{((double)bytes / gb).ToString("F1", CultureInfo.InvariantCulture)} GB";
+        if (bytes >= mb)
+            return $"{((double)bytes / mb).ToString("F1", CultureInfo.InvariantCulture)} MB";
+        if (bytes >= kb)
+            return $"{((double)bytes / kb).ToString("F1", CultureInfo.InvariantCulture)} KB";
+
+        return $"{bytes.ToString("N0", CultureInfo.InvariantCulture)} B";
     }
 
     /// <summary>Formats transfer speed into a compact human-readable string (e.g. 1.2 MB/s, 45 KB/s).</summary>
