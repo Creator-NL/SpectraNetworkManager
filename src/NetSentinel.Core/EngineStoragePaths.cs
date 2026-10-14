@@ -35,6 +35,7 @@ public static class EngineStoragePaths
     public static string DnsHistoryPath => Path.Combine(BaseDirectory, "dns-history.db");
     public static string NetworkHistoryPath => Path.Combine(BaseDirectory, "network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");
+    public static string AppSettingsPath => GetMigratedPath("app-settings.json");
     public static string LogsDirectory
     {
         get

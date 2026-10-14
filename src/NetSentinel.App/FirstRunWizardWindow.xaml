@@ -1,0 +1,164 @@
+<Window x:Class="NetSentinel.Ui.FirstRunWizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to NetSentinel - First-Run Wizard"
+        Width="780" Height="620"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}"
+        FontFamily="Segoe UI">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- Header -->
+            <RowDefinition Height="Auto"/> <!-- Steps Header -->
+            <RowDefinition Height="*"/>    <!-- Content -->
+            <RowDefinition Height="Auto"/> <!-- Bottom Buttons -->
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,0,0,16">
+            <StackPanel>
+                <TextBlock Text="NETSENTINEL // SETUP &amp; ORIENTATION" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                <TextBlock Margin="0,4,0,0" Foreground="{StaticResource Muted}" FontSize="13"
+                           Text="Your transparent, local-first network monitor, application firewall, and DNS sinkhole."/>
+            </StackPanel>
+        </Border>
+
+        <!-- Step Indicator -->
+        <Border Grid.Row="1" Background="{StaticResource Panel}" CornerRadius="4" Margin="0,14,0,16" Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="Step1Indicator" Grid.Column="0" Text="1. Welcome &amp; Privacy" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" Foreground="{StaticResource Cyan}"/>
+                <TextBlock x:Name="Step2Indicator" Grid.Column="1" Text="2. Modes &amp; Safety Nets" FontWeight="Normal"
+                           HorizontalAlignment="Center" Foreground="{StaticResource Muted}"/>
+                <TextBlock x:Name="Step3Indicator" Grid.Column="2" Text="3. System Verification" FontWeight="Normal"
+                           HorizontalAlignment="Center" Foreground="{StaticResource Muted}"/>
+            </Grid>
+        </Border>
+
+        <!-- Content Area -->
+        <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="20">
+            <Grid>
+                <!-- STEP 1: Welcome & Privacy -->
+                <StackPanel x:Name="Step1Panel" Visibility="Visible">
+                    <TextBlock Text="ZERO TELEMETRY. COMPLETE PRIVACY." FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                               Text="NetSentinel is 100% free and open-source software built for transparency and security. Unlike many commercial security suites:"/>
+
+                    <StackPanel Margin="12,12,0,0">
+                        <TextBlock Text="• Zero Telemetry: No data is ever sent to external servers, clouds, or analytics companies." Margin="0,3" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="• Zero Accounts: No registration, no login, and no subscription fees." Margin="0,3" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="• Local Storage: All network connection logs and DNS query records stay on your PC." Margin="0,3" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="• Open &amp; Verifiable: Full source code is published on GitHub under open-source license." Margin="0,3" Foreground="{StaticResource Text}"/>
+                    </StackPanel>
+
+                    <TextBlock Margin="0,18,0,4" Text="WHAT NETSENTINEL DOES" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12.5" Foreground="{StaticResource Muted}" LineHeight="19"
+                               Text="NetSentinel monitors every incoming and outgoing TCP/UDP connection, verifies digital signatures (Authenticode) of running executables, manages Windows Firewall rules with pinpoint precision, and provides a high-performance local DNS sinkhole to block tracking domains before they leave your computer."/>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Margin="0,16,0,0" Padding="12,10">
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Cyan}"
+                                   Text="Tip: You are in full control. NetSentinel will never block any connections or alter your system DNS without your explicit choice."/>
+                    </Border>
+                </StackPanel>
+
+                <!-- STEP 2: Modes & Safety Nets -->
+                <StackPanel x:Name="Step2Panel" Visibility="Collapsed">
+                    <TextBlock Text="CHOOSE YOUR INITIAL OPERATING MODE" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                    <TextBlock Margin="0,6,0,12" FontSize="12.5" Foreground="{StaticResource Muted}"
+                               Text="Select how active you want NetSentinel to be. You can change this at any time in the main window."/>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <RadioButton x:Name="ModeWatchRadio" GroupName="OpMode" IsChecked="True">
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Watch Only (Recommended)" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0" Foreground="{StaticResource Text}"
+                                           Text="Passively observes all network traffic, displays real-time connection telemetry, and logs activity. No connections are blocked unless you create explicit rules."/>
+                            </StackPanel>
+                        </RadioButton>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <RadioButton x:Name="ModeAskRadio" GroupName="OpMode">
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Ask Mode" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0" Foreground="{StaticResource Muted}"
+                                           Text="Monitors traffic and displays a non-intrusive alert whenever an unfamiliar program attempts to connect out, letting you Allow or Block it."/>
+                            </StackPanel>
+                        </RadioButton>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,12">
+                        <RadioButton x:Name="ModeStrictRadio" GroupName="OpMode">
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Strict Mode (Advanced)" FontWeight="SemiBold" Foreground="{StaticResource Amber}"/>
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0" Foreground="{StaticResource Muted}"
+                                           Text="Blocks all outbound connections by default. Only essential Windows components and explicitly allowed applications can communicate."/>
+                            </StackPanel>
+                        </RadioButton>
+                    </Border>
+
+                    <TextBlock Text="BUILT-IN SAFETY NETS" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,4,0,4"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Muted}" LineHeight="17"
+                               Text="• 60-Second Revert: Switching to Strict Mode or System DNS starts a 60s rollback timer; if not confirmed, it reverts automatically.&#x0a;• PANIC Button: Available on the top bar and system tray menu to instantly reset all firewall and DNS changes.&#x0a;• Safe Recovery Mode: Start NetSentinel with --safe (or use the Start menu shortcut) to revert all changes offline."/>
+                </StackPanel>
+
+                <!-- STEP 3: Harmless System Check -->
+                <StackPanel x:Name="Step3Panel" Visibility="Collapsed">
+                    <TextBlock Text="SYSTEM VERIFICATION" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                    <TextBlock Margin="0,6,0,16" FontSize="12.5" Foreground="{StaticResource Muted}"
+                               Text="NetSentinel verifies that your Windows environment is compatible and ready."/>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="14">
+                        <StackPanel>
+                            <!-- Test 1 -->
+                            <DockPanel Margin="0,6">
+                                <TextBlock x:Name="Test1Status" Text="[Pending]" FontFamily="Consolas" FontWeight="Bold" Foreground="{StaticResource Cyan}" Width="100"/>
+                                <StackPanel>
+                                    <TextBlock Text="Windows Firewall COM Management API" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Ensures NetSentinel can configure and manage firewall rules safely." FontSize="11.5" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Test 2 -->
+                            <DockPanel Margin="0,10">
+                                <TextBlock x:Name="Test2Status" Text="[Pending]" FontFamily="Consolas" FontWeight="Bold" Foreground="{StaticResource Cyan}" Width="100"/>
+                                <StackPanel>
+                                    <TextBlock Text="DNS Sinkhole Socket System" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Verifies local UDP socket binding for high-speed DNS filtering." FontSize="11.5" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Test 3 -->
+                            <DockPanel Margin="0,6">
+                                <TextBlock x:Name="Test3Status" Text="[Pending]" FontFamily="Consolas" FontWeight="Bold" Foreground="{StaticResource Cyan}" Width="100"/>
+                                <StackPanel>
+                                    <TextBlock Text="Native Authenticode Verification Engine" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Verifies WinVerifyTrust and CryptCATAdmin catalog signature verification." FontSize="11.5" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="RunCheckButton" Content="Run Self-Test Now" Click="OnRunCheckClick" HorizontalAlignment="Left" Margin="0,14,0,0"/>
+
+                    <TextBlock x:Name="SelfTestSummary" Margin="0,14,0,0" TextWrapping="Wrap" FontSize="12.5" Foreground="{StaticResource Text}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Bottom Navigation Buttons -->
+        <Grid Grid.Row="3" Margin="0,18,0,0">
+            <Button x:Name="BackButton" Content="&lt; Back" Click="OnBackClick" HorizontalAlignment="Left" Width="100" IsEnabled="False"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelButton" Content="Exit" Click="OnCancelClick" Margin="0,0,10,0" Width="90"/>
+                <Button x:Name="NextButton" Content="Next &gt;" Click="OnNextClick" Width="130" Foreground="{StaticResource Cyan}"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

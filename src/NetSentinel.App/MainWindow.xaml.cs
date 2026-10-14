@@ -54,6 +54,9 @@ public partial class MainWindow : Window
     private bool _isExiting;
     private bool _trayBalloonShown;
     private int _trafficHours = 1;
+    private readonly AppSettingsStore _appSettings = new();
+    private readonly UpdateChecker _updateChecker = new();
+    private UpdateCheckResult? _lastUpdateResult;
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
@@ -115,6 +118,21 @@ public partial class MainWindow : Window
             if (_sink.Settings.AutoStart && _engineClient == null) await StartDnsAsync();
             await RefreshAdaptersListAsync();
             UpdateDnsSwitchUi();
+
+            if (_appSettings.Settings.InitialOperatingMode == "AskMode")
+            {
+                AskMode.IsChecked = true;
+            }
+            else if (_appSettings.Settings.InitialOperatingMode == "WatchOnly")
+            {
+                AskMode.IsChecked = false;
+            }
+
+            if (_appSettings.Settings.CheckForUpdatesOnStartup)
+            {
+                _ = CheckUpdatesAsync(manual: false);
+            }
+
             await TickAsync();
             _timer.Start();
         };
@@ -2011,6 +2029,9 @@ public partial class MainWindow : Window
             menu.Items.Add("Panic: Revert All Changes", null, async (_, _) => await TriggerPanicAsync());
             menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
+            menu.Items.Add("Check for Updates", null, async (_, _) => await CheckUpdatesAsync(manual: true));
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
             menu.Items.Add("Exit NetSentinel", null, (_, _) =>
             {
                 _isExiting = true;
@@ -2256,6 +2277,91 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Info($"Failed to copy support report: {ex.Message}");
+        }
+    }
+
+    private async void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        await CheckUpdatesAsync(manual: true);
+    }
+
+    private void OnUpdateBadgeClick(object sender, RoutedEventArgs e)
+    {
+        if (_lastUpdateResult?.HtmlUrl is not null)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_lastUpdateResult.HtmlUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Error("Could not open browser", ex);
+            }
+        }
+    }
+
+    private async Task CheckUpdatesAsync(bool manual)
+    {
+        string currentVer = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        CheckUpdatesButton.IsEnabled = false;
+        if (manual) StatusText.Text = "Checking GitHub Releases for updates...";
+
+        try
+        {
+            var result = await _updateChecker.CheckForUpdatesAsync(currentVer);
+            _lastUpdateResult = result;
+
+            if (result.IsSuccess)
+            {
+                if (result.IsUpdateAvailable)
+                {
+                    UpdateBadge.Visibility = Visibility.Visible;
+                    UpdateBadge.Content = $"Update: {result.LatestVersion}";
+                    StatusText.Text = $"New version available: {result.LatestVersion}. Click 'Update' button to view.";
+
+                    if (manual)
+                    {
+                        var choice = MessageBox.Show(this,
+                            $"A new version of NetSentinel is available!\n\n" +
+                            $"Current version: v{currentVer}\n" +
+                            $"Latest version: {result.LatestVersion}\n" +
+                            $"Release: {result.ReleaseName}\n\n" +
+                            "Would you like to open the GitHub Releases page to download it?",
+                            "NetSentinel Update Available", MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                        if (choice == MessageBoxResult.Yes && result.HtmlUrl != null)
+                        {
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(result.HtmlUrl) { UseShellExecute = true });
+                        }
+                    }
+                }
+                else
+                {
+                    UpdateBadge.Visibility = Visibility.Collapsed;
+                    if (manual)
+                    {
+                        StatusText.Text = "NetSentinel is up to date.";
+                        MessageBox.Show(this,
+                            $"NetSentinel is up to date.\n\nYou are running the latest version (v{currentVer}).",
+                            "NetSentinel Update Check", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                }
+            }
+            else if (manual)
+            {
+                StatusText.Text = "Update check failed.";
+                MessageBox.Show(this,
+                    $"Could not check for updates.\n\n{result.ErrorMessage}",
+                    "NetSentinel Update Check", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (manual) Error("Failed to check for updates", ex);
+        }
+        finally
+        {
+            CheckUpdatesButton.IsEnabled = true;
         }
     }
 

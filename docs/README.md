@@ -2,14 +2,16 @@
 
 Windows network monitor + per-application firewall + DNS sinkhole, written in C# / .NET 8 (works in Visual Studio 2022 17.8+).
 
-## Status: Phase 3a - DNS sinkhole (the Pi-hole part), strict mode tested
+## Status: Phase 4 - Release Readiness & Packaging Complete
 
-| Project | Purpose |
+| Project / Component | Purpose |
 |---|---|
-| `NetSentinel.App` | **WPF window** (startup project): Connections, Programs and Firewall blocks views, live open/close events |
-| `NetSentinel.Core` | Platform-independent models, `ConnectionMonitor`, `ConnectionTracker`, per-program summary, reverse-DNS cache, block-event parser, rule store, learning tracker |
-| `NetSentinel.Platform.Windows` | IP Helper API (TCP/UDP + owning PID, IPv4/IPv6), process resolver + signer name, Firewall block log, Windows Firewall enforcer |
-| `NetSentinel.Spike` | Console version of the same data (`--watch`, `--blocks`), handy for quick checks |
+| `NetSentinel.App` | **WPF UI front-end**: Real-time traffic, Programs, Rules, DNS sinkhole, Firewall blocks, First-Run Wizard, Update Checker |
+| `NetSentinel.Core` | Platform-independent models, rule planners (IPv4 + IPv6), DNS engine, IPC protocol, update checker, logging, settings |
+| `NetSentinel.Platform.Windows` | Native IP Helper, native Authenticode verification (WinVerifyTrust + CryptCATAdmin), real-time WFP drop events, Firewall enforcer |
+| `NetSentinel.Engine` | **Windows Service**: Background LocalSystem coordinator for firewall enforcement, WFP events, and DNS sinkholing |
+| `installer/` | Inno Setup production installer script (`NetSentinel.iss`) and automated `build-package.ps1` pipeline |
+| `docs/` | User documentation: [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), [FAQ.md](FAQ.md) |
 
 ## Run it
 Open `NetSentinel.sln` in Visual Studio 2022. **`NetSentinel.App` must be the startup project** (right-click it in
@@ -29,11 +31,13 @@ Console spike: `dotnet run --project src/NetSentinel.Spike -- --watch` (also `--
 - **Block...** lets you choose *incoming + outgoing*, *outgoing only* or *incoming only*, then adds Windows Firewall rules for that exact exe. Needs Administrator.
 - **Rules view** lists every decision, including for programs that are not running, and checks that the Windows Firewall really has the matching rules (**MISSING** = they were removed outside NetSentinel). Use it to switch a decision to Allow or to Forget it.
 - **Forget decision** removes your decision and, for a block, the firewall rules.
-- **PANIC: undo all NetSentinel changes**: switches strict mode off and deletes every firewall rule NetSentinel created.
+- **PANIC: undo all NetSentinel changes**: switches strict mode off, deletes every firewall rule NetSentinel created, and restores original system DNS.
+- **Safe Recovery Mode (`--safe`)**: start with `NetSentinel.exe --safe` (or via the Start Menu shortcut "NetSentinel (Safe Recovery Mode)") to immediately restore firewall defaults, remove all rules, and restore system DNS offline without opening the main window.
+- **Windows System Tray**: right-click the shield tray icon for quick access to pause/resume DNS blocking, check for updates, or trigger Panic restore.
 - Windows system programs (anything under the Windows folder) cannot be blocked from here yet.
 - Careful with shared components: blocking something like `msedgewebview2.exe` also breaks every app that uses it (for example the new Outlook).
 - Every rule NetSentinel creates is in the Windows Firewall group **NetSentinel** (visible in "Windows Defender Firewall with Advanced Security"; the name starts with `NetSentinel block`). Deleting that group by hand also undoes everything.
-- Your decisions are stored in `%LocalAppData%\NetSentinel\rules.json`.
+- Your decisions and settings are stored in `%ProgramData%\NetSentinel` (with automatic migration from `%LocalAppData%\NetSentinel`).
 
 ## Blocking exactly what you want (Block... dialog)
 - **Direction**: incoming and outgoing, outgoing only, or incoming only.
