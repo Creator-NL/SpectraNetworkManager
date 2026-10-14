@@ -24,6 +24,7 @@ public partial class App : System.Windows.Application
         }
 
         // 3. First-Run Wizard check
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var settingsStore = new AppSettingsStore();
         if (!settingsStore.Settings.FirstRunCompleted)
         {
@@ -39,6 +40,7 @@ public partial class App : System.Windows.Application
         // 4. Launch main application window
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
         mainWindow.Show();
     }
 
