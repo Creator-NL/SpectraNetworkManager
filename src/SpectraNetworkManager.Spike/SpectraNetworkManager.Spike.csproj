@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SpectraNetworkManager.Core\SpectraNetworkManager.Core.csproj" />
+    <ProjectReference Include="..\SpectraNetworkManager.Platform.Windows\SpectraNetworkManager.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-name: NetSentinel CI
+name: SpectraNetworkManager CI
 
 on:
   push:
@@ -20,14 +20,14 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Run Core Tests on Linux
-        run: dotnet test tests/NetSentinel.Tests/NetSentinel.Tests.csproj -c Release --logger "trx;LogFileName=test-results-linux.trx"
+        run: dotnet test tests/SpectraNetworkManager.Tests/SpectraNetworkManager.Tests.csproj -c Release --logger "trx;LogFileName=test-results-linux.trx"
 
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-linux
-          path: tests/NetSentinel.Tests/TestResults/test-results-linux.trx
+          path: tests/SpectraNetworkManager.Tests/TestResults/test-results-linux.trx
 
   windows-build-and-test:
     name: Solution Build & Tests (Windows)
@@ -42,18 +42,18 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Build Full Solution (WPF + Core + Platform + Tests)
-        run: dotnet build NetSentinel.sln -c Release
+        run: dotnet build SpectraNetworkManager.sln -c Release
 
       - name: Run All Tests (Elevated Runner)
-        run: dotnet test NetSentinel.sln -c Release --no-build --logger "trx;LogFileName=test-results-windows.trx"
+        run: dotnet test SpectraNetworkManager.sln -c Release --no-build --logger "trx;LogFileName=test-results-windows.trx"
         env:
           CI: "true"
 
-      - name: Publish NetSentinel App
-        run: dotnet publish src/NetSentinel.App/NetSentinel.App.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish/NetSentinel
+      - name: Publish SpectraNetworkManager App
+        run: dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish/SpectraNetworkManager
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetSentinel-win-x64
-          path: publish/NetSentinel/
+          name: SpectraNetworkManager-win-x64
+          path: publish/SpectraNetworkManager/

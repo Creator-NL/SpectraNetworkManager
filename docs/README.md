@@ -1,4 +1,4 @@
-# NetSentinel (working name)
+﻿# SpectraNetworkManager (working name)
 
 Windows network monitor + per-application firewall + DNS sinkhole, written in C# / .NET 8 (works in Visual Studio 2022 17.8+).
 
@@ -6,38 +6,38 @@ Windows network monitor + per-application firewall + DNS sinkhole, written in C#
 
 | Project / Component | Purpose |
 |---|---|
-| `NetSentinel.App` | **WPF UI front-end**: Real-time traffic, Programs, Rules, DNS sinkhole, Firewall blocks, First-Run Wizard, Update Checker |
-| `NetSentinel.Core` | Platform-independent models, rule planners (IPv4 + IPv6), DNS engine, IPC protocol, update checker, logging, settings |
-| `NetSentinel.Platform.Windows` | Native IP Helper, native Authenticode verification (WinVerifyTrust + CryptCATAdmin), real-time WFP drop events, Firewall enforcer |
-| `NetSentinel.Engine` | **Windows Service**: Background LocalSystem coordinator for firewall enforcement, WFP events, and DNS sinkholing |
-| `installer/` | Inno Setup production installer script (`NetSentinel.iss`) and automated `build-package.ps1` pipeline |
+| `SpectraNetworkManager.App` | **WPF UI front-end**: Real-time traffic, Programs, Rules, DNS sinkhole, Firewall blocks, First-Run Wizard, Update Checker |
+| `SpectraNetworkManager.Core` | Platform-independent models, rule planners (IPv4 + IPv6), DNS engine, IPC protocol, update checker, logging, settings |
+| `SpectraNetworkManager.Platform.Windows` | Native IP Helper, native Authenticode verification (WinVerifyTrust + CryptCATAdmin), real-time WFP drop events, Firewall enforcer |
+| `SpectraNetworkManager.Engine` | **Windows Service**: Background LocalSystem coordinator for firewall enforcement, WFP events, and DNS sinkholing |
+| `installer/` | Inno Setup production installer script (`SpectraNetworkManager.iss`) and automated `build-package.ps1` pipeline |
 | `docs/` | User documentation: [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), [FAQ.md](FAQ.md) |
 
 ## Run it
-Open `NetSentinel.sln` in Visual Studio 2022. **`NetSentinel.App` must be the startup project** (right-click it in
+Open `SpectraNetworkManager.sln` in Visual Studio 2022. **`SpectraNetworkManager.App` must be the startup project** (right-click it in
 Solution Explorer -> *Set as Startup Project*); class libraries such as Core cannot be started directly.
 Then press F5.
 
-For the full picture run Visual Studio (or the built `NetSentinel.exe`) **as Administrator**: system services then show
+For the full picture run Visual Studio (or the built `SpectraNetworkManager.exe`) **as Administrator**: system services then show
 their program names, and the Firewall blocks view can read the Security log.
 
-Console spike: `dotnet run --project src/NetSentinel.Spike -- --watch` (also `--all`, `--blocks`, `--blocks --packets`).
+Console spike: `dotnet run --project src/SpectraNetworkManager.Spike -- --watch` (also `--all`, `--blocks`, `--blocks --packets`).
 
 ## Learning mode, Ask mode and decisions
 - Nothing is blocked automatically. Programs that reach the internet without a decision are marked **NEW** (magenta) in the Programs view and announced once in the live events list (amber `!`).
 - **Ask mode** (checkbox, on by default): when such a program appears, a bar at the top asks **Allow / Block... / Later** and the taskbar button flashes.
-  NetSentinel cannot pause the program's very first connection (that would need a kernel driver), so the question comes right after it. Programs already running when NetSentinel starts are not asked about, and Windows' own programs are listed but never asked about.
+  SpectraNetworkManager cannot pause the program's very first connection (that would need a kernel driver), so the question comes right after it. Programs already running when SpectraNetworkManager starts are not asked about, and Windows' own programs are listed but never asked about.
 - **Allow** records "this program is OK" (Windows already allows it; nothing changes in the firewall).
 - **Block...** lets you choose *incoming + outgoing*, *outgoing only* or *incoming only*, then adds Windows Firewall rules for that exact exe. Needs Administrator.
-- **Rules view** lists every decision, including for programs that are not running, and checks that the Windows Firewall really has the matching rules (**MISSING** = they were removed outside NetSentinel). Use it to switch a decision to Allow or to Forget it.
+- **Rules view** lists every decision, including for programs that are not running, and checks that the Windows Firewall really has the matching rules (**MISSING** = they were removed outside SpectraNetworkManager). Use it to switch a decision to Allow or to Forget it.
 - **Forget decision** removes your decision and, for a block, the firewall rules.
-- **PANIC: undo all NetSentinel changes**: switches strict mode off, deletes every firewall rule NetSentinel created, and restores original system DNS.
-- **Safe Recovery Mode (`--safe`)**: start with `NetSentinel.exe --safe` (or via the Start Menu shortcut "NetSentinel (Safe Recovery Mode)") to immediately restore firewall defaults, remove all rules, and restore system DNS offline without opening the main window.
+- **PANIC: undo all SpectraNetworkManager changes**: switches strict mode off, deletes every firewall rule SpectraNetworkManager created, and restores original system DNS.
+- **Safe Recovery Mode (`--safe`)**: start with `SpectraNetworkManager.exe --safe` (or via the Start Menu shortcut "SpectraNetworkManager (Safe Recovery Mode)") to immediately restore firewall defaults, remove all rules, and restore system DNS offline without opening the main window.
 - **Windows System Tray**: right-click the shield tray icon for quick access to pause/resume DNS blocking, check for updates, or trigger Panic restore.
 - Windows system programs (anything under the Windows folder) cannot be blocked from here yet.
 - Careful with shared components: blocking something like `msedgewebview2.exe` also breaks every app that uses it (for example the new Outlook).
-- Every rule NetSentinel creates is in the Windows Firewall group **NetSentinel** (visible in "Windows Defender Firewall with Advanced Security"; the name starts with `NetSentinel block`). Deleting that group by hand also undoes everything.
-- Your decisions and settings are stored in `%ProgramData%\NetSentinel` (with automatic migration from `%LocalAppData%\NetSentinel`).
+- Every rule SpectraNetworkManager creates is in the Windows Firewall group **SpectraNetworkManager** (visible in "Windows Defender Firewall with Advanced Security"; the name starts with `SpectraNetworkManager block`). Deleting that group by hand also undoes everything.
+- Your decisions and settings are stored in `%ProgramData%\SpectraNetworkManager` (with automatic migration from `%LocalAppData%\SpectraNetworkManager`).
 
 ## Blocking exactly what you want (Block... dialog)
 - **Direction**: incoming and outgoing, outgoing only, or incoming only.
@@ -54,7 +54,7 @@ Console spike: `dotnet run --project src/NetSentinel.Spike -- --watch` (also `--
 - If creating the rules fails half-way, the ones already created are removed again, so a program is never left half-blocked.
 
 ## DNS sinkhole (DNS tab) - the Pi-hole part
-A DNS server inside NetSentinel: it answers the DNS questions of your PC (and optionally your network), **blocks** names on block lists, caches answers and forwards everything else
+A DNS server inside SpectraNetworkManager: it answers the DNS questions of your PC (and optionally your network), **blocks** names on block lists, caches answers and forwards everything else
 to your upstream servers (default Quad9 9.9.9.9 and Cloudflare 1.1.1.1; change them in the settings).
 
 - **Start**: DNS tab > *Start DNS server*. Then *Update block lists* (downloads the lists from the settings; the default is the StevenBlack unified hosts list).
@@ -68,31 +68,31 @@ to your upstream servers (default Quad9 9.9.9.9 and Cloudflare 1.1.1.1; change t
   Chrome/Edge have a "Secure DNS" setting that can bypass any local DNS; set it to your system DNS if you want it filtered.
 - **Query log + statistics**: the last 5000 queries, totals, top blocked / queried domains and clients. *Always allow/block selected* turns a log line into a rule, effective at once.
 - **Using it on this PC (manual for now)**: set the DNS server of your network adapter to `127.0.0.1` and keep your old DNS server as the *second* one.
-  If NetSentinel is not running, Windows falls back to the second server after a short delay, so your internet keeps working. (Step 3b automates this, with a one-click restore.)
+  If SpectraNetworkManager is not running, Windows falls back to the second server after a short delay, so your internet keeps working. (Step 3b automates this, with a one-click restore.)
 - **Using it for your whole home network**: set the listen address to `0.0.0.0`, press *Allow local network* (Windows Firewall rules for TCP/UDP on the DNS port, only from your local
   subnet and only on Private/Domain networks), then set your router's DNS server (or a device's) to this PC's IP address. The PC has to be on for that to work.
-- **Strict mode**: NetSentinel itself is always allowed, so its upstream queries and list downloads keep working.
-- **Headless**: `NetSentinel.Spike --dns` runs the same server in a console (options `--port`, `--listen`, `--upstream IP[:port]`, `--block a.com,b.com`, `--update`), also on Linux.
+- **Strict mode**: SpectraNetworkManager itself is always allowed, so its upstream queries and list downloads keep working.
+- **Headless**: `SpectraNetworkManager.Spike --dns` runs the same server in a console (options `--port`, `--listen`, `--upstream IP[:port]`, `--block a.com,b.com`, `--update`), also on Linux.
 - Not in this step: DNS-over-HTTPS/TLS upstreams, DNSSEC validation (answers are passed through unvalidated), a persistent query history, per-client rules, a DHCP server.
 
 ## Strict mode (block by default) - opt-in
 Strict mode switches Windows Firewall's default for *outgoing* connections to BLOCK on all profiles. Only programs with an allow rule can connect out:
 your own Allow decisions, verified programs from publishers you trust, and a short list of Windows basics (the Windows kernel "System", `svchost.exe`,
-`lsass.exe`, the Windows Defender services and NetSentinel itself). Windows' built-in Core Networking rules (DHCP, DNS, IPv6) stay in place.
+`lsass.exe`, the Windows Defender services and SpectraNetworkManager itself). Windows' built-in Core Networking rules (DHCP, DNS, IPv6) stay in place.
 Incoming connections are not changed (Windows already blocks them by default).
 
 **Safety net**
-- Before anything changes, the previous firewall defaults and a "pending" marker are saved to `%LocalAppData%\NetSentinel\strict-mode.json`.
+- Before anything changes, the previous firewall defaults and a "pending" marker are saved to `%LocalAppData%\SpectraNetworkManager\strict-mode.json`.
 - After switching on you have **60 seconds to confirm** that your network works ("Keep strict mode"). A connection check runs automatically (it fetches Microsoft's
   tiny connect-test page, the same one Windows uses). Pressing Enter, closing the window or letting the time run out all switch strict mode **off** again.
-- If NetSentinel crashes or is closed before you confirm, strict mode is switched off at the next start (as Administrator).
+- If SpectraNetworkManager crashes or is closed before you confirm, strict mode is switched off at the next start (as Administrator).
 - If a basic rule cannot be created, everything is rolled back and strict mode is not switched on.
-- **PANIC** (Programs and Rules views): switches strict mode off first, then removes every firewall rule NetSentinel created.
+- **PANIC** (Programs and Rules views): switches strict mode off first, then removes every firewall rule SpectraNetworkManager created.
 - Manual way out, in an administrator command prompt: `netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound`
 
 **How it works day to day**
 - When enabling you can allow all programs that are online right now (recommended) so nothing you use stops at once.
-- A program without permission is blocked. NetSentinel reads the block from the Security log (needs auditing, see below) and shows it in the Ask bar:
+- A program without permission is blocked. SpectraNetworkManager reads the block from the Security log (needs auditing, see below) and shows it in the Ask bar:
   **Allow** creates the allow rule (the program has to retry), **Later** leaves it blocked, **Block...** adds an explicit block.
 - Programs with a decision "Allowed" or from a trusted publisher get their allow rule automatically when they are first blocked.
 - Allow rules are per exe path: a program that updates into a new folder is asked about again unless its publisher is trusted.
@@ -101,7 +101,7 @@ Incoming connections are not changed (Windows already blocks them by default).
 
 ## Signatures and trust
 - **SIGNER** is now *verified* by Windows' own Authenticode check (it understands embedded signatures and the catalog signatures most system files use),
-  run in the background in small batches and remembered in `%LocalAppData%\NetSentinel\signature-cache.json` (re-checked when the file changes or after 14 days).
+  run in the background in small batches and remembered in `%LocalAppData%\SpectraNetworkManager\signature-cache.json` (re-checked when the file changes or after 14 days).
   Certificate revocation is not queried (no network calls).
   - `✔ Publisher` = valid signature. `(Windows)` = signed as part of Windows itself.
   - `not signed` = nobody vouches for it (normal for small tools and your own builds).
@@ -123,7 +123,7 @@ subcategory GUIDs, so they work on every Windows language; the English names suc
 auditpol /set /subcategory:"{0CCE9226-69AE-11D9-BED3-505054503030}" /failure:enable
 auditpol /set /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}" /failure:enable
 ```
-The first one (blocked connections) is what NetSentinel needs; the second (individual dropped packets) is only for `--packets`.
+The first one (blocked connections) is what SpectraNetworkManager needs; the second (individual dropped packets) is only for `--packets`.
 Blocked attempts are written to the Security log, so a program that retries all the time makes the log busier.
 
 ## Roadmap

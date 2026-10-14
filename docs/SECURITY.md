@@ -1,16 +1,16 @@
-# NetSentinel Security Architecture & Policy
+﻿# SpectraNetworkManager Security Architecture & Policy
 
-**Project:** NetSentinel  
+**Project:** SpectraNetworkManager  
 **Maintainer:** Biohazard Corp / Creator-NL  
-**Repository:** https://github.com/Creator-NL/NetSentinel  
+**Repository:** https://github.com/Creator-NL/SpectraNetworkManager  
 
 ---
 
 ## 1. Security Philosophy
 
-Because NetSentinel inspects low-level networking data, manages Windows Firewall rules, and interacts with system-level network configurations, the application itself is built as a high-security target:
+Because SpectraNetworkManager inspects low-level networking data, manages Windows Firewall rules, and interacts with system-level network configurations, the application itself is built as a high-security target:
 
-1. **Least Privilege Architecture:** The GUI front-end runs in user context; privileged actions (firewall manipulation, DNS binding on port 53) are handled through the Windows Service (`NetSentinel.Engine`) or when explicitly run elevated.
+1. **Least Privilege Architecture:** The GUI front-end runs in user context; privileged actions (firewall manipulation, DNS binding on port 53) are handled through the Windows Service (`SpectraNetworkManager.Engine`) or when explicitly run elevated.
 2. **Access-Controlled IPC:** Named Pipe communication between GUI clients and the background engine is protected by Windows Security Descriptors, restricted exclusively to `LocalSystem` and the `Builtin\Administrators` group.
 3. **No Unsafe Interprocess Execution:** Antivirus-flagged techniques (such as running base64-encoded PowerShell scripts to inspect certificates) have been completely removed. All signature checking is performed via native Windows APIs (`WinVerifyTrust`, `CryptCATAdmin*`).
 4. **Resilience to Hostile Input:** The DNS sinkhole parser, wire decoding, and event logs are strictly bounds-checked and fuzz-tested with randomized inputs to ensure buffer overflow and crash resistance.
@@ -20,7 +20,7 @@ Because NetSentinel inspects low-level networking data, manages Windows Firewall
 
 ## 2. Threat Model & Mitigations
 
-| Threat | Potential Impact | NetSentinel Mitigation |
+| Threat | Potential Impact | SpectraNetworkManager Mitigation |
 | :--- | :--- | :--- |
 | **Tampered / Malicious Binary** | Unauthorized network exfiltration | Native Authenticode verification checks both embedded signatures and Windows catalog signatures (`CryptCATAdmin`). |
 | **Malicious IPC Client** | Unauthorized firewall or DNS manipulation | The Named Pipe server enforces strict Access Control Lists (ACLs); non-administrator unprivileged processes cannot send commands to the engine. |
@@ -37,7 +37,7 @@ We welcome security researchers and community members reporting security vulnera
 ### Responsible Disclosure Guidelines
 * **Do NOT report security vulnerabilities via public GitHub issues.**
 * Please submit security advisories privately via **GitHub Security Advisories** on the repository:  
-  `https://github.com/Creator-NL/NetSentinel/security/advisories`
+  `https://github.com/Creator-NL/SpectraNetworkManager/security/advisories`
 * Alternatively, contact the maintainer directly through the GitHub profile (`Creator-NL`).
 
 ### Our Commitment

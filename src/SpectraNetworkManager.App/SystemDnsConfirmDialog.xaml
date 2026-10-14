@@ -1,0 +1,20 @@
+﻿<Window x:Class="SpectraNetworkManager.Ui.SystemDnsConfirmDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="System DNS: is your network still working?" SizeToContent="Height" Width="660"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
+    <StackPanel Margin="22">
+        <TextBlock Text="System DNS is pointing to SpectraNetworkManager. Is your network working?" FontSize="18" FontWeight="SemiBold"
+                   Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
+        <TextBlock Margin="0,10,0,0" TextWrapping="Wrap"
+                   Text="SpectraNetworkManager has pointed your network adapters to the local DNS sinkhole. Try browsing a website to confirm you still have internet access. If you do nothing or close this dialog, SpectraNetworkManager will automatically restore your original DNS when the timer runs out."/>
+        <TextBlock x:Name="CountdownText" Margin="0,16,0,0" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+        <TextBlock x:Name="ProbeText" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                   Text="Checking DNS resolution through local sinkhole and Windows resolver..."/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Keep SpectraNetworkManager DNS" Click="OnKeep" Margin="0,0,10,0" Foreground="{StaticResource Cyan}"/>
+            <Button Content="Restore original DNS now" IsCancel="True" IsDefault="True" Foreground="{StaticResource Magenta}"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

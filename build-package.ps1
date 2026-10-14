@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Configuration = "Release"
 )
@@ -6,12 +6,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host " NetSentinel Release and Packaging Pipeline" -ForegroundColor Cyan
+Write-Host " SpectraNetworkManager Release and Packaging Pipeline" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # 1. Run all tests
 Write-Host "`n[1/4] Running automated test suite..." -ForegroundColor Yellow
-dotnet test NetSentinel.sln -c $Configuration
+dotnet test SpectraNetworkManager.sln -c $Configuration
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Tests failed! Aborting package build."
     exit $LASTEXITCODE
@@ -24,8 +24,8 @@ if (Test-Path "publish") {
     Remove-Item -Recurse -Force "publish"
 }
 
-dotnet publish src/NetSentinel.App/NetSentinel.App.csproj -c $Configuration -r win-x64 --self-contained false -o publish/app
-dotnet publish src/NetSentinel.Engine/NetSentinel.Engine.csproj -c $Configuration -r win-x64 --self-contained false -o publish/engine
+dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained false -o publish/app
+dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained false -o publish/engine
 Write-Host "Published win-x64 binaries to publish/." -ForegroundColor Green
 
 # 3. Compile Inno Setup installer
@@ -55,9 +55,9 @@ if (-not $isccPath) {
     Write-Warning "Inno Setup compiler (ISCC.exe) not found. Skipping installer exe creation."
 } else {
     Write-Host "Using Inno Setup compiler: $isccPath" -ForegroundColor DarkGray
-    $proc = Start-Process -FilePath $isccPath -ArgumentList "installer\NetSentinel.iss" -Wait -NoNewWindow -PassThru
+    $proc = Start-Process -FilePath $isccPath -ArgumentList "installer\SpectraNetworkManager.iss" -Wait -NoNewWindow -PassThru
     if ($proc.ExitCode -eq 0) {
-        Write-Host "Installer created at installer\output\NetSentinel-Setup-v1.0.0.exe" -ForegroundColor Green
+        Write-Host "Installer created at installer\output\SpectraNetworkManager-Setup-v1.0.0.exe" -ForegroundColor Green
     } else {
         Write-Error "Inno Setup compilation failed with exit code $($proc.ExitCode)."
         exit $proc.ExitCode
@@ -66,7 +66,7 @@ if (-not $isccPath) {
 
 # 4. Compute SHA-256 checksums
 Write-Host "`n[4/4] Generating SHA-256 checksums..." -ForegroundColor Yellow
-$installerExe = "installer\output\NetSentinel-Setup-v1.0.0.exe"
+$installerExe = "installer\output\SpectraNetworkManager-Setup-v1.0.0.exe"
 if (Test-Path $installerExe) {
     $hash = Get-FileHash $installerExe -Algorithm SHA256
     $hashText = "$($hash.Hash)  $($hash.Path | Split-Path -Leaf)"
