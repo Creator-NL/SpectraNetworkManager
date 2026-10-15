@@ -27,6 +27,7 @@ You can test SpectraNetworkManager directly in your browser without installing a
 | `SpectraNetworkManager.Engine` | **Windows Service**: Background LocalSystem coordinator for firewall enforcement, WFP events, and DNS sinkholing |
 | `installer/` | Inno Setup production installer script (`SpectraNetworkManager.iss`) and automated `build-package.ps1` pipeline |
 | `docs/` | User documentation: [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), [FAQ.md](FAQ.md) |
+| Community | [CONTRIBUTING.md](../CONTRIBUTING.md), [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md), [ACCESSIBILITY.md](../ACCESSIBILITY.md) |
 
 ## Run it
 Open `SpectraNetworkManager.sln` in Visual Studio 2022. **`SpectraNetworkManager.App` must be the startup project** (right-click it in
