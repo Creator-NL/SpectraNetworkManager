@@ -1,4 +1,4 @@
-﻿# SpectraNetworkManager Frequently Asked Questions (FAQ)
+# SpectraNetworkManager Frequently Asked Questions (FAQ)
 
 ---
 
@@ -75,3 +75,9 @@ To uninstall SpectraNetworkManager:
 1. Open Windows **Settings** > **Installed apps** (or Control Panel > Programs and Features).
 2. Select **SpectraNetworkManager** and click **Uninstall**.
 3. The SpectraNetworkManager uninstaller automatically executes safe cleanup: it removes all SpectraNetworkManager firewall rules, restores outbound defaults to Allow, restores your original network adapter DNS settings, stops and removes the background service, and asks if you wish to retain or delete your local rule files and history database.
+
+---
+
+### 11. Can I try out SpectraNetworkManager before downloading?
+**Yes.** You can test the interactive connection monitor, firewall rule generator, DNS sinkhole simulator, and strict mode safety countdown directly in your browser at [https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html). Visit [https://biohazard-corp.nl](https://biohazard-corp.nl) for more free tools and updates.
+

@@ -1,6 +1,21 @@
-﻿# SpectraNetworkManager
+# SpectraNetworkManager
 
 Windows network monitor + per-application firewall + DNS sinkhole, written in C# / .NET 8 (works in Visual Studio 2022 17.8+).
+
+> [!TIP]
+> **Try the Interactive Online Demo:** Test core functions right in your web browser before downloading or installing!  
+> 🌐 **[https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html)**  
+> 🏠 Official Hub: **[https://biohazard-corp.nl](https://biohazard-corp.nl)**
+
+## 🌐 Live Interactive Demo & Official Website
+
+You can test SpectraNetworkManager directly in your browser without installing anything:
+- 🔗 **Interactive Web Demo & Simulator**: [https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html)
+  - **Live Connection Monitor**: Experience real-time connection inspection and test Allow / Block actions.
+  - **Interactive Rule Builder**: Experiment with protocol, port, and address filter rule generation.
+  - **DNS Sinkhole Simulator**: Test domain blocking, wildcard rules, and CNAME cloaking defenses.
+  - **Strict Mode Simulation**: Experience the 60-second safety rollback countdown mechanism.
+- 🏠 **Official Website**: [https://biohazard-corp.nl](https://biohazard-corp.nl) — explore more software, updates, and community projects.
 
 ## Status: Phase 4 - Release Readiness & Packaging Complete
 
