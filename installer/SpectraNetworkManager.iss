@@ -1,4 +1,4 @@
-﻿; SpectraNetworkManager Inno Setup Script
+; SpectraNetworkManager Inno Setup Script
 ; Production installer packaging for Windows 10 & 11 (x64)
 ; Biohazard Corp / Creator-NL
 
@@ -34,6 +34,7 @@ UsedUserAreasWarning=no
 CloseApplications=force
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=app.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

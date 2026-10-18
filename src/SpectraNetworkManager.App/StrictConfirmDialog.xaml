@@ -1,8 +1,9 @@
-﻿<Window x:Class="SpectraNetworkManager.Ui.StrictConfirmDialog"
+<Window x:Class="SpectraNetworkManager.Ui.StrictConfirmDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Strict mode: is your network still working?" SizeToContent="Height" Width="640"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        Icon="app.ico"
         Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
     <StackPanel Margin="22">
         <TextBlock Text="Strict mode is ON. Is your network still working?" FontSize="18" FontWeight="SemiBold"

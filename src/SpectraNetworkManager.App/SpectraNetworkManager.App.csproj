@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -10,8 +10,13 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="app.ico" />
+    <Resource Include="app.png" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\SpectraNetworkManager.Core\SpectraNetworkManager.Core.csproj" />
     <ProjectReference Include="..\SpectraNetworkManager.Platform.Windows\SpectraNetworkManager.Platform.Windows.csproj" />
