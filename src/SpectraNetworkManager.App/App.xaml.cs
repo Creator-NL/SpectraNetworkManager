@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Security.Principal;
 using System.Windows;
 using SpectraNetworkManager.Core;
@@ -37,7 +37,25 @@ public partial class App : System.Windows.Application
             }
         }
 
-        // 4. Launch main application window
+        // 4. Check for 'Always start as administrator' preference
+        bool forceStandard = e.Args.Any(a =>
+            string.Equals(a, "--normal", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "--standard", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "-normal", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "-standard", StringComparison.OrdinalIgnoreCase));
+
+        if (!forceStandard && settingsStore.Settings.AlwaysStartAsAdministrator && !ElevationHelper.IsAdministrator())
+        {
+            string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
+            if (ElevationHelper.StartProcessElevated(exe, string.Join(" ", e.Args)))
+            {
+                Shutdown(0);
+                return;
+            }
+            RotatingFileLogger.LogInfo("Administrator elevation prompt declined by user; continuing in standard user mode.");
+        }
+
+        // 5. Launch main application window
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         ShutdownMode = ShutdownMode.OnMainWindowClose;

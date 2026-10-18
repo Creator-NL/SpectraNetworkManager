@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Windows;
@@ -19,6 +19,7 @@ public partial class FirstRunWizardWindow : Window
     public FirstRunWizardWindow()
     {
         InitializeComponent();
+        AlwaysAdminCheckBox.IsChecked = _settingsStore.Settings.AlwaysStartAsAdministrator || ElevationHelper.IsAdministrator();
         UpdateStepUi();
     }
 
@@ -90,16 +91,20 @@ public partial class FirstRunWizardWindow : Window
             SelectedMode = "WatchOnly";
         }
 
+        bool alwaysAdmin = AlwaysAdminCheckBox.IsChecked == true;
         var current = _settingsStore.Settings;
         var updated = current with
         {
             FirstRunCompleted = true,
-            InitialOperatingMode = SelectedMode
+            InitialOperatingMode = SelectedMode,
+            AlwaysStartAsAdministrator = alwaysAdmin
         };
 
         try
         {
             _settingsStore.Save(updated);
+            string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
+            ElevationHelper.SetAlwaysRunAsAdminRegistry(exe, alwaysAdmin);
         }
         catch (Exception ex)
         {

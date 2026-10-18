@@ -22,6 +22,14 @@
                            Foreground="{StaticResource Cyan}"/>
                 <TextBlock Text="  //  live network monitor" FontSize="14" Foreground="{StaticResource Magenta}"
                            VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                <Border x:Name="AdminStateBadge" Margin="18,0,0,4" Padding="10,2" VerticalAlignment="Bottom"
+                        Background="{StaticResource Selected}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" CornerRadius="3"
+                        ToolTip="Current privilege mode. Click 'Switch' to change modes.">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="AdminStateIcon" Text="🛡️ " FontSize="11" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="AdminStateText" Text="ADMINISTRATOR" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" VerticalAlignment="Center" FontSize="12"/>
+                    </StackPanel>
+                </Border>
                 <Border x:Name="DnsBadge" Visibility="Collapsed" Margin="18,0,0,4" Padding="10,2" VerticalAlignment="Bottom"
                         Background="{StaticResource Selected}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" CornerRadius="3">
                     <TextBlock Text="DNS ON" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
@@ -32,6 +40,8 @@
                 </Border>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="SwitchElevationButton" Content="Restart in Normal Mode" Margin="0,0,10,0" Click="OnSwitchElevationClick"
+                        ToolTip="Restart SpectraNetworkManager in standard user mode without Administrator privileges."/>
                 <Button x:Name="UpdateBadge" Content="Update Available" Visibility="Collapsed" Margin="0,0,10,0"
                         Foreground="{StaticResource Cyan}" Click="OnUpdateBadgeClick" ToolTip="Click to view update details on GitHub"/>
                 <Button x:Name="CheckUpdatesButton" Content="Check for Updates" Margin="0,0,10,0" Click="OnCheckUpdatesClick"
@@ -85,6 +95,9 @@
             <CheckBox x:Name="AskMode" Content="Ask about new programs" IsChecked="True"
                       VerticalAlignment="Center" Checked="OnAskModeChanged" Unchecked="OnAskModeChanged"
                       ToolTip="Shows an Allow / Block question when a program without a decision first reaches the internet. Nothing is blocked until you answer Block."/>
+            <CheckBox x:Name="AlwaysAdminCheck" Content="Always run as admin"
+                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnAlwaysAdminChanged" Unchecked="OnAlwaysAdminChanged"
+                      ToolTip="When checked, SpectraNetworkManager will automatically request Administrator elevation on launch."/>
         </WrapPanel>
 
         <!-- Ask mode: decision bar -->
@@ -627,6 +640,8 @@
             <Button DockPanel.Dock="Right" Content="Copy Support Info" Padding="10,2" Margin="10,0,0,0" FontSize="11"
                     Foreground="{StaticResource Cyan}" Click="OnCopySupportInfo"
                     ToolTip="Copies a sanitized system and SpectraNetworkManager diagnostics report to clipboard with personal user paths redacted."/>
+            <TextBlock x:Name="StatusAdminIndicator" DockPanel.Dock="Right" Text="[ Mode: Administrator ]" FontSize="11"
+                       Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="10,0,14,0"/>
             <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" Text="Starting..." VerticalAlignment="Center"/>
         </DockPanel>
     </Grid>

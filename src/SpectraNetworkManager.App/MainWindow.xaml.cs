@@ -118,6 +118,7 @@ public partial class MainWindow : Window
             if (_sink.Settings.AutoStart && _engineClient == null) await StartDnsAsync();
             await RefreshAdaptersListAsync();
             UpdateDnsSwitchUi();
+            UpdateElevationUi();
 
             if (_appSettings.Settings.InitialOperatingMode == "AskMode")
             {
@@ -2287,6 +2288,16 @@ public partial class MainWindow : Window
             menu.Items.Add("Panic: Revert All Changes", null, async (_, _) => await TriggerPanicAsync());
             menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
+            if (_isAdmin)
+            {
+                menu.Items.Add("Switch to Normal Mode", null, (_, _) => Dispatcher.Invoke(() => OnSwitchElevationClick(this, new RoutedEventArgs())));
+            }
+            else
+            {
+                menu.Items.Add("Switch to Administrator", null, (_, _) => Dispatcher.Invoke(() => OnSwitchElevationClick(this, new RoutedEventArgs())));
+            }
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
             menu.Items.Add("Check for Updates", null, async (_, _) => await CheckUpdatesAsync(manual: true));
             menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
@@ -2654,9 +2665,137 @@ public partial class MainWindow : Window
         }
     }
 
-    private static bool IsAdministrator()
+    private void UpdateElevationUi()
     {
-        using var identity = WindowsIdentity.GetCurrent();
-        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        if (_isAdmin)
+        {
+            AdminStateIcon.Text = "🛡️ ";
+            AdminStateText.Text = "ADMINISTRATOR";
+            AdminStateText.Foreground = (Brush)FindResource("Cyan");
+            AdminStateBadge.BorderBrush = (Brush)FindResource("Cyan");
+            AdminStateBadge.ToolTip = "Running with full Administrator privileges.\nFirewall rules, driver monitoring, and system DNS can be modified directly.";
+
+            SwitchElevationButton.Content = "👤 Switch to Normal Mode";
+            SwitchElevationButton.Foreground = (Brush)FindResource("Text");
+            SwitchElevationButton.ToolTip = "Restart SpectraNetworkManager in standard user mode without Administrator privileges.";
+
+            StatusAdminIndicator.Text = "[ Privilege: Administrator ]";
+            StatusAdminIndicator.Foreground = (Brush)FindResource("Cyan");
+        }
+        else
+        {
+            AdminStateIcon.Text = "👤 ";
+            AdminStateText.Text = "STANDARD USER";
+            AdminStateText.Foreground = (Brush)FindResource("Amber");
+            AdminStateBadge.BorderBrush = (Brush)FindResource("Amber");
+            AdminStateBadge.ToolTip = "Running in Standard User mode.\nSystem firewall rules and system DNS changes require Administrator privileges.";
+
+            SwitchElevationButton.Content = "🛡️ Switch to Administrator";
+            SwitchElevationButton.Foreground = (Brush)FindResource("Cyan");
+            SwitchElevationButton.ToolTip = "Restart SpectraNetworkManager with full Administrator privileges (prompts UAC elevation).";
+
+            StatusAdminIndicator.Text = "[ Privilege: Standard User ]";
+            StatusAdminIndicator.Foreground = (Brush)FindResource("Amber");
+        }
+
+        AlwaysAdminCheck.IsChecked = _appSettings.Settings.AlwaysStartAsAdministrator;
     }
+
+    private void OnSwitchElevationClick(object sender, RoutedEventArgs e)
+    {
+        string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
+
+        if (!_isAdmin)
+        {
+            var res = MessageBox.Show(this,
+                "Restart SpectraNetworkManager with Administrator privileges?\n\n" +
+                "Windows will show a User Account Control (UAC) prompt to elevate.",
+                "Switch to Administrator Mode",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (res != MessageBoxResult.Yes) return;
+
+            if (ElevationHelper.StartProcessElevated(exe))
+            {
+                _isExiting = true;
+                _trayIcon?.Dispose();
+                System.Windows.Application.Current.Shutdown(0);
+            }
+        }
+        else
+        {
+            if (_appSettings.Settings.AlwaysStartAsAdministrator)
+            {
+                var res = MessageBox.Show(this,
+                    "SpectraNetworkManager is currently set to 'Always run as admin'.\n\n" +
+                    "To switch to Normal mode, would you like to disable 'Always run as admin'?",
+                    "Switch to Normal Mode",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Question);
+
+                if (res == MessageBoxResult.Cancel) return;
+
+                if (res == MessageBoxResult.Yes)
+                {
+                    _appSettings.Save(_appSettings.Settings with { AlwaysStartAsAdministrator = false });
+                    ElevationHelper.SetAlwaysRunAsAdminRegistry(exe, false);
+                    AlwaysAdminCheck.IsChecked = false;
+
+                    if (ElevationHelper.StartProcessUnelevated(exe))
+                    {
+                        _isExiting = true;
+                        _trayIcon?.Dispose();
+                        System.Windows.Application.Current.Shutdown(0);
+                    }
+                }
+                else if (res == MessageBoxResult.No)
+                {
+                    if (ElevationHelper.StartProcessUnelevated(exe, "--normal"))
+                    {
+                        _isExiting = true;
+                        _trayIcon?.Dispose();
+                        System.Windows.Application.Current.Shutdown(0);
+                    }
+                }
+            }
+            else
+            {
+                var res = MessageBox.Show(this,
+                    "Restart SpectraNetworkManager in Normal (Standard User) mode?",
+                    "Switch to Normal Mode",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (res != MessageBoxResult.Yes) return;
+
+                if (ElevationHelper.StartProcessUnelevated(exe))
+                {
+                    _isExiting = true;
+                    _trayIcon?.Dispose();
+                    System.Windows.Application.Current.Shutdown(0);
+                }
+            }
+        }
+    }
+
+    private void OnAlwaysAdminChanged(object sender, RoutedEventArgs e)
+    {
+        bool enable = AlwaysAdminCheck.IsChecked == true;
+        if (enable == _appSettings.Settings.AlwaysStartAsAdministrator) return;
+
+        var updated = _appSettings.Settings with { AlwaysStartAsAdministrator = enable };
+        try
+        {
+            _appSettings.Save(updated);
+            string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
+            ElevationHelper.SetAlwaysRunAsAdminRegistry(exe, enable);
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogError("Failed to save AlwaysStartAsAdministrator setting", ex);
+        }
+    }
+
+    private static bool IsAdministrator() => ElevationHelper.IsAdministrator();
 }

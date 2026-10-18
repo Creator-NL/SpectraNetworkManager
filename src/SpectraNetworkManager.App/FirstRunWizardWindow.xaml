@@ -104,6 +104,20 @@
                         </RadioButton>
                     </Border>
 
+                    <!-- Option: Always start as administrator -->
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,12">
+                        <CheckBox x:Name="AlwaysAdminCheckBox" VerticalAlignment="Center">
+                            <StackPanel Margin="6,0,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🛡️ Always start as Administrator" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                    <TextBlock Text=" (Recommended to save time)" FontSize="11.5" Foreground="{StaticResource Amber}" Margin="6,1,0,0"/>
+                                </StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0" Foreground="{StaticResource Muted}"
+                                           Text="Automatically prompt for Administrator elevation on startup so firewall rules, driver telemetry, and network controls are always fully operational."/>
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+
                     <TextBlock Text="BUILT-IN SAFETY NETS" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,4,0,4"/>
                     <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Muted}" LineHeight="17"
                                Text="• 60-Second Revert: Switching to Strict Mode or System DNS starts a 60s rollback timer; if not confirmed, it reverts automatically.&#x0a;• PANIC Button: Available on the top bar and system tray menu to instantly reset all firewall and DNS changes.&#x0a;• Safe Recovery Mode: Start SpectraNetworkManager with --safe (or use the Start menu shortcut) to revert all changes offline."/>

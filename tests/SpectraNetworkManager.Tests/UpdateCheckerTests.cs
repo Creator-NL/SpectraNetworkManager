@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using SpectraNetworkManager.Core;
 
@@ -121,11 +121,13 @@ public sealed class UpdateCheckerTests
             var store = new AppSettingsStore(tempFile);
             Assert.False(store.Settings.FirstRunCompleted);
             Assert.Equal("WatchOnly", store.Settings.InitialOperatingMode);
+            Assert.False(store.Settings.AlwaysStartAsAdministrator);
 
             var updated = store.Settings with
             {
                 FirstRunCompleted = true,
                 InitialOperatingMode = "AskMode",
+                AlwaysStartAsAdministrator = true,
                 CheckForUpdatesOnStartup = true
             };
             store.Save(updated);
@@ -133,6 +135,7 @@ public sealed class UpdateCheckerTests
             var reloaded = new AppSettingsStore(tempFile);
             Assert.True(reloaded.Settings.FirstRunCompleted);
             Assert.Equal("AskMode", reloaded.Settings.InitialOperatingMode);
+            Assert.True(reloaded.Settings.AlwaysStartAsAdministrator);
             Assert.True(reloaded.Settings.CheckForUpdatesOnStartup);
         }
         finally

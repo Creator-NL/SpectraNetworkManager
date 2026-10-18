@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace SpectraNetworkManager.Core;
@@ -7,6 +7,7 @@ public sealed record AppSettings
 {
     public bool FirstRunCompleted { get; init; }
     public string InitialOperatingMode { get; init; } = "WatchOnly"; // "WatchOnly", "AskMode", "StrictMode"
+    public bool AlwaysStartAsAdministrator { get; init; }
     public bool CheckForUpdatesOnStartup { get; init; } = true;
     public DateTimeOffset? LastUpdateCheck { get; init; }
 }

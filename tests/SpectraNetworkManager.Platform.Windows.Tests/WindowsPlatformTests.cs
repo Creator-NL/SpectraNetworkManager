@@ -128,4 +128,33 @@ public class WindowsPlatformTests
         Assert.False(TcpConnectionTerminator.KillProcess(0));
         Assert.False(TcpConnectionTerminator.KillProcess(999999999));
     }
+
+    [Fact]
+    public void ElevationHelper_IsAdministrator_ReturnsBooleanWithoutThrowing()
+    {
+        bool isAdmin = ElevationHelper.IsAdministrator();
+        using var identity = WindowsIdentity.GetCurrent();
+        bool expected = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        Assert.Equal(expected, isAdmin);
+    }
+
+    [Fact]
+    public void ElevationHelper_RegistryAppCompatFlags_EnablesAndDisablesCleanly()
+    {
+        string dummyPath = @"C:\FakeApp_Test_" + Guid.NewGuid().ToString("N") + @"\test.exe";
+        try
+        {
+            Assert.False(ElevationHelper.IsAlwaysRunAsAdminRegistry(dummyPath));
+
+            ElevationHelper.SetAlwaysRunAsAdminRegistry(dummyPath, true);
+            Assert.True(ElevationHelper.IsAlwaysRunAsAdminRegistry(dummyPath));
+
+            ElevationHelper.SetAlwaysRunAsAdminRegistry(dummyPath, false);
+            Assert.False(ElevationHelper.IsAlwaysRunAsAdminRegistry(dummyPath));
+        }
+        finally
+        {
+            ElevationHelper.SetAlwaysRunAsAdminRegistry(dummyPath, false);
+        }
+    }
 }
