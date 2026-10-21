@@ -70,26 +70,41 @@ Console spike: `dotnet run --project src/SpectraNetworkManager.Spike -- --watch`
 - If creating the rules fails half-way, the ones already created are removed again, so a program is never left half-blocked.
 
 ## DNS sinkhole (DNS tab) - the Pi-hole part
-A DNS server inside SpectraNetworkManager: it answers the DNS questions of your PC (and optionally your network), **blocks** names on block lists, caches answers and forwards everything else
-to your upstream servers (default Quad9 9.9.9.9 and Cloudflare 1.1.1.1; change them in the settings).
+A high-performance DNS sinkhole and resolver inside SpectraNetworkManager: it intercepts DNS lookups from your PC (and optionally other devices on your home network), **blocks** ads, trackers, and telemetry before they reach your network, caches responses in memory, and forwards legitimate requests to encrypted upstream resolvers.
 
-- **Start**: DNS tab > *Start DNS server*. Then *Update block lists* (downloads the lists from the settings; the default is the StevenBlack unified hosts list).
-  Check it from a command prompt: `nslookup ads.example.com 127.0.0.1` (or `nslookup -port=5353 ...` when you use another port).
-  The *Check* box next to the buttons tells you what the filter would do with a domain, without sending a query.
-- **Lists**: hosts files, plain domain lists and Adblock-style `||domain^` rules are understood. A listed domain also blocks its subdomains. Your *Always allow* list wins over everything.
-  Single labels (a bare `com`), IP addresses and `localhost`-style entries are never blocked.
-- **Blocked names** get `0.0.0.0` / `::` (default; programs fail at once) or "does not exist" (NXDOMAIN). Other record types (HTTPS and so on) get an empty answer.
-- **Aliases**: a harmless-looking name that is only a CNAME alias for a blocked name is blocked too (switchable).
-- **Browsers**: Firefox's "use-application-dns.net" check is answered with "does not exist", which tells Firefox to keep using this DNS server instead of its own DNS-over-HTTPS.
-  Chrome/Edge have a "Secure DNS" setting that can bypass any local DNS; set it to your system DNS if you want it filtered.
-- **Query log + statistics**: the last 5000 queries, totals, top blocked / queried domains and clients. *Always allow/block selected* turns a log line into a rule, effective at once.
-- **Using it on this PC (manual for now)**: set the DNS server of your network adapter to `127.0.0.1` and keep your old DNS server as the *second* one.
-  If SpectraNetworkManager is not running, Windows falls back to the second server after a short delay, so your internet keeps working. (Step 3b automates this, with a one-click restore.)
-- **Using it for your whole home network**: set the listen address to `0.0.0.0`, press *Allow local network* (Windows Firewall rules for TCP/UDP on the DNS port, only from your local
-  subnet and only on Private/Domain networks), then set your router's DNS server (or a device's) to this PC's IP address. The PC has to be on for that to work.
-- **Strict mode**: SpectraNetworkManager itself is always allowed, so its upstream queries and list downloads keep working.
-- **Headless**: `SpectraNetworkManager.Spike --dns` runs the same server in a console (options `--port`, `--listen`, `--upstream IP[:port]`, `--block a.com,b.com`, `--update`), also on Linux.
-- Not in this step: DNS-over-HTTPS/TLS upstreams, DNSSEC validation (answers are passed through unvalidated), a persistent query history, per-client rules, a DHCP server.
+### Key Capabilities:
+- **Instant Startup & Local Cache**: Downloaded blocklists are stored persistently in `%ProgramData%\SpectraNetworkManager\blocklists` and parsed into memory immediately on startup (83,000+ domains ready in milliseconds with zero re-downloading required across app updates).
+- **Interactive Domain Intelligence Inspector**:
+  - Click any row in the DNS log (or right-click) to open the domain intelligence panel.
+  - Automatically classifies domains into: **Advertising & Trackers**, **Operating System Telemetry**, **Media Streaming**, **CDN Infrastructure**, **Social Media Trackers**, or **Core System & Security**.
+  - Provides actionable safety advice: **Safe to Block** (Magenta), **Caution: May Break Features** (Amber - e.g. `googlevideo.com` carries video stream segments), **Essential: Keep Allowed** (Cyan - e.g. Cloudflare / Akamai / SSL CAs), or **Manually Blocked by You**.
+  - Direct 1-click actions: `[ 🚫 Always Block ]`, `[ 🛡️ Always Allow ]`, `[ ✕ Remove from Blocklist (Undo) ]`, `[ 🌐 Search Online (VirusTotal) ]`, and `[ 📋 Copy Domain ]`.
+- **Dedicated Custom Rules & Blocklist Manager**:
+  - Click **`[ 🛡️ Custom Rules ]`** on the DNS toolbar to open the full manager window.
+  - View, search, and manage all domains you have personally blocked or allowed.
+  - 1-click `[ ✕ Remove ]` button to undo any accidental block immediately.
+  - Quick-add input box to block or whitelist any domain.
+  - Subscription lists inspector showing local file paths, file sizes, last modified times, and a 1-click `[ 📁 Open Folder in Explorer ]` button.
+- **1-Click System DNS Switch with 60-Second Safety Rollback**:
+  - One-click configuration points selected network adapters (Wi-Fi, Ethernet) to SpectraNetworkManager (`127.0.0.1` / `::1`).
+  - Automatically backs up your previous DNS settings and starts a 60-second safety rollback timer: if unconfirmed or connectivity drops, your original DNS configuration is automatically restored!
+- **Encrypted DNS Upstreams (DoH / DoT)**:
+  - Supports modern encrypted upstreams via DNS-over-HTTPS (`https://...`) and DNS-over-TLS (`tls://...`).
+  - 1-click presets for Quad9 DoH, Cloudflare DoH, Google DoH, Quad9 DoT, and standard IP resolvers.
+  - Real-time upstream health checks, latency measurement (in ms), and automatic failover.
+- **Persistent SQLite Query History & CSV Export**:
+  - High-throughput background SQLite database (`dns-history.db`) recording queries without slowing DNS lookups.
+  - Export query history to CSV with custom date-range filters.
+  - Configurable retention auto-pruning (e.g. keep logs for 7, 30, or 90 days).
+  - Privacy controls: Anonymize client IP addresses (masking last octet) and redact sensitive domain names (`[redacted]`).
+  - Working **`Clear log`** button that wipes the displayed table, memory counters, and database cleanly for testing.
+- **Browser DoH Bypass Protection**:
+  - Automatically answers Firefox's canary query (`use-application-dns.net`) with NXDOMAIN, instructing Firefox not to bypass local DNS.
+  - Includes settings guidance for Chrome and Edge to ensure browser queries flow through the sinkhole.
+- **Network-Wide Protection**:
+  - Set listen address to `0.0.0.0` and click *Allow local network* to let other devices (phones, tablets, smart TVs, or your router) use this PC as their network-wide ad blocker.
+- **Headless & Linux Console**:
+  - `SpectraNetworkManager.Spike --dns` runs the exact same DNS sinkhole engine in a console (with options `--port`, `--listen`, `--upstream`, `--block`, `--update`), fully supported on both Windows and Linux.
 
 ## Strict mode (block by default) - opt-in
 Strict mode switches Windows Firewall's default for *outgoing* connections to BLOCK on all profiles. Only programs with an allow rule can connect out:

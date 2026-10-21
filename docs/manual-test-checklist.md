@@ -1,4 +1,4 @@
-﻿# SpectraNetworkManager Manual Pre-Release Test Checklist
+# SpectraNetworkManager Manual Pre-Release Test Checklist
 
 This checklist covers Windows-specific platform features that cannot be fully verified in automated headless environments (Windows Defender Firewall COM integration, WFP audit logging, strict-mode countdown watchdogs, and live DNS sinkholing).
 
@@ -68,6 +68,9 @@ This checklist covers Windows-specific platform features that cannot be fully ve
 | **5.7** | Test RFC 8482 ANY handling:<br>Send ANY query for `example.com`. | Server answers with minimal `HINFO` RR (CPU `RFC8482`), mitigating DNS amplification. | [ ] |
 | **5.8** | **Open Resolver Protection:** Set listen address to `0.0.0.0`, save and restart. Query from a simulated non-private/external IP. | Server returns `REFUSED` (Rcode 5). Activity log records `Refused` ("query from public/untrusted client IP refused"). | [ ] |
 | **5.9** | **Pause Blocking:** Click **Pause blocking** -> select **Pause for 5 minutes**. | Button updates to `Resume (04:59)` in amber. Cache flushes. Querying `doubleclick.net` now succeeds. Clicking `Resume` restores blocking immediately. | [ ] |
+| **5.10** | **Domain Intelligence Inspector:** Click any row in the live DNS query table. | Inspector panel opens below grid displaying domain categorization badge, service identity, and safety advice (e.g. Safe to block, Caution, Essential). Buttons for Always Block, Always Allow, Online Lookup, and Copy work as expected. | [ ] |
+| **5.11** | **Custom Rules Manager & 1-Click Undo:** Click **Custom Rules** on the toolbar (or select a manually blocked query in the log). | Displays all user-blocked and whitelisted domains. Clicking `[ ✕ Remove ]` immediately unblocks the domain and restores default filter behavior. | [ ] |
+| **5.12** | **Clear Log Reset:** Click **Clear log** on the DNS toolbar. | Displayed table, memory counters, and SQLite history database are emptied and remain clean until new queries arrive. | [ ] |
 
 ---
 

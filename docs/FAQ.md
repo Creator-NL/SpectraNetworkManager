@@ -81,3 +81,25 @@ To uninstall SpectraNetworkManager:
 ### 11. Can I try out SpectraNetworkManager before downloading?
 **Yes.** You can test the interactive connection monitor, firewall rule generator, DNS sinkhole simulator, and strict mode safety countdown directly in your browser at [https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html). Visit [https://biohazard-corp.nl](https://biohazard-corp.nl) for more free tools and updates.
 
+---
+
+### 12. How do I view or undo domains I have manually blocked or allowed?
+* **Directly in the Live Query Log:** Click any query in the DNS tab that you have manually blocked. The Domain Inspector at the bottom will display a **`[ 🚫 CUSTOM BLOCKED RULE ]`** badge and an amber **`[ ✕ Remove from Blocklist (Undo) ]`** button. Clicking it removes the rule and unblocks the domain immediately.
+* **Via the Custom Rules Manager:** Click **`[ 🛡️ Custom Rules ]`** on the DNS toolbar (or right-click the log and choose *Manage Custom Rules...*). This opens a dedicated window listing all domains you have personally blocked or whitelisted, complete with a real-time search filter and 1-click **Remove** buttons.
+
+---
+
+### 13. How are blocklists stored, and do I need to re-download them after an update?
+**No, you do not need to re-download them.** Downloaded subscription blocklists are stored permanently as plaintext files in `%ProgramData%\SpectraNetworkManager\blocklists\`. SpectraNetworkManager preloads these files into memory immediately on startup (83,000+ domains in milliseconds). When you install updates, existing downloaded lists and custom rules are preserved automatically.
+
+---
+
+### 14. Why do YouTube videos buffer if I block `googlevideo.com`?
+YouTube serves both advertisements and the actual video/audio stream segments from `*.googlevideo.com` servers. Blocking this domain prevents video playback or causes videos to buffer indefinitely. SpectraNetworkManager's Domain Intelligence Inspector flags `googlevideo.com` with a **Caution: May Break Features** warning to prevent accidental breakage.
+
+---
+
+### 15. How does the 60-second safety rollback protect my network connection?
+Whenever you point your network adapters (Wi-Fi, Ethernet) to SpectraNetworkManager or enable Strict Mode, SpectraNetworkManager creates a backup of your current working configuration and starts a 60-second safety timer while testing internet connectivity. If you do not click Confirm, if connectivity is lost, or if the application closes unexpectedly, all DNS and firewall settings are automatically rolled back to your previous working state.
+
+
