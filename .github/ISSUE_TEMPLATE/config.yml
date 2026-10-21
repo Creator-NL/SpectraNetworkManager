@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions, ideas and show and tell
+    url: https://github.com/Creator-NL/SpectraNetworkManager/discussions
+    about: Ask a question, share an idea, or show how you use SpectraNetworkManager. Use Issues only for bugs and concrete feature requests.
+  - name: Security vulnerability
+    url: https://github.com/Creator-NL/SpectraNetworkManager/blob/main/SECURITY.md
+    about: Please report security problems privately, as described in the security policy, and not as a public issue.
