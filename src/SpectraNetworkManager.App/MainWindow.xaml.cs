@@ -1592,6 +1592,7 @@ public partial class MainWindow : Window
     public ObservableCollection<AdapterListItem> DnsAdapters { get; } = new();
     private DnsLogEntry? _dnsLastTop;
     private bool _dnsBusy;
+    private bool _dnsHistoryLoaded;
 
     private void LoadDnsSettingsIntoUi()
     {
@@ -1871,12 +1872,22 @@ public partial class MainWindow : Window
         StatusText.Text = "DNS cache emptied.";
     }
 
-    private void OnDnsClearLog(object sender, RoutedEventArgs e)
+    private async void OnDnsClearLog(object sender, RoutedEventArgs e)
     {
-        _sink.Activity.Reset();
-        DnsRows.Clear();
-        _dnsLastTop = null;
-        RefreshDnsUi();
+        try
+        {
+            await _sink.ClearHistoryAsync();
+            DnsRows.Clear();
+            _dnsLastTop = null;
+            _dnsHistoryLoaded = true;
+            CloseDnsInspector();
+            RefreshDnsUi();
+            StatusText.Text = "DNS query log and persistent history cleared.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not clear DNS log", ex);
+        }
     }
 
     private async void OnDnsAllow(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: true);
@@ -1898,10 +1909,163 @@ public partial class MainWindow : Window
 
             LoadDnsSettingsIntoUi();
             StatusText.Text = allow ? $"{row.Domain} is always allowed now." : $"{row.Domain} is always blocked now.";
+            if (DnsInspectorPanel.Visibility == Visibility.Visible)
+            {
+                ShowDnsInspector(row with { IsBlocked = !allow, Result = allow ? "ok" : "BLOCKED" });
+            }
         }
         catch (Exception ex)
         {
             Error("Could not change the rule", ex);
+        }
+    }
+
+    private void OnDnsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            ShowDnsInspector(row);
+        }
+    }
+
+    private void OnCloseDnsInspector(object sender, RoutedEventArgs e) => CloseDnsInspector();
+
+    private void CloseDnsInspector()
+    {
+        DnsInspectorPanel.Visibility = Visibility.Collapsed;
+        DnsGrid.SelectedItem = null;
+    }
+
+    private void ShowDnsInspector(DnsRow row)
+    {
+        var analysis = DomainIntelligence.Analyze(row.Domain, row.IsBlocked, row.IsFailed);
+
+        InspectorDomainText.Text = row.Domain;
+        InspectorCategoryText.Text = analysis.CategoryName.ToUpperInvariant();
+        InspectorAdviceBadgeText.Text = analysis.AdviceTitle.ToUpperInvariant();
+
+        Brush adviceBrush;
+        Brush adviceBgBrush;
+        switch (analysis.Advice)
+        {
+            case BlockAdvice.SafeToBlock:
+                adviceBrush = (Brush)FindResource("Magenta");
+                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
+                break;
+            case BlockAdvice.CautionBreakagePossible:
+                adviceBrush = (Brush)FindResource("Amber");
+                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
+                break;
+            case BlockAdvice.EssentialKeepAllowed:
+                adviceBrush = (Brush)FindResource("Cyan");
+                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                break;
+            default:
+                adviceBrush = row.IsBlocked ? (Brush)FindResource("Magenta") : (Brush)FindResource("Cyan");
+                adviceBgBrush = row.IsBlocked
+                    ? new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
+                    : new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                break;
+        }
+
+        InspectorAdviceBadge.Background = adviceBgBrush;
+        InspectorAdviceBadgeText.Foreground = adviceBrush;
+        InspectorAdviceTitle.Foreground = adviceBrush;
+        InspectorAdviceTitle.Text = analysis.AdviceTitle + ":";
+        InspectorAdviceDetail.Text = analysis.AdviceDetail;
+
+        InspectorServiceName.Text = analysis.ServiceName;
+        InspectorDescription.Text = analysis.Description;
+
+        InspectorRootDomain.Text = analysis.RootDomain;
+        InspectorClient.Text = row.Client;
+        InspectorQueryType.Text = row.Type;
+        InspectorLatency.Text = $"{row.Ms} ms";
+        InspectorOutcome.Text = row.Result;
+
+        DnsInspectorPanel.Visibility = Visibility.Visible;
+    }
+
+    private async void OnInspectorBlock(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            await ChangeDnsRuleAsync(allow: false);
+            ShowDnsInspector(row with { IsBlocked = true, Result = "BLOCKED" });
+        }
+    }
+
+    private async void OnInspectorAllow(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            await ChangeDnsRuleAsync(allow: true);
+            ShowDnsInspector(row with { IsBlocked = false, Result = "ok" });
+        }
+    }
+
+    private void OnInspectorLookup(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            OpenDomainOnlineLookup(row.Domain);
+        }
+    }
+
+    private void OnInspectorCopy(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            CopyDomainToClipboard(row.Domain);
+        }
+    }
+
+    private async void OnDnsContextMenuBlock(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: false);
+
+    private async void OnDnsContextMenuAllow(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: true);
+
+    private void OnDnsContextMenuLookup(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            OpenDomainOnlineLookup(row.Domain);
+        }
+    }
+
+    private void OnDnsContextMenuCopy(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            CopyDomainToClipboard(row.Domain);
+        }
+    }
+
+    private void OpenDomainOnlineLookup(string domain)
+    {
+        string d = DomainFilter.Normalize(domain);
+        if (string.IsNullOrWhiteSpace(d)) return;
+        try
+        {
+            string url = $"https://www.virustotal.com/gui/domain/{Uri.EscapeDataString(d)}";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open browser for domain lookup", ex);
+        }
+    }
+
+    private void CopyDomainToClipboard(string domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(domain);
+            StatusText.Text = $"Copied '{domain}' to clipboard.";
+        }
+        catch
+        {
+            // Ignore clipboard lock errors
         }
     }
 
@@ -2209,8 +2373,9 @@ public partial class MainWindow : Window
         DnsTestButton.IsEnabled = _sink.IsRunning && !_dnsBusy;
         UpdateDnsSwitchUi();
 
-        if (DnsRows.Count == 0)
+        if (!_dnsHistoryLoaded)
         {
+            _dnsHistoryLoaded = true;
             _ = LoadInitialHistoryAsync();
         }
 

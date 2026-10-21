@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Threading.Channels;
@@ -218,6 +218,16 @@ public sealed class DnsHistoryDatabase : IDisposable
         cmd.CommandText = "DELETE FROM queries WHERE ts < datetime('now', '-' || @days || ' days');";
         cmd.Parameters.AddWithValue("@days", days);
 
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<int> ClearAllAsync(CancellationToken ct = default)
+    {
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM queries;";
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

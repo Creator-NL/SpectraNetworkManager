@@ -1,4 +1,4 @@
-﻿using SpectraNetworkManager.Sinkhole;
+using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Tests;
 
@@ -83,5 +83,24 @@ public sealed class DnsHistoryDatabaseTests : IDisposable
         Assert.Contains("Timestamp,Client,Domain,Type,Outcome,Detail,DurationMs", csv);
         Assert.Contains("\"test,domain.com\"", csv);
         Assert.Contains("\"note with \"\"quotes\"\"\"", csv);
+    }
+
+    [Fact]
+    public async Task DnsHistoryDatabase_ClearAllAsync_EmptiesAllRecords()
+    {
+        using var db = new DnsHistoryDatabase(_dbPath);
+
+        db.Enqueue(new DnsLogEntry(DateTimeOffset.Now, "127.0.0.1", "a.com", "A", DnsOutcome.Forwarded, null, 10));
+        db.Enqueue(new DnsLogEntry(DateTimeOffset.Now, "127.0.0.1", "b.com", "A", DnsOutcome.Blocked, null, 1));
+        db.Flush();
+
+        var before = await db.GetRecentEntriesAsync(10);
+        Assert.Equal(2, before.Count);
+
+        int cleared = await db.ClearAllAsync();
+        Assert.Equal(2, cleared);
+
+        var after = await db.GetRecentEntriesAsync(10);
+        Assert.Empty(after);
     }
 }

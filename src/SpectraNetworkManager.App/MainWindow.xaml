@@ -436,7 +436,8 @@
                 <Button Content="Update block lists" Click="OnDnsUpdateLists" Margin="0,0,8,6"
                         ToolTip="Downloads the lists in the settings (needs internet; with strict mode on, SpectraNetworkManager itself is allowed)."/>
                 <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
-                <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"/>
+                <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"
+                        ToolTip="Clears the displayed query log, memory counters, and database history."/>
                 <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,20,6"
                         ToolTip="Export persistent SQLite query history to a CSV file."/>
                 <Button Content="Always allow selected" Click="OnDnsAllow" Margin="0,0,8,6" ToolTip="Adds the selected log line's domain to your allow list."/>
@@ -455,29 +456,110 @@
                     <ColumnDefinition Width="390"/>
                 </Grid.ColumnDefinitions>
 
-                <DataGrid x:Name="DnsGrid" Grid.Column="0" ItemsSource="{Binding DnsRows}" SelectionMode="Single">
-                    <DataGrid.RowStyle>
-                        <Style TargetType="DataGridRow">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsBlocked}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource Magenta}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsFailed}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource Amber}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </DataGrid.RowStyle>
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="80"/>
-                        <DataGridTextColumn Header="CLIENT" Binding="{Binding Client, Mode=OneWay}" Width="120"/>
-                        <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain, Mode=OneWay}" Width="260"/>
-                        <DataGridTextColumn Header="TYPE" Binding="{Binding Type, Mode=OneWay}" Width="70"/>
-                        <DataGridTextColumn Header="RESULT" Binding="{Binding Result, Mode=OneWay}" Width="90"/>
-                        <DataGridTextColumn Header="MS" Binding="{Binding Ms, Mode=OneWay}" Width="55"/>
-                        <DataGridTextColumn Header="DETAIL" Binding="{Binding Detail, Mode=OneWay}" Width="*"/>
-                    </DataGrid.Columns>
-                </DataGrid>
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <DataGrid x:Name="DnsGrid" Grid.Row="0" ItemsSource="{Binding DnsRows}" SelectionMode="Single"
+                              SelectionChanged="OnDnsGridSelectionChanged">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="🚫 Always Block Domain" Click="OnDnsContextMenuBlock" Foreground="{StaticResource Magenta}"/>
+                                <MenuItem Header="🛡️ Always Allow Domain" Click="OnDnsContextMenuAllow" Foreground="{StaticResource Cyan}"/>
+                                <Separator/>
+                                <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnDnsContextMenuLookup"/>
+                                <MenuItem Header="📋 Copy Domain" Click="OnDnsContextMenuCopy"/>
+                                <Separator/>
+                                <MenuItem Header="🗑️ Clear DNS Log" Click="OnDnsClearLog"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource Magenta}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource Amber}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="80"/>
+                            <DataGridTextColumn Header="CLIENT" Binding="{Binding Client, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain, Mode=OneWay}" Width="260"/>
+                            <DataGridTextColumn Header="TYPE" Binding="{Binding Type, Mode=OneWay}" Width="70"/>
+                            <DataGridTextColumn Header="RESULT" Binding="{Binding Result, Mode=OneWay}" Width="90"/>
+                            <DataGridTextColumn Header="MS" Binding="{Binding Ms, Mode=OneWay}" Width="55"/>
+                            <DataGridTextColumn Header="DETAIL" Binding="{Binding Detail, Mode=OneWay}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- DOMAIN INSPECTOR / INTELLIGENCE PANEL -->
+                    <Border x:Name="DnsInspectorPanel" Grid.Row="1" Visibility="Collapsed"
+                            Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
+                            BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="14,10">
+                        <StackPanel>
+                            <!-- Header: Domain name, Category badge, Advice badge, Close button -->
+                            <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Right" Content="✕" Click="OnCloseDnsInspector"
+                                        Background="Transparent" BorderThickness="0" Foreground="{StaticResource Muted}"
+                                        Width="24" Height="24" Cursor="Hand" ToolTip="Close details"
+                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock x:Name="InspectorDomainText" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                                    <Border x:Name="InspectorCategoryBadge" CornerRadius="3" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center" Background="#2222E8FF">
+                                        <TextBlock x:Name="InspectorCategoryText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                    </Border>
+                                    <Border x:Name="InspectorAdviceBadge" CornerRadius="3" Padding="6,2" Margin="6,0,0,0" VerticalAlignment="Center" Background="#22FF2BD6">
+                                        <TextBlock x:Name="InspectorAdviceBadgeText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                                    </Border>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Service Name & Description -->
+                            <TextBlock x:Name="InspectorServiceName" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource Text}" Margin="0,0,0,2"/>
+                            <TextBlock x:Name="InspectorDescription" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                            <!-- Query Meta Details -->
+                            <WrapPanel Margin="0,0,0,8">
+                                <TextBlock Text="Root: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorRootDomain" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Client: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorClient" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Type: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorQueryType" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Latency: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorLatency" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Status: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorOutcome" FontSize="11" Foreground="{StaticResource Text}"/>
+                            </WrapPanel>
+
+                            <!-- Advice / Recommendation Box -->
+                            <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,8">
+                                <DockPanel LastChildFill="True">
+                                    <TextBlock x:Name="InspectorAdviceTitle" DockPanel.Dock="Left" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Magenta}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="InspectorAdviceDetail" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                </DockPanel>
+                            </Border>
+
+                            <!-- Action Buttons -->
+                            <WrapPanel>
+                                <Button Content="🚫 Always Block" Click="OnInspectorBlock" Margin="0,0,8,0" Foreground="{StaticResource Magenta}"
+                                        ToolTip="Adds domain to block list and immediately blocks it."/>
+                                <Button Content="🛡️ Always Allow" Click="OnInspectorAllow" Margin="0,0,8,0" Foreground="{StaticResource Cyan}"
+                                        ToolTip="Adds domain to allow list and immediately unblocks it."/>
+                                <Button Content="🌐 Search Online (VirusTotal)" Click="OnInspectorLookup" Margin="0,0,8,0"
+                                        ToolTip="Opens VirusTotal threat analysis in default web browser."/>
+                                <Button Content="📋 Copy Domain" Click="OnInspectorCopy" Margin="0,0,8,0"
+                                        ToolTip="Copies domain to clipboard."/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
                 <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">

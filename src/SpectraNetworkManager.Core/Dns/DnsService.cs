@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 
 namespace SpectraNetworkManager.Sinkhole;
 
@@ -257,4 +257,11 @@ public sealed class DnsService : IDisposable
     /// <summary>Prunes historical query log entries older than the specified number of days.</summary>
     public Task<int> PruneHistoryAsync(int days, CancellationToken ct = default) =>
         _historyDb.PruneOlderThanDaysAsync(days, ct);
+
+    /// <summary>Clears all DNS query history from SQLite database and resets in-memory activity counters.</summary>
+    public async Task ClearHistoryAsync(CancellationToken ct = default)
+    {
+        await _historyDb.ClearAllAsync(ct).ConfigureAwait(false);
+        Activity.Reset();
+    }
 }
