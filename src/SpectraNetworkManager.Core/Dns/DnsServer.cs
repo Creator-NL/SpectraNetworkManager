@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -52,7 +52,7 @@ public sealed class DnsServer : IDisposable
         _isBlockingPaused = isBlockingPaused;
         _clientAccessPolicy = clientAccessPolicy ?? new ClientAccessPolicy(settings.RestrictClientsToLocalNetwork, settings.AllowedClientRanges);
         _rateLimiter = rateLimiter ?? new DnsRateLimiter(settings.RateLimitPerSecond);
-        _groupManager = groupManager ?? new ClientGroupManager(settings.ClientGroups, filter());
+        _groupManager = groupManager ?? new ClientGroupManager(settings.ClientGroups, filter);
         _conditionalForwarder = conditionalForwarder ?? new ConditionalForwarder(settings.ConditionalForwarding);
         _historyDb = historyDb;
     }

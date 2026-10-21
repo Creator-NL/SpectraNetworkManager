@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 
 namespace SpectraNetworkManager.Sinkhole;
 
@@ -14,9 +14,10 @@ public sealed class ClientGroupManager
         public ClientGroup Group { get; }
         public List<IPAddress> SingleIps { get; } = new();
         public List<IPNetwork> Networks { get; } = new();
-        public DomainFilter Filter { get; }
+        private DomainFilter? _cachedFilter;
+        private DomainFilter? _lastBaseFilter;
 
-        public GroupRule(ClientGroup group, DomainFilter baseFilter)
+        public GroupRule(ClientGroup group)
         {
             Group = group;
             foreach (var r in group.ClientRanges)
@@ -31,16 +32,19 @@ public sealed class ClientGroupManager
                     Networks.Add(net);
                 }
             }
+        }
 
-            // Build group domain filter if group defines custom rules
-            if (group.CustomBlock.Count > 0 || group.CustomAllow.Count > 0)
-            {
-                Filter = baseFilter.WithOverrides(group.CustomBlock, group.CustomAllow);
-            }
-            else
-            {
-                Filter = baseFilter;
-            }
+        public DomainFilter GetFilter(DomainFilter baseFilter)
+        {
+            if (Group.CustomBlock.Count == 0 && Group.CustomAllow.Count == 0)
+                return baseFilter;
+
+            if (_cachedFilter is not null && ReferenceEquals(_lastBaseFilter, baseFilter))
+                return _cachedFilter;
+
+            _lastBaseFilter = baseFilter;
+            _cachedFilter = baseFilter.WithOverrides(Group.CustomBlock, Group.CustomAllow);
+            return _cachedFilter;
         }
 
         public bool Matches(IPAddress clientIp)
@@ -53,11 +57,11 @@ public sealed class ClientGroupManager
 
     private readonly List<GroupRule> _groups = new();
     private readonly ClientGroup _defaultGroup;
-    private readonly DomainFilter _baseFilter;
+    private readonly Func<DomainFilter> _baseFilterProvider;
 
-    public ClientGroupManager(IEnumerable<ClientGroup>? groups, DomainFilter baseFilter)
+    public ClientGroupManager(IEnumerable<ClientGroup>? groups, Func<DomainFilter> baseFilterProvider)
     {
-        _baseFilter = baseFilter;
+        _baseFilterProvider = baseFilterProvider;
         _defaultGroup = new ClientGroup { Name = "Default", BlockingEnabled = true };
 
         if (groups is not null)
@@ -70,25 +74,31 @@ public sealed class ClientGroupManager
                 }
                 else
                 {
-                    _groups.Add(new GroupRule(g, baseFilter));
+                    _groups.Add(new GroupRule(g));
                 }
             }
         }
+    }
+
+    public ClientGroupManager(IEnumerable<ClientGroup>? groups, DomainFilter baseFilter)
+        : this(groups, () => baseFilter)
+    {
     }
 
     public (ClientGroup Group, DomainFilter Filter, bool BlockingEnabled) GetGroupForClient(IPAddress clientIp)
     {
         // Unmap IPv4-mapped IPv6 addresses if needed
         var targetIp = clientIp.IsIPv4MappedToIPv6 ? clientIp.MapToIPv4() : clientIp;
+        var baseFilter = _baseFilterProvider();
 
         foreach (var rule in _groups)
         {
             if (rule.Matches(targetIp))
             {
-                return (rule.Group, rule.Filter, rule.Group.BlockingEnabled);
+                return (rule.Group, rule.GetFilter(baseFilter), rule.Group.BlockingEnabled);
             }
         }
 
-        return (_defaultGroup, _baseFilter, _defaultGroup.BlockingEnabled);
+        return (_defaultGroup, baseFilter, _defaultGroup.BlockingEnabled);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Tests;
@@ -113,5 +113,55 @@ public sealed class ClientGroupTests
         var ansAdult = await server.HandleAsync(query, new IPEndPoint(IPAddress.Parse("192.168.1.50"), 50000), tcp: false, CancellationToken.None);
         Assert.NotNull(ansAdult);
         Assert.Equal(IPAddress.Parse("9.9.9.9"), DnsWire.AddressAnswers(ansAdult)[0]);
+    }
+
+    [Fact]
+    public async Task ClientGroups_DynamicallyUpdatesWhenFilterChangesWithoutServerRestart()
+    {
+        var currentFilter = DomainFilter.Empty;
+
+        var settings = new DnsSettings();
+
+        var fakeUpstream = new FakeUpstream
+        {
+            Handler = (raw, _) => DnsWire.BuildResponse(
+                DnsQuery.TryParse(raw, out var q, out string _) ? q! : null!,
+                DnsRcode.NoError,
+                new[] { (DnsType.A, new byte[] { 142, 251, 142, 206 }) }
+            )
+        };
+
+        var cache = new DnsCache(100);
+        var activity = new DnsActivity();
+
+        using var server = new DnsServer(
+            settings,
+            () => currentFilter,
+            fakeUpstream,
+            cache,
+            activity,
+            clientAccessPolicy: new ClientAccessPolicy(restrictToLocal: false)
+        );
+
+        byte[] query = DnsWire.BuildQuery("doubleclick.net", DnsType.A, 0x3333);
+        var clientEp = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 50000);
+
+        // 1. Initially filter is empty -> query should be allowed & resolved upstream
+        var ansBefore = await server.HandleAsync(query, clientEp, tcp: false, CancellationToken.None);
+        Assert.NotNull(ansBefore);
+        var ipsBefore = DnsWire.AddressAnswers(ansBefore);
+        Assert.Equal(IPAddress.Parse("142.251.142.206"), ipsBefore[0]);
+
+        // 2. Now simulate updating block lists in background while server keeps running
+        var builder = new DomainFilterBuilder();
+        builder.AddBlock("doubleclick.net");
+        currentFilter = builder.Build();
+        cache.Clear(); // Just like DnsService.UpdateListsAsync does
+
+        // 3. Query again WITHOUT restarting DnsServer -> MUST be blocked (0.0.0.0)
+        var ansAfter = await server.HandleAsync(query, clientEp, tcp: false, CancellationToken.None);
+        Assert.NotNull(ansAfter);
+        var ipsAfter = DnsWire.AddressAnswers(ansAfter);
+        Assert.Equal(IPAddress.Any, ipsAfter[0]); // 0.0.0.0
     }
 }
