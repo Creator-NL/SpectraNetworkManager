@@ -129,6 +129,7 @@ public partial class MainWindow : Window
             if (_sink.Settings.AutoStart && _engineClient == null) await StartDnsAsync();
             await RefreshAdaptersListAsync();
             UpdateDnsSwitchUi();
+        DnsCustomRulesButton.Content = $"🛡️ Custom Rules ({_sink.Settings.CustomBlock.Count} blocked, {_sink.Settings.CustomAllow.Count} allowed)";
             UpdateElevationUi();
 
             if (_appSettings.Settings.InitialOperatingMode == "AskMode")
@@ -1942,37 +1943,77 @@ public partial class MainWindow : Window
 
         InspectorDomainText.Text = row.Domain;
         InspectorCategoryText.Text = analysis.CategoryName.ToUpperInvariant();
-        InspectorAdviceBadgeText.Text = analysis.AdviceTitle.ToUpperInvariant();
 
-        Brush adviceBrush;
-        Brush adviceBgBrush;
-        switch (analysis.Advice)
+        bool isCustomBlock = _sink.IsCustomBlocked(row.Domain);
+        bool isCustomAllow = _sink.IsCustomAllowed(row.Domain);
+
+        if (isCustomBlock)
         {
-            case BlockAdvice.SafeToBlock:
-                adviceBrush = (Brush)FindResource("Magenta");
-                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
-                break;
-            case BlockAdvice.CautionBreakagePossible:
-                adviceBrush = (Brush)FindResource("Amber");
-                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
-                break;
-            case BlockAdvice.EssentialKeepAllowed:
-                adviceBrush = (Brush)FindResource("Cyan");
-                adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
-                break;
-            default:
-                adviceBrush = row.IsBlocked ? (Brush)FindResource("Magenta") : (Brush)FindResource("Cyan");
-                adviceBgBrush = row.IsBlocked
-                    ? new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
-                    : new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
-                break;
-        }
+            InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0x2B, 0xD6));
+            InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Magenta");
+            InspectorAdviceBadgeText.Text = "CUSTOM BLOCKED RULE";
 
-        InspectorAdviceBadge.Background = adviceBgBrush;
-        InspectorAdviceBadgeText.Foreground = adviceBrush;
-        InspectorAdviceTitle.Foreground = adviceBrush;
-        InspectorAdviceTitle.Text = analysis.AdviceTitle + ":";
-        InspectorAdviceDetail.Text = analysis.AdviceDetail;
+            InspectorAdviceTitle.Foreground = (Brush)FindResource("Magenta");
+            InspectorAdviceTitle.Text = "Manually Blocked by You:";
+            InspectorAdviceDetail.Text = "This domain was explicitly added to your personal blocklist. Click 'Remove Custom Rule (Undo)' to revert.";
+
+            InspectorBlockButton.Visibility = Visibility.Collapsed;
+            InspectorAllowButton.Visibility = Visibility.Visible;
+            InspectorRemoveCustomButton.Visibility = Visibility.Visible;
+            InspectorRemoveCustomButton.Content = "✕ Remove from Blocklist (Undo)";
+        }
+        else if (isCustomAllow)
+        {
+            InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0x22, 0xE8, 0xFF));
+            InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Cyan");
+            InspectorAdviceBadgeText.Text = "CUSTOM WHITELIST RULE";
+
+            InspectorAdviceTitle.Foreground = (Brush)FindResource("Cyan");
+            InspectorAdviceTitle.Text = "Manually Whitelisted by You:";
+            InspectorAdviceDetail.Text = "This domain is explicitly whitelisted in your personal allow list. Click 'Remove Custom Rule (Undo)' to revert.";
+
+            InspectorBlockButton.Visibility = Visibility.Visible;
+            InspectorAllowButton.Visibility = Visibility.Collapsed;
+            InspectorRemoveCustomButton.Visibility = Visibility.Visible;
+            InspectorRemoveCustomButton.Content = "✕ Remove from Whitelist (Undo)";
+        }
+        else
+        {
+            InspectorBlockButton.Visibility = Visibility.Visible;
+            InspectorAllowButton.Visibility = Visibility.Visible;
+            InspectorRemoveCustomButton.Visibility = Visibility.Collapsed;
+            InspectorAdviceBadgeText.Text = analysis.AdviceTitle.ToUpperInvariant();
+
+            Brush adviceBrush;
+            Brush adviceBgBrush;
+            switch (analysis.Advice)
+            {
+                case BlockAdvice.SafeToBlock:
+                    adviceBrush = (Brush)FindResource("Magenta");
+                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
+                    break;
+                case BlockAdvice.CautionBreakagePossible:
+                    adviceBrush = (Brush)FindResource("Amber");
+                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
+                    break;
+                case BlockAdvice.EssentialKeepAllowed:
+                    adviceBrush = (Brush)FindResource("Cyan");
+                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                    break;
+                default:
+                    adviceBrush = row.IsBlocked ? (Brush)FindResource("Magenta") : (Brush)FindResource("Cyan");
+                    adviceBgBrush = row.IsBlocked
+                        ? new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
+                        : new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                    break;
+            }
+
+            InspectorAdviceBadge.Background = adviceBgBrush;
+            InspectorAdviceBadgeText.Foreground = adviceBrush;
+            InspectorAdviceTitle.Foreground = adviceBrush;
+            InspectorAdviceTitle.Text = analysis.AdviceTitle + ":";
+            InspectorAdviceDetail.Text = analysis.AdviceDetail;
+        }
 
         InspectorServiceName.Text = analysis.ServiceName;
         InspectorDescription.Text = analysis.Description;
@@ -1984,6 +2025,35 @@ public partial class MainWindow : Window
         InspectorOutcome.Text = row.Result;
 
         DnsInspectorPanel.Visibility = Visibility.Visible;
+    }
+
+    private async void OnInspectorRemoveCustom(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            await _sink.RemoveCustomRuleAsync(row.Domain);
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            ShowDnsInspector(row with { IsBlocked = false, Result = "ok" });
+            StatusText.Text = $"Removed '{row.Domain}' from custom rules (undo completed).";
+        }
+    }
+
+    private void OnOpenCustomRulesWindow(object sender, RoutedEventArgs e)
+    {
+        var win = new DnsCustomRulesWindow(_sink, () =>
+        {
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            if (DnsGrid.SelectedItem is DnsRow row)
+            {
+                ShowDnsInspector(row);
+            }
+        })
+        {
+            Owner = this
+        };
+        win.ShowDialog();
     }
 
     private async void OnInspectorBlock(object sender, RoutedEventArgs e)

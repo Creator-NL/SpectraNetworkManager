@@ -24,6 +24,7 @@ public sealed class DnsService : IDisposable
         _historyDb = new DnsHistoryDatabase(historyDbPath ?? DnsHistoryDatabase.DefaultPath);
         Settings = _store.Load();
         Cache = new DnsCache(Settings.CacheEntries);
+        ReloadFilter();
     }
 
     public static DnsService CreateDefault() => new(DnsSettingsStore.DefaultPath, BlocklistManager.DefaultFolder);
@@ -191,6 +192,34 @@ public sealed class DnsService : IDisposable
         Cache.Clear();
     }
 
+    /// <summary>Removes a domain from both custom block and custom allow lists. Takes effect immediately.</summary>
+    public async Task RemoveCustomRuleAsync(string domain)
+    {
+        string d = DomainFilter.Normalize(domain);
+        if (d.Length == 0) return;
+
+        Settings.CustomBlock.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
+        Settings.CustomAllow.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
+
+        _store.Save(Settings);
+        await Task.Run(ReloadFilter).ConfigureAwait(false);
+        Cache.Clear();
+    }
+
+    /// <summary>Checks whether the domain is explicitly present in the user's custom block list.</summary>
+    public bool IsCustomBlocked(string domain)
+    {
+        string d = DomainFilter.Normalize(domain);
+        return Settings.CustomBlock.Any(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Checks whether the domain is explicitly present in the user's custom allow list.</summary>
+    public bool IsCustomAllowed(string domain)
+    {
+        string d = DomainFilter.Normalize(domain);
+        return Settings.CustomAllow.Any(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>
     /// Sends real queries to the running server on its configured port: one normal name, and one name the filter blocks.
     /// Works on any port (Windows' nslookup only uses port 53).
@@ -221,6 +250,9 @@ public sealed class DnsService : IDisposable
         }
         return null;
     }
+
+    /// <summary>Returns the filter's decision for a domain without sending any query.</summary>
+    public FilterDecision Decide(string domain) => _filter.Decide(DomainFilter.Normalize(domain));
 
     /// <summary>Says what the filter would do with a domain, without sending any query.</summary>
     public string Check(string domain)

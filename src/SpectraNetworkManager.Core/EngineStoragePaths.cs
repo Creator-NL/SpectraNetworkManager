@@ -32,8 +32,8 @@ public static class EngineStoragePaths
     public static string StrictModePath => GetMigratedPath("strict-mode.json");
     public static string SignatureCachePath => GetMigratedPath("signature-cache.json");
     public static string DnsSettingsPath => GetMigratedPath("dns-settings.json");
-    public static string DnsHistoryPath => Path.Combine(BaseDirectory, "dns-history.db");
-    public static string NetworkHistoryPath => Path.Combine(BaseDirectory, "network-history.db");
+    public static string DnsHistoryPath => GetMigratedPath("dns-history.db");
+    public static string NetworkHistoryPath => GetMigratedPath("network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");
     public static string AppSettingsPath => GetMigratedPath("app-settings.json");
     public static string LogsDirectory
@@ -58,7 +58,49 @@ public static class EngineStoragePaths
             {
                 try { Directory.CreateDirectory(dir); } catch { }
             }
+
+            try
+            {
+                if (Directory.Exists(dir) && !Directory.EnumerateFiles(dir).Any())
+                {
+                    MigrateBlocklistsFolder(dir);
+                }
+            }
+            catch { }
+
             return dir;
+        }
+    }
+
+    private static void MigrateBlocklistsFolder(string targetDir)
+    {
+        string[] candidates = new[]
+        {
+            Path.Combine(UserBase, "blocklists"),
+            Path.Combine(CommonBase, "blocklists"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "NetSentinel", "blocklists"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetSentinel", "blocklists")
+        };
+
+        foreach (var source in candidates)
+        {
+            if (string.Equals(source, targetDir, StringComparison.OrdinalIgnoreCase)) continue;
+            if (Directory.Exists(source))
+            {
+                var files = Directory.GetFiles(source, "*.txt");
+                if (files.Length > 0)
+                {
+                    foreach (var file in files)
+                    {
+                        string dest = Path.Combine(targetDir, Path.GetFileName(file));
+                        if (!File.Exists(dest))
+                        {
+                            try { File.Copy(file, dest, overwrite: false); } catch { }
+                        }
+                    }
+                    break;
+                }
+            }
         }
     }
 

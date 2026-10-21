@@ -438,8 +438,10 @@
                 <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
                 <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"
                         ToolTip="Clears the displayed query log, memory counters, and database history."/>
-                <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,20,6"
+                <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,8,6"
                         ToolTip="Export persistent SQLite query history to a CSV file."/>
+                <Button x:Name="DnsCustomRulesButton" Content="🛡️ Custom Rules (0)" Click="OnOpenCustomRulesWindow" Margin="0,0,20,6"
+                        Foreground="{StaticResource Cyan}" ToolTip="View, search, add, or remove domains you have personally blocked or whitelisted."/>
                 <Button Content="Always allow selected" Click="OnDnsAllow" Margin="0,0,8,6" ToolTip="Adds the selected log line's domain to your allow list."/>
                 <Button Content="Always block selected" Click="OnDnsBlock" Margin="0,0,20,6" Foreground="{StaticResource Magenta}"
                         ToolTip="Adds the selected log line's domain to your block list."/>
@@ -472,6 +474,7 @@
                                 <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnDnsContextMenuLookup"/>
                                 <MenuItem Header="📋 Copy Domain" Click="OnDnsContextMenuCopy"/>
                                 <Separator/>
+                                <MenuItem Header="🛡️ Manage Custom Rules..." Click="OnOpenCustomRulesWindow"/>
                                 <MenuItem Header="🗑️ Clear DNS Log" Click="OnDnsClearLog"/>
                             </ContextMenu>
                         </DataGrid.ContextMenu>
@@ -548,10 +551,14 @@
 
                             <!-- Action Buttons -->
                             <WrapPanel>
-                                <Button Content="🚫 Always Block" Click="OnInspectorBlock" Margin="0,0,8,0" Foreground="{StaticResource Magenta}"
+                                <Button x:Name="InspectorBlockButton" Content="🚫 Always Block" Click="OnInspectorBlock" Margin="0,0,8,0" Foreground="{StaticResource Magenta}"
                                         ToolTip="Adds domain to block list and immediately blocks it."/>
-                                <Button Content="🛡️ Always Allow" Click="OnInspectorAllow" Margin="0,0,8,0" Foreground="{StaticResource Cyan}"
+                                <Button x:Name="InspectorAllowButton" Content="🛡️ Always Allow" Click="OnInspectorAllow" Margin="0,0,8,0" Foreground="{StaticResource Cyan}"
                                         ToolTip="Adds domain to allow list and immediately unblocks it."/>
+                                <Button x:Name="InspectorRemoveCustomButton" Content="✕ Remove Custom Rule (Undo)" Click="OnInspectorRemoveCustom" Margin="0,0,8,0" Foreground="{StaticResource Amber}" Visibility="Collapsed"
+                                        ToolTip="Removes this domain from your custom list and restores default filtering."/>
+                                <Button Content="🛡️ All Custom Rules..." Click="OnOpenCustomRulesWindow" Margin="0,0,8,0"
+                                        ToolTip="Open Custom Rules &amp; Blocklist Manager"/>
                                 <Button Content="🌐 Search Online (VirusTotal)" Click="OnInspectorLookup" Margin="0,0,8,0"
                                         ToolTip="Opens VirusTotal threat analysis in default web browser."/>
                                 <Button Content="📋 Copy Domain" Click="OnInspectorCopy" Margin="0,0,8,0"
