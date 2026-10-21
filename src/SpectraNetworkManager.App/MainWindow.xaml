@@ -98,6 +98,12 @@
             <CheckBox x:Name="AlwaysAdminCheck" Content="Always run as admin"
                       VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnAlwaysAdminChanged" Unchecked="OnAlwaysAdminChanged"
                       ToolTip="When checked, SpectraNetworkManager will automatically request Administrator elevation on launch."/>
+            <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"
+                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnAlwaysOnTopChanged" Unchecked="OnAlwaysOnTopChanged"
+                      ToolTip="Keep SpectraNetworkManager window on top of all other windows."/>
+            <CheckBox x:Name="NotificationSoundCheck" Content="Alert sounds"
+                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnNotificationSoundChanged" Unchecked="OnNotificationSoundChanged"
+                      ToolTip="Play alert sounds for network prompts. Uncheck to silence all notification sounds."/>
         </WrapPanel>
 
         <!-- Ask mode: decision bar -->

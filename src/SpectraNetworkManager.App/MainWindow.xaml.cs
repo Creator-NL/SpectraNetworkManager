@@ -57,6 +57,10 @@ public partial class MainWindow : Window
     private readonly AppSettingsStore _appSettings = new();
     private readonly UpdateChecker _updateChecker = new();
     private UpdateCheckResult? _lastUpdateResult;
+    private NetworkPromptToastWindow? _promptToast;
+    private System.Windows.Forms.ToolStripMenuItem? _trayAlwaysOnTopItem;
+    private System.Windows.Forms.ToolStripMenuItem? _traySoundItem;
+    private DateTimeOffset _lastSoundTime = DateTimeOffset.MinValue;
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
@@ -97,8 +101,15 @@ public partial class MainWindow : Window
 
         _dns.Resolved += OnHostResolved;
         _signatures.Verified += OnSignatureVerified;
+
+        _promptToast = new NetworkPromptToastWindow();
+        _promptToast.AllowRequested += OnToastAllow;
+        _promptToast.BlockRequested += OnToastBlock;
+        _promptToast.TrustRequested += OnToastTrust;
+        _promptToast.LaterRequested += OnToastLater;
         Closed += (_, _) =>
         {
+            _promptToast?.Close();
             _trayIcon?.Dispose();
             _etw.Dispose();
             _historyDb.Dispose();
@@ -133,6 +144,9 @@ public partial class MainWindow : Window
             {
                 _ = CheckUpdatesAsync(manual: false);
             }
+            AlwaysOnTopCheck.IsChecked = _appSettings.Settings.AlwaysOnTop;
+            Topmost = _appSettings.Settings.AlwaysOnTop;
+            NotificationSoundCheck.IsChecked = _appSettings.Settings.NotificationSoundEnabled;
 
             await TickAsync();
             _timer.Start();
@@ -461,6 +475,7 @@ public partial class MainWindow : Window
         if (_askCurrent is null)
         {
             DecisionBar.Visibility = Visibility.Collapsed;
+            _promptToast?.Hide();
             return;
         }
 
@@ -480,10 +495,16 @@ public partial class MainWindow : Window
         AskTrustButton.Content = canTrust ? $"Trust {standing.Signature!.Publisher}" : "Trust publisher";
         AskTrustButton.Visibility = canTrust ? Visibility.Visible : Visibility.Collapsed;
         DecisionBar.Visibility = Visibility.Visible;
-        if (Visibility != Visibility.Visible || WindowState == WindowState.Minimized || !IsActive)
+        if (_appSettings.Settings.InteractiveToastsEnabled)
+        {
+            _promptToast?.DisplayPrompt(s, standing, DescribePeers(s), _askQueue.Count);
+        }
+        else if (Visibility != Visibility.Visible || WindowState == WindowState.Minimized || !IsActive)
         {
             _trayIcon?.ShowBalloonTip(4000, "SpectraNetworkManager: Network Prompt", $"{s.Name} wants to reach the network. Click to review.", System.Windows.Forms.ToolTipIcon.Warning);
         }
+
+        PlayPromptSoundIfEnabled();
     }
 
     private string DescribePeers(ProgramSummary s)
@@ -516,6 +537,7 @@ public partial class MainWindow : Window
         if (!IsLoaded || AskMode.IsChecked == true) return;
         _askQueue.Clear();
         _askCurrent = null;
+        _promptToast?.Hide();
         ShowNextAsk();
     }
 
@@ -547,6 +569,113 @@ public partial class MainWindow : Window
         if (!TryTrustPublisher(StandingOf(path).Signature)) return;
         _askCurrent = null;
         AfterDecision();
+    }
+
+    private void OnToastAllow(ProgramSummary s)
+    {
+        if (s.Path is not string path) return;
+        TryAllow(path, s.Name, existing: null);
+        if (_askCurrent?.Path == path)
+        {
+            _askCurrent = null;
+        }
+        AfterDecision();
+    }
+
+    private void OnToastBlock(ProgramSummary s)
+    {
+        if (s.Path is not string path) return;
+        TryQuickBlock(path, s.Name);
+        if (_askCurrent?.Path == path)
+        {
+            _askCurrent = null;
+        }
+        AfterDecision();
+    }
+
+    private void OnToastTrust(ProgramSummary s)
+    {
+        if (s.Path is not string path) return;
+        TryTrustPublisher(StandingOf(path).Signature);
+        if (_askCurrent?.Path == path)
+        {
+            _askCurrent = null;
+        }
+        AfterDecision();
+    }
+
+    private void OnToastLater(ProgramSummary s)
+    {
+        _askCurrent = null;
+        ShowNextAsk();
+    }
+
+    private bool TryQuickBlock(string path, string name)
+    {
+        if (ProtectedPrograms.IsProtected(path, _signatures.TryGet(path), out string why))
+        {
+            Info(why);
+            return false;
+        }
+
+        if (!_isAdmin)
+        {
+            Info("Blocking changes Windows Firewall, which requires Administrator rights.\n\nRestart SpectraNetworkManager as Administrator to apply block rules.");
+            return false;
+        }
+
+        try
+        {
+            var plan = RulePlanner.Plan(RuleDirection.Both, TrafficScope.All);
+            _enforcer.Block(path, plan);
+            _ = TerminateConnectionsAsync(path);
+            _rules.Set(new ProgramRule(path, RuleAction.Block, DateTimeOffset.Now, null, RuleDirection.Both, null));
+            StatusText.Text = $"Blocked {name}: all traffic.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Error("Could not add the firewall rules", ex);
+            return false;
+        }
+    }
+
+    private void OnAlwaysOnTopChanged(object sender, RoutedEventArgs e)
+    {
+        bool enable = AlwaysOnTopCheck.IsChecked == true;
+        Topmost = enable;
+        if (enable == _appSettings.Settings.AlwaysOnTop) return;
+        _appSettings.Save(_appSettings.Settings with { AlwaysOnTop = enable });
+        if (_trayAlwaysOnTopItem != null && _trayAlwaysOnTopItem.Checked != enable)
+        {
+            _trayAlwaysOnTopItem.Checked = enable;
+        }
+    }
+
+    private void OnNotificationSoundChanged(object sender, RoutedEventArgs e)
+    {
+        bool enable = NotificationSoundCheck.IsChecked == true;
+        if (enable == _appSettings.Settings.NotificationSoundEnabled) return;
+        _appSettings.Save(_appSettings.Settings with { NotificationSoundEnabled = enable });
+        if (_traySoundItem != null && _traySoundItem.Checked != enable)
+        {
+            _traySoundItem.Checked = enable;
+        }
+    }
+
+    private void PlayPromptSoundIfEnabled()
+    {
+        if (!_appSettings.Settings.NotificationSoundEnabled) return;
+
+        var now = DateTimeOffset.Now;
+        if ((now - _lastSoundTime).TotalSeconds < 3.0) return;
+        _lastSoundTime = now;
+
+        try
+        {
+            System.Media.SystemSounds.Asterisk.Play();
+        }
+        catch { /* best effort */ }
     }
 
     // ---- decisions: allow / block / forget / panic -----------------------------------------
@@ -2252,7 +2381,10 @@ public partial class MainWindow : Window
             if (!_trayBalloonShown && _trayIcon != null)
             {
                 _trayBalloonShown = true;
-                _trayIcon.ShowBalloonTip(3000, "SpectraNetworkManager", "SpectraNetworkManager is minimized to your system tray.", System.Windows.Forms.ToolTipIcon.Info);
+                if (_appSettings.Settings.NotificationSoundEnabled)
+                {
+                    _trayIcon.ShowBalloonTip(3000, "SpectraNetworkManager", "SpectraNetworkManager is minimized to your system tray.", System.Windows.Forms.ToolTipIcon.Info);
+                }
             }
             return;
         }
@@ -2274,6 +2406,35 @@ public partial class MainWindow : Window
 
             var menu = new System.Windows.Forms.ContextMenuStrip();
             menu.Items.Add("Show SpectraNetworkManager", null, (_, _) => RestoreFromTray());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+            _trayAlwaysOnTopItem = new System.Windows.Forms.ToolStripMenuItem("Always on Top")
+            {
+                Checked = _appSettings.Settings.AlwaysOnTop,
+                CheckOnClick = true
+            };
+            _trayAlwaysOnTopItem.CheckedChanged += (_, _) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    AlwaysOnTopCheck.IsChecked = _trayAlwaysOnTopItem.Checked;
+                });
+            };
+            menu.Items.Add(_trayAlwaysOnTopItem);
+
+            _traySoundItem = new System.Windows.Forms.ToolStripMenuItem("Alert Sounds")
+            {
+                Checked = _appSettings.Settings.NotificationSoundEnabled,
+                CheckOnClick = true
+            };
+            _traySoundItem.CheckedChanged += (_, _) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    NotificationSoundCheck.IsChecked = _traySoundItem.Checked;
+                });
+            };
+            menu.Items.Add(_traySoundItem);
             menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
             var pauseDns = new System.Windows.Forms.ToolStripMenuItem("Pause DNS Blocking");
@@ -2719,7 +2880,8 @@ public partial class MainWindow : Window
             if (ElevationHelper.StartProcessElevated(exe))
             {
                 _isExiting = true;
-                _trayIcon?.Dispose();
+                _promptToast?.Close();
+            _trayIcon?.Dispose();
                 System.Windows.Application.Current.Shutdown(0);
             }
         }
@@ -2745,7 +2907,8 @@ public partial class MainWindow : Window
                     if (ElevationHelper.StartProcessUnelevated(exe))
                     {
                         _isExiting = true;
-                        _trayIcon?.Dispose();
+                        _promptToast?.Close();
+            _trayIcon?.Dispose();
                         System.Windows.Application.Current.Shutdown(0);
                     }
                 }
@@ -2754,7 +2917,8 @@ public partial class MainWindow : Window
                     if (ElevationHelper.StartProcessUnelevated(exe, "--normal"))
                     {
                         _isExiting = true;
-                        _trayIcon?.Dispose();
+                        _promptToast?.Close();
+            _trayIcon?.Dispose();
                         System.Windows.Application.Current.Shutdown(0);
                     }
                 }
@@ -2772,7 +2936,8 @@ public partial class MainWindow : Window
                 if (ElevationHelper.StartProcessUnelevated(exe))
                 {
                     _isExiting = true;
-                    _trayIcon?.Dispose();
+                    _promptToast?.Close();
+            _trayIcon?.Dispose();
                     System.Windows.Application.Current.Shutdown(0);
                 }
             }

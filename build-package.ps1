@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$Configuration = "Release"
 )
@@ -64,14 +64,31 @@ if (-not $isccPath) {
     }
 }
 
+# Create Portable ZIP package
+Write-Host "`nCreating Portable ZIP package..." -ForegroundColor Yellow
+$portableZip = "installer\output\SpectraNetworkManager-v1.0.0-Portable.zip"
+if (Test-Path $portableZip) {
+    Remove-Item -Force $portableZip
+}
+Compress-Archive -Path "publish\app\*" -DestinationPath $portableZip -CompressionLevel Optimal
+Write-Host "Portable package created at $portableZip" -ForegroundColor Green
+
 # 4. Compute SHA-256 checksums
 Write-Host "`n[4/4] Generating SHA-256 checksums..." -ForegroundColor Yellow
 $installerExe = "installer\output\SpectraNetworkManager-Setup-v1.0.0.exe"
+$hashes = @()
 if (Test-Path $installerExe) {
     $hash = Get-FileHash $installerExe -Algorithm SHA256
-    $hashText = "$($hash.Hash)  $($hash.Path | Split-Path -Leaf)"
-    Set-Content -Path "installer\output\SHA256SUMS.txt" -Value $hashText
-    Write-Host "SHA-256: $($hash.Hash)" -ForegroundColor Cyan
+    $hashes += "$($hash.Hash)  $($hash.Path | Split-Path -Leaf)"
+    Write-Host "Installer SHA-256: $($hash.Hash)" -ForegroundColor Cyan
+}
+if (Test-Path $portableZip) {
+    $zipHash = Get-FileHash $portableZip -Algorithm SHA256
+    $hashes += "$($zipHash.Hash)  $($zipHash.Path | Split-Path -Leaf)"
+    Write-Host "Portable ZIP SHA-256: $($zipHash.Hash)" -ForegroundColor Cyan
+}
+if ($hashes.Count -gt 0) {
+    Set-Content -Path "installer\output\SHA256SUMS.txt" -Value ($hashes -join "`r`n")
 }
 
 Write-Host "`n==========================================" -ForegroundColor Green

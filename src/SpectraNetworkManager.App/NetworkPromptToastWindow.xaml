@@ -1,0 +1,98 @@
+<Window x:Class="SpectraNetworkManager.Ui.NetworkPromptToastWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SpectraNetworkManager Prompt"
+        Width="440" SizeToContent="Height"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        ResizeMode="NoResize"
+        Icon="app.ico"
+        FontFamily="Segoe UI">
+    <Border x:Name="OuterBorder" Margin="10"
+            Background="{StaticResource Bg}"
+            BorderBrush="{StaticResource Cyan}"
+            BorderThickness="1.5"
+            CornerRadius="6"
+            Padding="14,12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="15" Color="#22E8FF" Opacity="0.35" ShadowDepth="2"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="⚡ " FontSize="14" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                    <TextBlock Text="NETWORK PROMPT" FontSize="13" FontWeight="Bold" FontFamily="Bahnschrift"
+                               Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                    <Border x:Name="QueueBadge" Visibility="Collapsed" Margin="10,0,0,0" Padding="6,1"
+                            Background="{StaticResource Selected}" BorderBrush="{StaticResource Magenta}" BorderThickness="1" CornerRadius="3">
+                        <TextBlock x:Name="QueueText" Text="+1 waiting" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                    </Border>
+                </StackPanel>
+
+                <Button x:Name="CloseButton" Content="✕" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                        Width="24" Height="24" Padding="0" Margin="0" FontSize="12"
+                        Foreground="{StaticResource Muted}" Background="Transparent" BorderThickness="0"
+                        ToolTip="Dismiss (Decide later)" Click="OnLaterClick"/>
+            </DockPanel>
+
+            <!-- Program & Connection Details -->
+            <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                <TextBlock x:Name="ProgramNameText" Text="Program Name" FontSize="16" FontWeight="Bold"
+                           Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="ProgramPathText" Text="C:\Path\To\Program.exe" FontSize="11"
+                           Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,2,0,6"/>
+
+                <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                        CornerRadius="4" Padding="10,8" Margin="0,0,0,4">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,4">
+                            <TextBlock Text="Destination: " FontSize="11" Foreground="{StaticResource Muted}" Width="75"/>
+                            <TextBlock x:Name="DestinationText" Text="142.250.190.46:443" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Cyan}" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                        <DockPanel>
+                            <TextBlock Text="Signer: " FontSize="11" Foreground="{StaticResource Muted}" Width="75"/>
+                            <TextBlock x:Name="SignerText" Text="Checking..." FontSize="11"
+                                       Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="WarningText" Text="⚠️ WARNING: Digital signature is not valid!"
+                           Foreground="{StaticResource Magenta}" FontWeight="SemiBold" FontSize="11" Margin="0,4,0,0"
+                           Visibility="Collapsed"/>
+            </StackPanel>
+
+            <!-- Actions -->
+            <DockPanel Grid.Row="2">
+                <Button x:Name="TrustButton" Content="Trust Publisher" DockPanel.Dock="Left"
+                        Visibility="Collapsed" Margin="0,0,8,0" Padding="10,5" FontSize="12"
+                        ToolTip="Allow and trust all programs signed by this publisher." Click="OnTrustClick"/>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="AllowButton" Content="🛡️ Allow" Margin="0,0,8,0" Padding="14,5"
+                            FontWeight="SemiBold" FontSize="12"
+                            ToolTip="Allow this program to reach the network." Click="OnAllowClick"/>
+                    <Button x:Name="BlockButton" Content="🚫 Block" Foreground="{StaticResource Magenta}"
+                            BorderBrush="{StaticResource Magenta}" Margin="0,0,8,0" Padding="14,5"
+                            FontWeight="SemiBold" FontSize="12"
+                            ToolTip="Block this program in Windows Firewall." Click="OnBlockClick"/>
+                    <Button x:Name="LaterButton" Content="Later" Foreground="{StaticResource Muted}"
+                            Padding="10,5" FontSize="12"
+                            ToolTip="Decide later. Leaves the program in NEW state." Click="OnLaterClick"/>
+                </StackPanel>
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>

@@ -8,6 +8,9 @@ public sealed record AppSettings
     public bool FirstRunCompleted { get; init; }
     public string InitialOperatingMode { get; init; } = "WatchOnly"; // "WatchOnly", "AskMode", "StrictMode"
     public bool AlwaysStartAsAdministrator { get; init; }
+    public bool AlwaysOnTop { get; init; }
+    public bool NotificationSoundEnabled { get; init; } = true;
+    public bool InteractiveToastsEnabled { get; init; } = true;
     public bool CheckForUpdatesOnStartup { get; init; } = true;
     public DateTimeOffset? LastUpdateCheck { get; init; }
 }
