@@ -149,6 +149,7 @@ public partial class MainWindow : Window
             AlwaysOnTopCheck.IsChecked = _appSettings.Settings.AlwaysOnTop;
             Topmost = _appSettings.Settings.AlwaysOnTop;
             NotificationSoundCheck.IsChecked = _appSettings.Settings.NotificationSoundEnabled;
+            DnsFallbackModeBox.IsChecked = _appSettings.Settings.DnsFallbackModeEnabled;
 
             await TickAsync();
             _timer.Start();
@@ -272,6 +273,14 @@ public partial class MainWindow : Window
                         conn.Connection.Protocol.ToString(),
                         now);
                 }
+            }
+        }
+
+        foreach (var conn in tick.Connections)
+        {
+            if (conn.Process != null && conn.Connection.Remote?.Address != null)
+            {
+                RecordProcessSocket(conn.Connection.Remote.Address.ToString(), conn.Process.Name, conn.Process.Pid);
             }
         }
 
@@ -664,6 +673,13 @@ public partial class MainWindow : Window
         {
             _traySoundItem.Checked = enable;
         }
+    }
+
+    private void OnFallbackModeChanged(object sender, RoutedEventArgs e)
+    {
+        bool enable = DnsFallbackModeBox.IsChecked == true;
+        if (enable == _appSettings.Settings.DnsFallbackModeEnabled) return;
+        _appSettings.Save(_appSettings.Settings with { DnsFallbackModeEnabled = enable });
     }
 
     private void PlayPromptSoundIfEnabled()
@@ -2009,12 +2025,21 @@ public partial class MainWindow : Window
         return client;
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Program, int Pid, DateTimeOffset LastSeen)> _recentProcessByHostOrIp = new(StringComparer.OrdinalIgnoreCase);
+
+    private void RecordProcessSocket(string hostOrIp, string program, int pid)
+    {
+        if (string.IsNullOrWhiteSpace(hostOrIp) || string.IsNullOrWhiteSpace(program)) return;
+        _recentProcessByHostOrIp[hostOrIp] = (program, pid, DateTimeOffset.UtcNow);
+    }
+
     private string ResolveInitiator(DnsRow row)
     {
         string client = row.Client;
         if (client == "127.0.0.1" || client == "::1" || client == "localhost")
         {
             string domain = row.Domain.TrimEnd('.');
+
             var matchingConn = Rows.FirstOrDefault(c =>
                 !string.IsNullOrEmpty(c.Host) && (
                     c.Host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
@@ -2026,7 +2051,27 @@ public partial class MainWindow : Window
                 return $"{matchingConn.Program} (PID {matchingConn.Pid})";
             }
 
-            return "This PC (Windows App / System)";
+            var cutoff = DateTimeOffset.UtcNow.AddMinutes(-5);
+            foreach (var kvp in _recentProcessByHostOrIp)
+            {
+                if (kvp.Value.LastSeen > cutoff)
+                {
+                    if (kvp.Key.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+                        kvp.Key.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase) ||
+                        domain.EndsWith("." + kvp.Key, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(row.Detail) && row.Detail.Contains(kvp.Key)))
+                    {
+                        return $"{kvp.Value.Program} (PID {kvp.Value.Pid})";
+                    }
+                }
+            }
+
+            if (row.IsBlocked)
+            {
+                return "This PC (Blocked Query - No Connection)";
+            }
+
+            return "This PC (Windows Service / DNS Prefetch)";
         }
 
         if (_lanDeviceNames.TryGetValue(client, out var cachedName))
@@ -2634,7 +2679,10 @@ public partial class MainWindow : Window
         {
             foreach (var row in Rows)
                 if (row.RemoteAddress is not null && row.RemoteAddress.Equals(ip))
+                {
                     row.Host = name;
+                    RecordProcessSocket(name, row.Program, row.Pid);
+                }
         }));
     }
 

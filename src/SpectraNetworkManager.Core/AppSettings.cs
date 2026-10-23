@@ -12,6 +12,7 @@ public sealed record AppSettings
     public bool NotificationSoundEnabled { get; init; } = true;
     public bool InteractiveToastsEnabled { get; init; } = true;
     public bool CheckForUpdatesOnStartup { get; init; } = true;
+    public bool DnsFallbackModeEnabled { get; init; }
     public DateTimeOffset? LastUpdateCheck { get; init; }
 }
 

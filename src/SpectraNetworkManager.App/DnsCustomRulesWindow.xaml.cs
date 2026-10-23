@@ -264,6 +264,60 @@ public partial class DnsCustomRulesWindow : Window
 
     // --- Subscriptions Tab Actions ---
 
+    private async void OnSubscribeClick(object sender, RoutedEventArgs e) => await SubscribeFromInputAsync();
+
+    private async void OnNewListUrlKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) await SubscribeFromInputAsync();
+    }
+
+    private async Task SubscribeFromInputAsync()
+    {
+        string url = NewListUrlBox.Text.Trim();
+        string name = NewListNameBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        DialogStatusText.Text = "Subscribing to blocklist and downloading domains...";
+        try
+        {
+            await _sink.AddSubscriptionListAsync(name, url);
+            NewListUrlBox.Clear();
+            NewListNameBox.Clear();
+            LoadSubscriptions();
+            _onChanged();
+            DialogStatusText.Text = $"Subscribed! Filter updated with {_sink.BlockedDomainCount:N0} total domains.";
+        }
+        catch (Exception ex)
+        {
+            DialogStatusText.Text = "Failed to add subscription: " + ex.Message;
+        }
+    }
+
+    private async void OnRemoveSubscriptionClick(object sender, RoutedEventArgs e)
+    {
+        if (SubscriptionsGrid.SelectedItem is not SubscriptionRow row)
+        {
+            MessageBox.Show(this, "Please select a subscription list from the table to remove.", "Remove Blocklist", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var res = MessageBox.Show(this, $"Are you sure you want to unsubscribe and remove '{row.Name}'?\n\nURL: {row.Url}", "Confirm Unsubscribe", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (res != MessageBoxResult.Yes) return;
+
+        DialogStatusText.Text = $"Removing '{row.Name}'...";
+        try
+        {
+            await _sink.RemoveSubscriptionListAsync(row.Url);
+            LoadSubscriptions();
+            _onChanged();
+            DialogStatusText.Text = $"Removed subscription '{row.Name}'. Total blocked domains: {_sink.BlockedDomainCount:N0}.";
+        }
+        catch (Exception ex)
+        {
+            DialogStatusText.Text = "Failed to remove subscription: " + ex.Message;
+        }
+    }
+
     private void OnOpenBlocklistsFolder(object sender, RoutedEventArgs e)
     {
         string dir = EngineStoragePaths.BlocklistsDirectory;

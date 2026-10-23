@@ -17,11 +17,12 @@
 
         <!-- Header -->
         <DockPanel Grid.Row="0">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="SPECTRANETWORKMANAGER" FontSize="26" FontWeight="Bold" FontFamily="Bahnschrift"
-                           Foreground="{StaticResource Cyan}"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Spectra" FontSize="26" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                <TextBlock Text="NetworkManager" FontSize="18" FontWeight="SemiBold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="0,0,0,1"/>
+
                 <TextBlock Text="  //  live network monitor" FontSize="14" Foreground="{StaticResource Magenta}"
-                           VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                           VerticalAlignment="Center" Margin="0,0,0,1"/>
                 <Border x:Name="AdminStateBadge" Margin="18,0,0,4" Padding="10,2" VerticalAlignment="Bottom"
                         Background="{StaticResource Selected}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" CornerRadius="3"
                         ToolTip="Current privilege mode. Click 'Switch' to change modes.">
@@ -333,7 +334,7 @@
                         <TextBlock Text="LIVE BANDWIDTH" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center"/>
                         
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="⬇ DL: " Foreground="{StaticResource Cyan}" FontWeight="SemiBold" FontSize="11"/>
 
                                 <TextBlock x:Name="LiveDownloadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Cyan}" FontWeight="SemiBold"/>
@@ -341,7 +342,7 @@
                         </Border>
 
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="⬆ UL: " Foreground="{StaticResource Magenta}" FontWeight="SemiBold" FontSize="11"/>
 
                                 <TextBlock x:Name="LiveUploadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Magenta}" FontWeight="SemiBold"/>
@@ -349,7 +350,7 @@
                         </Border>
 
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="📊 SESSION: " Foreground="{StaticResource Muted}" FontWeight="SemiBold" FontSize="11"/>
 
                                 <TextBlock x:Name="SessionTrafficText" Text="0 MB" Foreground="{StaticResource Text}" FontWeight="SemiBold"/>
@@ -493,9 +494,9 @@
                         ToolTip="Export persistent SQLite query history to a CSV file."/>
                 <Button x:Name="DnsCustomRulesButton" Content="🛡️ Custom Rules (0)" Click="OnOpenCustomRulesWindow" Margin="0,0,20,6"
                         Foreground="{StaticResource Cyan}" ToolTip="View, search, add, or remove domains you have personally blocked or whitelisted."/>
-                <Button Content="Always allow selected" Click="OnDnsAllow" Margin="0,0,8,6" ToolTip="Adds the selected log line's domain to your allow list."/>
-                <Button Content="Always block selected" Click="OnDnsBlock" Margin="0,0,20,6" Foreground="{StaticResource Magenta}"
-                        ToolTip="Adds the selected log line's domain to your block list."/>
+
+
+
                 <TextBox x:Name="DnsCheckBox" Width="220" Margin="0,0,8,6" VerticalContentAlignment="Center"
                          ToolTip="Type a domain and press Check to see what the filter would do, without sending a query."/>
                 <Button Content="Check" Click="OnDnsCheck" Margin="0,0,10,6"/>
@@ -649,7 +650,7 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
 
-                            <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="True" Margin="0,0,0,8"
+                            <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="False" Margin="0,0,0,8" Checked="OnFallbackModeChanged" Unchecked="OnFallbackModeChanged"
                                       ToolTip="Recommended. If SpectraNetworkManager is stopped, your computer can still reach your previous DNS servers."/>
 
                             <WrapPanel Margin="0,0,0,12">

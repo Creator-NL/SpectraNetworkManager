@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 
@@ -85,6 +85,55 @@ public sealed class DomainFilter
 
     public static string Normalize(string domain) => domain.Trim().TrimEnd('.').ToLowerInvariant();
 
+    public static string WildcardToRegex(string pattern)
+    {
+        string p = pattern.Trim().ToLowerInvariant();
+        string escaped = Regex.Escape(p);
+        return "^" + escaped.Replace(@"\*", ".*").Replace(@"\?", ".") + "$";
+    }
+
+    public static bool MatchesCustomRule(string rule, string domain)
+    {
+        rule = rule.Trim();
+        if (rule.Length == 0 || rule.StartsWith('#')) return false;
+
+        domain = Normalize(domain);
+
+        if (rule.Length > 2 && rule.StartsWith('/') && rule.EndsWith('/'))
+        {
+            try
+            {
+                return Regex.IsMatch(domain, rule[1..^1], RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        if (rule.Contains('*') || rule.Contains('?'))
+        {
+            if (rule.StartsWith("*.", StringComparison.Ordinal) && !rule[2..].Contains('*') && !rule[2..].Contains('?'))
+            {
+                string baseDomain = Normalize(rule[2..]);
+                return domain.Equals(baseDomain, StringComparison.OrdinalIgnoreCase) || domain.EndsWith("." + baseDomain, StringComparison.OrdinalIgnoreCase);
+            }
+
+            try
+            {
+                string rx = WildcardToRegex(rule);
+                return Regex.IsMatch(domain, rx, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        string ruleNorm = Normalize(rule);
+        return domain.Equals(ruleNorm, StringComparison.OrdinalIgnoreCase) || domain.EndsWith("." + ruleNorm, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Creates a new filter combining this filter with additional custom block and allow rules.</summary>
     public DomainFilter WithOverrides(IEnumerable<string> customBlock, IEnumerable<string> customAllow)
     {
@@ -145,7 +194,7 @@ public sealed class DomainFilterBuilder
         }
     }
 
-    /// <summary>A custom rule typed by the user: "example.com", "*.example.com" or "/regex/".</summary>
+    /// <summary>A custom rule typed by the user: "example.com", "*.example.com", "*pattern.com" or "/regex/".</summary>
     public void AddCustom(string rule, bool allow)
     {
         rule = rule.Trim();
@@ -154,6 +203,23 @@ public sealed class DomainFilterBuilder
         if (rule.Length > 2 && rule.StartsWith('/') && rule.EndsWith('/'))
         {
             AddRegex(rule[1..^1], allow);
+            return;
+        }
+
+        if (rule.Contains('*') || rule.Contains('?'))
+        {
+            if (rule.StartsWith("*.", StringComparison.Ordinal) && !rule[2..].Contains('*') && !rule[2..].Contains('?'))
+            {
+                string baseDomain = rule[2..].TrimStart('.');
+                if (TryNormalizeDomain(baseDomain, out string bd))
+                {
+                    if (allow) AddAllow(bd); else AddBlock(bd);
+                    return;
+                }
+            }
+
+            string rx = DomainFilter.WildcardToRegex(rule);
+            AddRegex(rx, allow);
             return;
         }
 

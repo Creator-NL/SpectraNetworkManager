@@ -177,6 +177,50 @@ public sealed class DnsService : IDisposable
         return results;
     }
 
+    /// <summary>Subscribes to a blocklist URL, downloads it, and activates it immediately.</summary>
+    public async Task AddSubscriptionListAsync(string name, string url, CancellationToken ct = default)
+    {
+        name = name.Trim();
+        url = url.Trim();
+        if (string.IsNullOrEmpty(url)) return;
+
+        // Auto-convert GitHub blob to raw URL
+        if (url.Contains("github.com", StringComparison.OrdinalIgnoreCase) && url.Contains("/blob/", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url.Replace("github.com", "raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+                     .Replace("/blob/", "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.IsNullOrEmpty(name))
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                name = Path.GetFileNameWithoutExtension(uri.LocalPath);
+            if (string.IsNullOrWhiteSpace(name)) name = "Custom Blocklist";
+        }
+
+        var lists = new List<BlocklistSource>(Settings.Lists);
+        lists.RemoveAll(l => string.Equals(l.Url, url, StringComparison.OrdinalIgnoreCase));
+        lists.Add(new BlocklistSource(name, url, Enabled: true));
+
+        Settings.Lists = lists;
+        _store.Save(Settings);
+
+        await UpdateListsAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Unsubscribes from a blocklist URL and reloads active rules.</summary>
+    public async Task RemoveSubscriptionListAsync(string url, CancellationToken ct = default)
+    {
+        var lists = new List<BlocklistSource>(Settings.Lists);
+        lists.RemoveAll(l => string.Equals(l.Url, url, StringComparison.OrdinalIgnoreCase));
+
+        Settings.Lists = lists;
+        _store.Save(Settings);
+
+        await Task.Run(ReloadFilter, ct).ConfigureAwait(false);
+        Cache.Clear();
+    }
+
     /// <summary>Adds a domain to your allow list (and removes it from your block list). Takes effect immediately.</summary>
     public Task AllowDomainAsync(string domain) => ChangeRuleAsync(domain, allow: true);
 
@@ -205,27 +249,21 @@ public sealed class DnsService : IDisposable
         string d = DomainFilter.Normalize(domain);
         if (d.Length == 0) return;
 
-        Settings.CustomBlock.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
-        Settings.CustomAllow.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
+        Settings.CustomBlock.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase) || DomainFilter.MatchesCustomRule(r, d));
+        Settings.CustomAllow.RemoveAll(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase) || DomainFilter.MatchesCustomRule(r, d));
 
         _store.Save(Settings);
         await Task.Run(ReloadFilter).ConfigureAwait(false);
         Cache.Clear();
     }
 
-    /// <summary>Checks whether the domain is explicitly present in the user's custom block list.</summary>
-    public bool IsCustomBlocked(string domain)
-    {
-        string d = DomainFilter.Normalize(domain);
-        return Settings.CustomBlock.Any(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
-    }
+    /// <summary>Checks whether the domain matches any user's custom block rule.</summary>
+    public bool IsCustomBlocked(string domain) =>
+        Settings.CustomBlock.Any(r => DomainFilter.MatchesCustomRule(r, domain));
 
-    /// <summary>Checks whether the domain is explicitly present in the user's custom allow list.</summary>
-    public bool IsCustomAllowed(string domain)
-    {
-        string d = DomainFilter.Normalize(domain);
-        return Settings.CustomAllow.Any(r => string.Equals(r.Trim(), d, StringComparison.OrdinalIgnoreCase));
-    }
+    /// <summary>Checks whether the domain matches any user's custom allow rule.</summary>
+    public bool IsCustomAllowed(string domain) =>
+        Settings.CustomAllow.Any(r => DomainFilter.MatchesCustomRule(r, domain));
 
     /// <summary>
     /// Sends real queries to the running server on its configured port: one normal name, and one name the filter blocks.

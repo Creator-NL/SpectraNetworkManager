@@ -1,4 +1,4 @@
-﻿using SpectraNetworkManager.Sinkhole;
+using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Tests;
 
@@ -110,5 +110,17 @@ public class DomainFilterTests
         Assert.Equal(FilterAction.Blocked, filter.Decide("telemetry.microsoft.com").Action);
         Assert.Equal(FilterAction.Blocked, filter.Decide("v10.telemetry.microsoft.com").Action);
         Assert.Equal(FilterAction.None, filter.Decide("microsoft.com").Action);
+    }
+
+    [Fact]
+    public void CustomGlobWildcard_MatchesAndBlocks()
+    {
+        var builder = new DomainFilterBuilder();
+        builder.AddCustom("*bvvbaxivnuxqabp-5hne.googlevideo.com", allow: false);
+
+        var filter = builder.Build();
+        Assert.Equal(FilterAction.Blocked, filter.Decide("r1---sn-bvvbaxivnuxqabp-5hne.googlevideo.com").Action);
+        Assert.Equal(FilterAction.Blocked, filter.Decide("bvvbaxivnuxqabp-5hne.googlevideo.com").Action);
+        Assert.Equal(FilterAction.None, filter.Decide("other-sn-1234.googlevideo.com").Action);
     }
 }
