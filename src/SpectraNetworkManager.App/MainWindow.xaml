@@ -44,8 +44,7 @@
                         ToolTip="Restart SpectraNetworkManager in standard user mode without Administrator privileges."/>
                 <Button x:Name="UpdateBadge" Content="Update Available" Visibility="Collapsed" Margin="0,0,10,0"
                         Foreground="{StaticResource Cyan}" Click="OnUpdateBadgeClick" ToolTip="Click to view update details on GitHub"/>
-                <Button x:Name="CheckUpdatesButton" Content="Check for Updates" Margin="0,0,10,0" Click="OnCheckUpdatesClick"
-                        ToolTip="Check for newer SpectraNetworkManager versions on GitHub Releases (Zero Telemetry)"/>
+                <Button x:Name="HeaderDnsButton" Content="▶ Start DNS" Margin="0,0,10,0" Padding="12,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnHeaderDnsClick" ToolTip="Quickly start or stop the DNS Sinkhole Server from any tab"/>
             </StackPanel>
         </DockPanel>
 
@@ -263,6 +262,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Traffic Toolbar & Controls -->
@@ -299,10 +299,10 @@
                     <DataGrid x:Name="TopTalkersGrid" ItemsSource="{Binding TopTalkers}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="150"/>
-                            <DataGridTextColumn Header="IN" Binding="{Binding DownloadFormatted, Mode=OneWay}" Width="90"/>
-                            <DataGridTextColumn Header="OUT" Binding="{Binding UploadFormatted, Mode=OneWay}" Width="90"/>
-                            <DataGridTextColumn Header="TOTAL" Binding="{Binding TotalFormatted, Mode=OneWay}" Width="90"/>
-                            <DataGridTextColumn Header="LAST ACTIVE" Binding="{Binding LastActiveFormatted, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="IN" Binding="{Binding DownloadFormatted, Mode=OneWay}" SortMemberPath="BytesIn" Width="90"/>
+                            <DataGridTextColumn Header="OUT" Binding="{Binding UploadFormatted, Mode=OneWay}" SortMemberPath="BytesOut" Width="90"/>
+                            <DataGridTextColumn Header="TOTAL" Binding="{Binding TotalFormatted, Mode=OneWay}" SortMemberPath="TotalBytes" Width="90"/>
+                            <DataGridTextColumn Header="LAST ACTIVE" Binding="{Binding LastActiveFormatted, Mode=OneWay}" SortMemberPath="LastActive" Width="120"/>
                             <DataGridTextColumn Header="PATH" Binding="{Binding Program, Mode=OneWay}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
@@ -319,12 +319,48 @@
                             <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="140"/>
                             <DataGridTextColumn Header="PORT" Binding="{Binding Port, Mode=OneWay}" Width="60"/>
                             <DataGridTextColumn Header="PROTO" Binding="{Binding Proto, Mode=OneWay}" Width="60"/>
-                            <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastSeenFormatted, Mode=OneWay}" Width="120"/>
-                            <DataGridTextColumn Header="FIRST SEEN" Binding="{Binding FirstSeenFormatted, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastSeenFormatted, Mode=OneWay}" SortMemberPath="LastSeen" Width="120"/>
+                            <DataGridTextColumn Header="FIRST SEEN" Binding="{Binding FirstSeenFormatted, Mode=OneWay}" SortMemberPath="FirstSeen" Width="120"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </GroupBox>
             </Grid>
+            <!-- Bottom: Live Bandwidth Card -->
+            <Border Grid.Row="2" Margin="0,8,0,0" Padding="12,8" Background="{StaticResource Surface}"
+                    BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4">
+                <DockPanel LastChildFill="True">
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                        <TextBlock Text="LIVE BANDWIDTH" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" FontSize="11" Margin="0,0,16,0" VerticalAlignment="Center"/>
+                        
+                        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="[DL]" Foreground="{StaticResource Cyan}" FontWeight="Bold"/>
+                                <TextBlock Text=" DL: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock x:Name="LiveDownloadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Cyan}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="[UL]" Foreground="{StaticResource Magenta}" FontWeight="Bold"/>
+                                <TextBlock Text=" UL: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock x:Name="LiveUploadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Magenta}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="[TOTAL]" Foreground="{StaticResource Text}"/>
+                                <TextBlock Text=" SESSION: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock x:Name="SessionTrafficText" Text="0 MB" Foreground="{StaticResource Text}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <TextBlock x:Name="LiveTrafficInterfaceText" Text="Monitoring active interfaces" Foreground="{StaticResource Muted}"
+                               FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
         </Grid>
 
         <!-- Rules view: every stored decision, whether or not the program is running -->
@@ -604,7 +640,7 @@
 
                             <CheckBox x:Name="InspectCnameBox" Content="Also block names that are only an alias of a blocked name" Margin="0,2,0,2"/>
                             <CheckBox x:Name="BlockDohBox" Content="Tell Firefox not to bypass this DNS (its DoH check)" Margin="0,2,0,2"/>
-                            <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when SpectraNetworkManager starts" Margin="0,2,0,4"/>
+                            <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when SpectraNetworkManager starts" Margin="0,2,0,4" Checked="OnAutoStartDnsChanged" Unchecked="OnAutoStartDnsChanged"/>
                             <CheckBox x:Name="RestrictClientsBox" Content="Only answer queries from local / private networks" Margin="0,2,0,4"
                                       ToolTip="Protects your PC from acting as an open resolver on the internet if listening on 0.0.0.0."/>
                             <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
@@ -732,6 +768,9 @@
 
         <!-- Status bar -->
         <DockPanel Grid.Row="4" Margin="0,10,0,0">
+            <Button x:Name="CheckUpdatesButton" DockPanel.Dock="Right" Content="Check for Updates" Padding="10,2" Margin="10,0,0,0" FontSize="11"
+                    Click="OnCheckUpdatesClick"
+                    ToolTip="Check for newer SpectraNetworkManager versions on GitHub Releases (Zero Telemetry)"/>
             <Button DockPanel.Dock="Right" Content="Copy Support Info" Padding="10,2" Margin="10,0,0,0" FontSize="11"
                     Foreground="{StaticResource Cyan}" Click="OnCopySupportInfo"
                     ToolTip="Copies a sanitized system and SpectraNetworkManager diagnostics report to clipboard with personal user paths redacted."/>

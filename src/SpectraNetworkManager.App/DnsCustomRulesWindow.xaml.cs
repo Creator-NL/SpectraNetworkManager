@@ -316,5 +316,64 @@ public partial class DnsCustomRulesWindow : Window
         catch { }
     }
 
+    private void OnExportBlocklistClick(object sender, RoutedEventArgs e)
+    {
+        var listToExport = TabAllowed.IsChecked == true
+            ? _sink.Settings.CustomAllow
+            : _sink.Settings.CustomBlock;
+
+        string listName = TabAllowed.IsChecked == true ? "custom-allowlist" : "custom-blocklist";
+        string listTitle = TabAllowed.IsChecked == true ? "Custom Whitelist" : "Custom Blocklist";
+
+        if (listToExport.Count == 0)
+        {
+            MessageBox.Show(this, $"The {listTitle.ToLowerInvariant()} is currently empty. Add domains before exporting.", "Export Rules", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var sfd = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = $"Export {listTitle}",
+            FileName = $"{listName}.txt",
+            Filter = "Hosts File (*.txt)|*.txt|Plain Domain List (*.txt)|*.txt|All Files (*.*)|*.*",
+            FilterIndex = 1,
+            DefaultExt = ".txt"
+        };
+
+        if (sfd.ShowDialog(this) != true) return;
+
+        try
+        {
+            var sb = new StringBuilder();
+            if (sfd.FilterIndex == 1) // Hosts format: 0.0.0.0 domain
+            {
+                sb.AppendLine($"# SpectraNetworkManager {listTitle}");
+                sb.AppendLine($"# Generated on: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"# Total domains: {listToExport.Count}");
+                sb.AppendLine("# Format: 0.0.0.0 <domain>");
+                sb.AppendLine();
+                foreach (var domain in listToExport.OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.AppendLine($"0.0.0.0 {domain}");
+                }
+            }
+            else // Plain domain list
+            {
+                foreach (var domain in listToExport.OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.AppendLine(domain);
+                }
+            }
+
+            File.WriteAllText(sfd.FileName, sb.ToString());
+            DialogStatusText.Text = $"Exported {listToExport.Count} domains to {Path.GetFileName(sfd.FileName)}.";
+            MessageBox.Show(this, $"Successfully exported {listToExport.Count} domains to:\n{sfd.FileName}", "Export Completed", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not export rules: {ex.Message}", "Export Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

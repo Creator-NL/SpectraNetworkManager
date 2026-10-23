@@ -162,6 +162,13 @@ public sealed class DnsService : IDisposable
         else await Task.Run(ReloadFilter).ConfigureAwait(false);
     }
 
+    /// <summary>Saves settings to disk and updates in-memory settings without restarting the DNS server.</summary>
+    public void SaveSettingsOnly(DnsSettings settings)
+    {
+        _store.Save(settings);
+        Settings = settings;
+    }
+
     public async Task<IReadOnlyList<ListUpdateResult>> UpdateListsAsync(CancellationToken ct = default)
     {
         var results = await _lists.UpdateAsync(Settings.Lists, ct).ConfigureAwait(false);

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Security.Principal;
 using System.Text;
 using System.Windows;
@@ -126,7 +127,7 @@ public partial class MainWindow : Window
             await RecoverStrictStateAsync();
             await RecoverDnsSwitchStateAsync();
             LoadDnsSettingsIntoUi();
-            if (_sink.Settings.AutoStart && _engineClient == null) await StartDnsAsync();
+            if (_sink.Settings.AutoStart) await StartDnsAsync();
             await RefreshAdaptersListAsync();
             UpdateDnsSwitchUi();
         DnsCustomRulesButton.Content = $"🛡️ Custom Rules ({_sink.Settings.CustomBlock.Count} blocked, {_sink.Settings.CustomAllow.Count} allowed)";
@@ -243,6 +244,7 @@ public partial class MainWindow : Window
             _tickCount++;
             if (StrictActive && _isAdmin && _tickCount % 2 == 0) _ = PollBlockedAsync();
             RefreshDnsUi();
+            UpdateLiveBandwidth();
         }
         catch (Exception ex)
         {
@@ -1594,9 +1596,22 @@ public partial class MainWindow : Window
     private DnsLogEntry? _dnsLastTop;
     private bool _dnsBusy;
     private bool _dnsHistoryLoaded;
+    private bool _isLoadingDnsSettings;
+
+    private void OnAutoStartDnsChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingDnsSettings) return;
+        bool enabled = AutoStartDnsBox.IsChecked == true;
+        _sink.Settings.AutoStart = enabled;
+        _sink.SaveSettingsOnly(_sink.Settings);
+        StatusText.Text = enabled ? "DNS auto-start enabled." : "DNS auto-start disabled.";
+    }
 
     private void LoadDnsSettingsIntoUi()
     {
+        _isLoadingDnsSettings = true;
+        try
+        {
         var c = _sink.Settings;
         DnsListenBox.Text = c.ListenAddress;
         DnsPortBox.Text = c.Port.ToString(CultureInfo.InvariantCulture);
@@ -1616,6 +1631,11 @@ public partial class MainWindow : Window
         CustomAllowBox.Text = string.Join("\r\n", c.CustomAllow);
         LocalRecordsBox.Text = string.Join("\r\n", c.LocalRecords.Select(r => $"{r.Domain} | {r.RecordType} | {r.Value}"));
         ConditionalForwardingBox.Text = string.Join("\r\n", c.ConditionalForwarding.Select(f => $"{f.DomainSuffix} | {f.TargetServer}"));
+        }
+        finally
+        {
+            _isLoadingDnsSettings = false;
+        }
     }
 
     private bool TryReadDnsSettings(out DnsSettings settings, out string error)
@@ -1739,6 +1759,19 @@ public partial class MainWindow : Window
         {
             _dnsBusy = false;
             RefreshDnsUi();
+        }
+    }
+
+    private async void OnHeaderDnsClick(object sender, RoutedEventArgs e)
+    {
+        if (_dnsBusy) return;
+        if (_sink.IsRunning)
+        {
+            OnDnsStop(sender, e);
+        }
+        else
+        {
+            await StartDnsAsync();
         }
     }
 
@@ -3195,6 +3228,83 @@ public partial class MainWindow : Window
         {
             RotatingFileLogger.LogError("Failed to save AlwaysStartAsAdministrator setting", ex);
         }
+    }
+    // ---- Live Bandwidth Speed Monitor --------------------------------------------------------
+
+    private long _lastTotalBytesIn;
+    private long _lastTotalBytesOut;
+    private DateTimeOffset _lastBandwidthTime = DateTimeOffset.MinValue;
+    private long _sessionBytesIn;
+    private long _sessionBytesOut;
+    private bool _bandwidthInitialized;
+
+    private void UpdateLiveBandwidth()
+    {
+        try
+        {
+            long currentIn = 0;
+            long currentOut = 0;
+            int activeAdapters = 0;
+
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                    ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+
+                var stats = ni.GetIPStatistics();
+                currentIn += stats.BytesReceived;
+                currentOut += stats.BytesSent;
+                activeAdapters++;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+
+            if (!_bandwidthInitialized)
+            {
+                _lastTotalBytesIn = currentIn;
+                _lastTotalBytesOut = currentOut;
+                _lastBandwidthTime = now;
+                _bandwidthInitialized = true;
+                return;
+            }
+
+            double seconds = (now - _lastBandwidthTime).TotalSeconds;
+            if (seconds <= 0.2) return;
+
+            long deltaIn = Math.Max(0, currentIn - _lastTotalBytesIn);
+            long deltaOut = Math.Max(0, currentOut - _lastTotalBytesOut);
+
+            _lastTotalBytesIn = currentIn;
+            _lastTotalBytesOut = currentOut;
+            _lastBandwidthTime = now;
+
+            _sessionBytesIn += deltaIn;
+            _sessionBytesOut += deltaOut;
+
+            double dlSpeedPerSec = deltaIn / seconds;
+            double ulSpeedPerSec = deltaOut / seconds;
+
+            if (TrafficTab.IsChecked == true)
+            {
+                LiveDownloadSpeedText.Text = FormatBandwidthSpeed(dlSpeedPerSec);
+                LiveUploadSpeedText.Text = FormatBandwidthSpeed(ulSpeedPerSec);
+                SessionTrafficText.Text = Display.Bytes(_sessionBytesIn + _sessionBytesOut);
+                LiveTrafficInterfaceText.Text = $"Active adapters: {activeAdapters} (DL: {Display.Bytes(_sessionBytesIn)}, UL: {Display.Bytes(_sessionBytesOut)})";
+            }
+        }
+        catch
+        {
+            // Ignore transient network interface read failures
+        }
+    }
+
+    private static string FormatBandwidthSpeed(double bytesPerSec)
+    {
+        if (bytesPerSec < 1024) return $"{bytesPerSec:F0} B/s";
+        if (bytesPerSec < 1024 * 1024) return $"{bytesPerSec / 1024.0:F1} KB/s";
+        if (bytesPerSec < 1024 * 1024 * 1024) return $"{bytesPerSec / (1024.0 * 1024.0):F2} MB/s";
+        return $"{bytesPerSec / (1024.0 * 1024.0 * 1024.0):F2} GB/s";
     }
 
     private static bool IsAdministrator() => ElevationHelper.IsAdministrator();

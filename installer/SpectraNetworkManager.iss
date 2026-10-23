@@ -3,7 +3,7 @@
 ; Biohazard Corp / Creator-NL
 
 #define MyAppName "SpectraNetworkManager"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Biohazard Corp / Creator-NL"
 #define MyAppURL "https://github.com/Creator-NL/SpectraNetworkManager"
 #define MyAppExeName "SpectraNetworkManager.exe"

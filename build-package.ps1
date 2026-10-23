@@ -5,8 +5,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Read version from Directory.Build.props
+[xml]$props = Get-Content "Directory.Build.props"
+$Version = $props.Project.PropertyGroup.Version
+if (-not $Version) { $Version = "1.0.1" }
+
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host " SpectraNetworkManager Release and Packaging Pipeline" -ForegroundColor Cyan
+Write-Host " SpectraNetworkManager v$Version Release and Packaging Pipeline" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # 1. Run all tests
@@ -19,14 +24,14 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "All test suites passed cleanly." -ForegroundColor Green
 
 # 2. Publish binaries
-Write-Host "`n[2/4] Publishing application and engine binaries..." -ForegroundColor Yellow
+Write-Host "`n[2/4] Publishing application and engine binaries (Self-Contained win-x64)..." -ForegroundColor Yellow
 if (Test-Path "publish") {
     Remove-Item -Recurse -Force "publish"
 }
 
-dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained false -o publish/app
-dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained false -o publish/engine
-Write-Host "Published win-x64 binaries to publish/." -ForegroundColor Green
+dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true -o publish/app
+dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true -o publish/engine
+Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green
 
 # 3. Compile Inno Setup installer
 Write-Host "`n[3/4] Compiling Inno Setup installer..." -ForegroundColor Yellow
@@ -57,7 +62,7 @@ if (-not $isccPath) {
     Write-Host "Using Inno Setup compiler: $isccPath" -ForegroundColor DarkGray
     $proc = Start-Process -FilePath $isccPath -ArgumentList "installer\SpectraNetworkManager.iss" -Wait -NoNewWindow -PassThru
     if ($proc.ExitCode -eq 0) {
-        Write-Host "Installer created at installer\output\SpectraNetworkManager-Setup-v1.0.0.exe" -ForegroundColor Green
+        Write-Host "Installer created at installer\output\SpectraNetworkManager-Setup-v$Version.exe" -ForegroundColor Green
     } else {
         Write-Error "Inno Setup compilation failed with exit code $($proc.ExitCode)."
         exit $proc.ExitCode
@@ -66,7 +71,7 @@ if (-not $isccPath) {
 
 # Create Portable ZIP package
 Write-Host "`nCreating Portable ZIP package..." -ForegroundColor Yellow
-$portableZip = "installer\output\SpectraNetworkManager-v1.0.0-Portable.zip"
+$portableZip = "installer\output\SpectraNetworkManager-v$Version-Portable.zip"
 if (Test-Path $portableZip) {
     Remove-Item -Force $portableZip
 }
@@ -75,7 +80,7 @@ Write-Host "Portable package created at $portableZip" -ForegroundColor Green
 
 # 4. Compute SHA-256 checksums
 Write-Host "`n[4/4] Generating SHA-256 checksums..." -ForegroundColor Yellow
-$installerExe = "installer\output\SpectraNetworkManager-Setup-v1.0.0.exe"
+$installerExe = "installer\output\SpectraNetworkManager-Setup-v$Version.exe"
 $hashes = @()
 if (Test-Path $installerExe) {
     $hash = Get-FileHash $installerExe -Algorithm SHA256
@@ -92,5 +97,5 @@ if ($hashes.Count -gt 0) {
 }
 
 Write-Host "`n==========================================" -ForegroundColor Green
-Write-Host " Build and Packaging Complete!" -ForegroundColor Green
+Write-Host " Build and Packaging Complete for v$Version!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
