@@ -326,7 +326,7 @@
                 </GroupBox>
             </Grid>
             <!-- Bottom: Live Bandwidth Card -->
-            <Border Grid.Row="2" Margin="0,8,0,0" Padding="12,8" Background="{StaticResource Surface}"
+            <Border Grid.Row="2" Margin="0,8,0,0" Padding="12,8" Background="{StaticResource PanelAlt}"
                     BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4">
                 <DockPanel LastChildFill="True">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">

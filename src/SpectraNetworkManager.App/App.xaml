@@ -1,4 +1,4 @@
-﻿<Application x:Class="SpectraNetworkManager.Ui.App"
+<Application x:Class="SpectraNetworkManager.Ui.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
@@ -6,6 +6,7 @@
         <SolidColorBrush x:Key="Bg" Color="#0B0D14"/>
         <SolidColorBrush x:Key="Panel" Color="#121626"/>
         <SolidColorBrush x:Key="PanelAlt" Color="#161B30"/>
+        <SolidColorBrush x:Key="Surface" Color="#161B30"/>
         <SolidColorBrush x:Key="Line" Color="#243055"/>
         <SolidColorBrush x:Key="Border" Color="#243055"/>
         <SolidColorBrush x:Key="Cyan" Color="#22E8FF"/>
