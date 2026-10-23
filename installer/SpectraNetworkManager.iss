@@ -47,7 +47,7 @@ Name: "runonstartup"; Description: "Start SpectraNetworkManager GUI automaticall
 ; GUI Application published binaries
 Source: "..\publish\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Background Engine Service binaries
-Source: "..\publish\engine\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\engine\*"; DestDir: "{app}\engine"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; Standard application shortcut
@@ -65,7 +65,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; 1. Register SpectraNetworkManager.Engine as a Windows Service
-Filename: "{app}\{#MyEngineExeName}"; Parameters: "--install"; StatusMsg: "Registering SpectraNetworkManager Engine service..."; Flags: runhidden
+Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--install"; StatusMsg: "Registering SpectraNetworkManager Engine service..."; Flags: runhidden
 ; 2. Start the Engine service
 Filename: "net.exe"; Parameters: "start SpectraNetworkManager.Engine"; StatusMsg: "Starting SpectraNetworkManager Engine service..."; Flags: runhidden
 ; 3. Optionally launch the GUI front-end
@@ -75,7 +75,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 ; 1. Safety First: Revert all SpectraNetworkManager firewall rules, strict mode, and DNS settings back to Windows defaults before removing files
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--safe"; RunOnceId: "SpectraNetworkManagerSafeRevert"; StatusMsg: "Restoring Windows Firewall rules and system DNS settings to defaults..."; Flags: runhidden
 ; 2. Stop and unregister SpectraNetworkManager.Engine service
-Filename: "{app}\{#MyEngineExeName}"; Parameters: "--uninstall"; RunOnceId: "SpectraNetworkManagerEngineUninstall"; StatusMsg: "Stopping and unregistering SpectraNetworkManager Engine service..."; Flags: runhidden
+Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--uninstall"; RunOnceId: "SpectraNetworkManagerEngineUninstall"; StatusMsg: "Stopping and unregistering SpectraNetworkManager Engine service..."; Flags: runhidden
 
 [Code]
 // After file removal, prompt user whether to clean up data in ProgramData

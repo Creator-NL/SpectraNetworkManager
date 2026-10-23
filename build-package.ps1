@@ -1,9 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = "1"
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+$env:DOTNET_NOLOGO = "1"
 
 # Read version from Directory.Build.props
 [xml]$props = Get-Content "Directory.Build.props"
@@ -15,13 +22,17 @@ Write-Host " SpectraNetworkManager v$Version Release and Packaging Pipeline" -Fo
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # 1. Run all tests
-Write-Host "`n[1/4] Running automated test suite..." -ForegroundColor Yellow
-dotnet test SpectraNetworkManager.sln -c $Configuration
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Tests failed! Aborting package build."
-    exit $LASTEXITCODE
+if (-not $SkipTests) {
+    Write-Host "`n[1/4] Running automated test suite..." -ForegroundColor Yellow
+    dotnet test SpectraNetworkManager.sln -c $Configuration
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Tests failed! Aborting package build."
+        exit $LASTEXITCODE
+    }
+    Write-Host "All test suites passed cleanly." -ForegroundColor Green
+} else {
+    Write-Host "`n[1/4] Skipping automated test suite (-SkipTests specified)." -ForegroundColor DarkGray
 }
-Write-Host "All test suites passed cleanly." -ForegroundColor Green
 
 # 2. Publish binaries
 Write-Host "`n[2/4] Publishing application and engine binaries (Self-Contained win-x64)..." -ForegroundColor Yellow
@@ -30,7 +41,9 @@ if (Test-Path "publish") {
 }
 
 dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true -o publish/app
+if ($LASTEXITCODE -ne 0) { Write-Error "Publish App failed!"; exit $LASTEXITCODE }
 dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true -o publish/engine
+if ($LASTEXITCODE -ne 0) { Write-Error "Publish Engine failed!"; exit $LASTEXITCODE }
 Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green
 
 # 3. Compile Inno Setup installer
