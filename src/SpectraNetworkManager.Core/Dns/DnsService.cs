@@ -243,6 +243,49 @@ public sealed class DnsService : IDisposable
         Cache.Clear();
     }
 
+    /// <summary>
+    /// Imports a batch of rules (from hosts files, domain lists, or text lines) into either the custom block list or custom allow list.
+    /// Deduplicates in memory, removes conflicting entries from the opposite list, persists settings, and reloads active filter.
+    /// </summary>
+    public async Task<(int Added, int Skipped)> ImportCustomRulesAsync(IEnumerable<string> rawLines, bool allow, CancellationToken ct = default)
+    {
+        var parsedRules = DomainFilter.ExtractRulesFromLines(rawLines);
+        if (parsedRules.Count == 0) return (0, 0);
+
+        var targetList = allow ? Settings.CustomAllow : Settings.CustomBlock;
+        var opposingList = allow ? Settings.CustomBlock : Settings.CustomAllow;
+
+        var existingTarget = new HashSet<string>(targetList, StringComparer.OrdinalIgnoreCase);
+        var toAdd = new List<string>();
+        int skipped = 0;
+
+        foreach (var rule in parsedRules)
+        {
+            if (existingTarget.Contains(rule))
+            {
+                skipped++;
+            }
+            else
+            {
+                toAdd.Add(rule);
+                existingTarget.Add(rule);
+            }
+        }
+
+        if (toAdd.Count == 0) return (0, skipped);
+
+        var toAddSet = new HashSet<string>(toAdd, StringComparer.OrdinalIgnoreCase);
+        opposingList.RemoveAll(r => toAddSet.Contains(r.Trim()));
+
+        targetList.AddRange(toAdd);
+
+        _store.Save(Settings);
+        await Task.Run(ReloadFilter, ct).ConfigureAwait(false);
+        Cache.Clear();
+
+        return (toAdd.Count, skipped);
+    }
+
     /// <summary>Removes a domain from both custom block and custom allow lists. Takes effect immediately.</summary>
     public async Task RemoveCustomRuleAsync(string domain)
     {

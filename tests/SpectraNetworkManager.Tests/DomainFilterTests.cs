@@ -123,4 +123,38 @@ public class DomainFilterTests
         Assert.Equal(FilterAction.Blocked, filter.Decide("bvvbaxivnuxqabp-5hne.googlevideo.com").Action);
         Assert.Equal(FilterAction.None, filter.Decide("other-sn-1234.googlevideo.com").Action);
     }
+
+    [Fact]
+    public void ExtractRulesFromLines_ParsesHostsAndWildcardsAndAdblock()
+    {
+        var lines = new[]
+        {
+            "# Header comment",
+            "127.0.0.1 localhost",
+            "0.0.0.0 0.0.0.0",
+            "0.0.0.0 ads.example.com # inline comment",
+            "127.0.0.1 doubleclick.net tracker.org",
+            "0.0.0.0 *bing.com",
+            "*facebook.com",
+            "||telemetry.org^",
+            "settings-win.data.microsoft.com",
+            "   ",
+            "! adblock comment",
+            "// c-style comment"
+        };
+
+        var rules = DomainFilter.ExtractRulesFromLines(lines);
+
+        Assert.Contains("ads.example.com", rules);
+        Assert.Contains("doubleclick.net", rules);
+        Assert.Contains("tracker.org", rules);
+        Assert.Contains("*bing.com", rules);
+        Assert.Contains("*facebook.com", rules);
+        Assert.Contains("telemetry.org", rules);
+        Assert.Contains("settings-win.data.microsoft.com", rules);
+
+        Assert.DoesNotContain("localhost", rules);
+        Assert.DoesNotContain("0.0.0.0", rules);
+        Assert.DoesNotContain("127.0.0.1", rules);
+    }
 }

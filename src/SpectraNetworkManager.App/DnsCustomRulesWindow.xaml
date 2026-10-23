@@ -205,6 +205,8 @@
         <!-- Footer -->
         <DockPanel Grid.Row="3" Margin="0,14,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                <Button Content="📥 Import List..." Click="OnImportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
+                        Foreground="{StaticResource Cyan}" ToolTip="Import domains or wildcard rules from a Hosts file or text list into the active list"/>
                 <Button Content="💾 Export List..." Click="OnExportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
                         Foreground="{StaticResource Cyan}" ToolTip="Export domains as a Hosts file (0.0.0.0 domain) or plain domain list"/>
                 <Button Content="Close" Click="OnCloseClick" Padding="18,4"/>

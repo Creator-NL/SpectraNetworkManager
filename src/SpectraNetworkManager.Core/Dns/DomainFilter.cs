@@ -134,6 +134,131 @@ public sealed class DomainFilter
         return domain.Equals(ruleNorm, StringComparison.OrdinalIgnoreCase) || domain.EndsWith("." + ruleNorm, StringComparison.OrdinalIgnoreCase);
     }
 
+    public static readonly HashSet<string> IgnoredHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "localhost", "localhost.localdomain", "local", "broadcasthost", "ip6-localhost", "ip6-loopback",
+        "ip6-localnet", "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters", "ip6-allhosts", "0.0.0.0",
+        "127.0.0.1", "::1", "::"
+    };
+
+    public static bool TryNormalizeDomain(string input, out string domain)
+    {
+        domain = "";
+        string d = input.Trim();
+        if (d.StartsWith("*.", StringComparison.Ordinal)) d = d[2..];
+        d = d.TrimStart('.').TrimEnd('.').ToLowerInvariant();
+
+        if (d.Length is 0 or > 253 || IgnoredHosts.Contains(d)) return false;
+        if (IPAddress.TryParse(d, out _)) return false;
+
+        var labels = d.Split('.');
+        if (labels.Length < 2) return false;
+        foreach (var label in labels)
+        {
+            if (label.Length is 0 or > 63) return false;
+            foreach (char ch in label)
+                if (!(ch is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_')) return false;
+        }
+
+        if (labels[^1].All(char.IsDigit)) return false;
+        domain = d;
+        return true;
+    }
+
+    public static bool IsValidCustomRule(string rule, out string normalized)
+    {
+        normalized = "";
+        if (string.IsNullOrWhiteSpace(rule)) return false;
+        string r = rule.Trim().TrimEnd('.').ToLowerInvariant();
+
+        if (r.Length is 0 or > 253) return false;
+        if (IgnoredHosts.Contains(r) || IPAddress.TryParse(r, out _)) return false;
+
+        if (r.Length > 2 && r.StartsWith('/') && r.EndsWith('/'))
+        {
+            try
+            {
+                _ = new Regex(r[1..^1]);
+                normalized = r;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        if (r.Contains('*') || r.Contains('?'))
+        {
+            foreach (char c in r)
+            {
+                if (!(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_' or '.' or '*' or '?'))
+                    return false;
+            }
+            if (!r.Contains('.')) return false;
+            normalized = r;
+            return true;
+        }
+
+        if (TryNormalizeDomain(r, out string d))
+        {
+            normalized = d;
+            return true;
+        }
+
+        return false;
+    }
+
+    public static List<string> ExtractRulesFromLines(IEnumerable<string> lines)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawLine in lines)
+        {
+            string line = rawLine.Trim();
+            if (line.Length == 0 || line[0] == '#' || line[0] == '!' || line[0] == ';' || line[0] == '[')
+                continue;
+
+            if (line.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            int hash = line.IndexOf('#');
+            if (hash >= 0) line = line[..hash].Trim();
+
+            int slashes = line.IndexOf("//", StringComparison.Ordinal);
+            if (slashes >= 0) line = line[..slashes].Trim();
+
+            if (line.Length == 0) continue;
+
+            // Strip Adblock prefix if present
+            if (line.StartsWith("@@||", StringComparison.Ordinal)) line = line[4..];
+            else if (line.StartsWith("||", StringComparison.Ordinal)) line = line[2..];
+
+            int caret = line.IndexOf('^');
+            if (caret >= 0) line = line[..caret].Trim();
+
+            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) continue;
+
+            IEnumerable<string> candidates = parts.Length > 1 && IPAddress.TryParse(parts[0], out _)
+                ? parts.Skip(1)
+                : parts;
+
+            foreach (var c in candidates)
+            {
+                string token = c.Trim().TrimEnd('.');
+                if (token.StartsWith("||", StringComparison.Ordinal)) token = token[2..];
+                int cCaret = token.IndexOf('^');
+                if (cCaret >= 0) token = token[..cCaret];
+
+                if (IsValidCustomRule(token, out string rule) && seen.Add(rule))
+                {
+                    result.Add(rule);
+                }
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Creates a new filter combining this filter with additional custom block and allow rules.</summary>
     public DomainFilter WithOverrides(IEnumerable<string> customBlock, IEnumerable<string> customAllow)
     {
@@ -161,11 +286,7 @@ public sealed record ListParseStats(int Blocked, int Allowed, int Skipped);
 /// <summary>Collects entries from block lists (hosts files, plain domain lists, Adblock-style rules) and your own rules.</summary>
 public sealed class DomainFilterBuilder
 {
-    private static readonly HashSet<string> Ignored = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "localhost", "localhost.localdomain", "local", "broadcasthost", "ip6-localhost", "ip6-loopback",
-        "ip6-localnet", "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters", "ip6-allhosts", "0.0.0.0",
-    };
+    private static readonly HashSet<string> Ignored = DomainFilter.IgnoredHosts;
 
     private readonly HashSet<string> _block = new(StringComparer.Ordinal);
     private readonly HashSet<string> _allow = new(StringComparer.Ordinal);
@@ -293,27 +414,5 @@ public sealed class DomainFilterBuilder
         return TryNormalizeDomain(rest, out domain);
     }
 
-    private static bool TryNormalizeDomain(string input, out string domain)
-    {
-        domain = "";
-        string d = input.Trim();
-        if (d.StartsWith("*.", StringComparison.Ordinal)) d = d[2..];
-        d = d.TrimStart('.').TrimEnd('.').ToLowerInvariant();
-
-        if (d.Length is 0 or > 253 || Ignored.Contains(d)) return false;
-        if (IPAddress.TryParse(d, out _)) return false;
-
-        var labels = d.Split('.');
-        if (labels.Length < 2) return false;                        // single labels (a bare TLD) are never blocked
-        foreach (var label in labels)
-        {
-            if (label.Length is 0 or > 63) return false;
-            foreach (char ch in label)
-                if (!(ch is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_')) return false;
-        }
-
-        if (labels[^1].All(char.IsDigit)) return false;             // "1.2.3.4" style leftovers
-        domain = d;
-        return true;
-    }
+    private static bool TryNormalizeDomain(string input, out string domain) => DomainFilter.TryNormalizeDomain(input, out domain);
 }

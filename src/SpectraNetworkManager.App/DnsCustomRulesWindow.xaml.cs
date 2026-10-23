@@ -370,6 +370,52 @@ public partial class DnsCustomRulesWindow : Window
         catch { }
     }
 
+    private async void OnImportBlocklistClick(object sender, RoutedEventArgs e)
+    {
+        bool isWhitelist = TabAllowed.IsChecked == true;
+        string listTitle = isWhitelist ? "Custom Whitelist" : "Custom Blocklist";
+
+        var ofd = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Import into {listTitle}",
+            Filter = "All Supported Files (*.txt;*.hosts;hosts)|*.txt;*.hosts;hosts|Hosts Files (*.hosts;hosts)|*.hosts;hosts|Plain Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+            FilterIndex = 1,
+            Multiselect = false
+        };
+
+        if (ofd.ShowDialog(this) != true) return;
+
+        string filePath = ofd.FileName;
+        if (!File.Exists(filePath)) return;
+
+        DialogStatusText.Text = $"Importing rules from '{Path.GetFileName(filePath)}'...";
+        try
+        {
+            var lines = await File.ReadAllLinesAsync(filePath);
+            var (added, skipped) = await _sink.ImportCustomRulesAsync(lines, allow: isWhitelist);
+
+            LoadData();
+            _onChanged();
+
+            string statusMsg = $"Imported {added:N0} new rules into {listTitle} ({skipped:N0} duplicates skipped).";
+            DialogStatusText.Text = statusMsg;
+
+            MessageBox.Show(this,
+                $"Successfully imported {added:N0} rules into {listTitle}.\n\n" +
+                $"• New rules added: {added:N0}\n" +
+                $"• Duplicates/invalid skipped: {skipped:N0}\n" +
+                $"• Source file: {Path.GetFileName(filePath)}",
+                "Import Completed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            DialogStatusText.Text = "Import failed: " + ex.Message;
+            MessageBox.Show(this, $"Could not import list:\n{ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void OnExportBlocklistClick(object sender, RoutedEventArgs e)
     {
         var listToExport = TabAllowed.IsChecked == true
