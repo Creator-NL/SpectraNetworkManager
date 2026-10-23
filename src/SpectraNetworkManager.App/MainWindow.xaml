@@ -334,24 +334,24 @@
                         
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="[DL]" Foreground="{StaticResource Cyan}" FontWeight="Bold"/>
-                                <TextBlock Text=" DL: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock Text="⬇ DL: " Foreground="{StaticResource Cyan}" FontWeight="SemiBold" FontSize="11"/>
+
                                 <TextBlock x:Name="LiveDownloadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Cyan}" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Border>
 
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="[UL]" Foreground="{StaticResource Magenta}" FontWeight="Bold"/>
-                                <TextBlock Text=" UL: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock Text="⬆ UL: " Foreground="{StaticResource Magenta}" FontWeight="SemiBold" FontSize="11"/>
+
                                 <TextBlock x:Name="LiveUploadSpeedText" Text="0.0 KB/s" Foreground="{StaticResource Magenta}" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Border>
 
                         <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,12,0">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="[TOTAL]" Foreground="{StaticResource Text}"/>
-                                <TextBlock Text=" SESSION: " Foreground="{StaticResource Muted}" FontSize="11"/>
+                                <TextBlock Text="📊 SESSION: " Foreground="{StaticResource Muted}" FontWeight="SemiBold" FontSize="11"/>
+
                                 <TextBlock x:Name="SessionTrafficText" Text="0 MB" Foreground="{StaticResource Text}" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Border>
@@ -458,7 +458,22 @@
 
             <StackPanel Grid.Row="0">
                 <TextBlock x:Name="DnsStatus" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
-                <TextBlock x:Name="DnsCounters" Margin="0,4,0,0" FontFamily="Consolas" FontSize="13" Foreground="{StaticResource Cyan}"/>
+                <TextBlock x:Name="DnsCounters" Margin="0,4,0,0" FontFamily="Consolas" FontSize="13" Foreground="{StaticResource Cyan}" Cursor="Help">
+                    <TextBlock.ToolTip>
+                        <ToolTip Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" Padding="12,10">
+                            <StackPanel MaxWidth="480">
+                                <TextBlock Text="DNS SINKHOLE METRICS GUIDE" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,0,0,8" FontSize="12"/>
+                                <TextBlock Text="• Queries: Total DNS lookup requests received by SpectraNetworkManager." Foreground="{StaticResource Text}" Margin="0,0,0,4"/>
+                                <TextBlock Text="• Blocked: Intercepted ad/tracking/telemetry domains matching blocklists or custom rules (sinkholed to 0.0.0.0 or NXDOMAIN)." Foreground="{StaticResource Magenta}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBlock Text="• Cached: Queries answered instantly from local memory cache (0 ms latency, no internet lookup needed)." Foreground="{StaticResource Cyan}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBlock Text="• Forwarded: Safe queries forwarded to configured upstream DNS servers (e.g. Cloudflare, Quad9)." Foreground="{StaticResource Text}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBlock Text="• Failed: Queries where all upstream resolvers timed out, dropped packets, or returned DNS server errors (SERVFAIL)." Foreground="{StaticResource Amber}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBlock Text="• Domains on lists: Unique malicious and tracking hostnames actively loaded into block memory." Foreground="{StaticResource Muted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBlock Text="• Cache: Total domain response sets currently active in local memory cache." Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </ToolTip>
+                    </TextBlock.ToolTip>
+                </TextBlock>
                 <TextBlock x:Name="DnsNotes" Margin="0,4,0,0" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
             </StackPanel>
 
@@ -484,14 +499,16 @@
                 <TextBox x:Name="DnsCheckBox" Width="220" Margin="0,0,8,6" VerticalContentAlignment="Center"
                          ToolTip="Type a domain and press Check to see what the filter would do, without sending a query."/>
                 <Button Content="Check" Click="OnDnsCheck" Margin="0,0,10,6"/>
-                <TextBlock x:Name="DnsCheckResult" VerticalAlignment="Center" Margin="0,0,0,6" Foreground="{StaticResource Text}"/>
+                <TextBlock x:Name="DnsCheckResult" VerticalAlignment="Center" Margin="0,0,10,6" Foreground="{StaticResource Text}"/>
+                <Button x:Name="DnsToggleSidebarButton" Content="◀ Hide Sidebar" Click="OnToggleDnsSidebar" Margin="0,0,8,6"
+                        ToolTip="Collapse or expand the Settings and Adapters sidebar"/>
             </WrapPanel>
 
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="10"/>
-                    <ColumnDefinition Width="390"/>
+                    <ColumnDefinition x:Name="DnsSplitterCol" Width="10"/>
+                    <ColumnDefinition x:Name="DnsSidebarCol" Width="390"/>
                 </Grid.ColumnDefinitions>
 
                 <Grid Grid.Column="0">
@@ -569,6 +586,8 @@
                                 <TextBlock x:Name="InspectorRootDomain" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
                                 <TextBlock Text="Client: " FontSize="11" Foreground="{StaticResource Muted}"/>
                                 <TextBlock x:Name="InspectorClient" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Caller: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="InspectorInitiator" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Margin="0,0,16,0"/>
                                 <TextBlock Text="Type: " FontSize="11" Foreground="{StaticResource Muted}"/>
                                 <TextBlock x:Name="InspectorQueryType" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
                                 <TextBlock Text="Latency: " FontSize="11" Foreground="{StaticResource Muted}"/>
@@ -604,9 +623,47 @@
                     </Border>
                 </Grid>
 
-                <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+                <Border x:Name="DnsSidebarBorder" Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="14,10,14,14">
+                            <TextBlock Text="POINT THIS PC TO SPECTRANETWORKMANAGER" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,4"/>
+                            <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="One click points your network adapters to SpectraNetworkManager (127.0.0.1 / ::1) to block ads and trackers across your entire PC. Backs up your existing DNS first, with an automatic 60-second rollback if unconfirmed."/>
+
+                            <!-- Status banner -->
+                            <Border x:Name="DnsSwitchBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,10" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock x:Name="DnsSwitchStatus" FontWeight="SemiBold" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="DnsSwitchDetails" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="Select network adapters to point at SpectraNetworkManager:" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4"/>
+                            <ItemsControl x:Name="DnsAdaptersList" Margin="0,0,0,6">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2,0,2">
+                                            <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" FontSize="11"/>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="True" Margin="0,0,0,8"
+                                      ToolTip="Recommended. If SpectraNetworkManager is stopped, your computer can still reach your previous DNS servers."/>
+
+                            <WrapPanel Margin="0,0,0,12">
+                                <Button x:Name="DnsApplySwitchButton" Content="Point PC to SpectraNetworkManager..." Click="OnDnsSwitchApply" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
+                                <Button x:Name="DnsRestoreSwitchButton" Content="Restore original DNS" Click="OnDnsSwitchRestore" Margin="0,0,8,6"/>
+                                <Button Content="Refresh adapters" Click="OnDnsRefreshAdapters" Margin="0,0,8,6"/>
+                            </WrapPanel>
+
+                            <TextBlock Text="BROWSER SECURE DNS (DoH) NOTICE" FontWeight="SemiBold" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,0,0,2"/>
+                            <TextBlock Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12"
+                                       Text="Browsers (Chrome, Edge) sometimes bypass Windows DNS with built-in DNS-over-HTTPS. In Chrome/Edge settings under Privacy &amp; Security -> Use secure DNS, select 'With your current service provider' (or disable it)."/>
+
+                            <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,0,0,12"/>
+
                             <TextBlock Text="SETTINGS" FontWeight="SemiBold" Foreground="{StaticResource Magenta}" Margin="0,0,0,8"/>
 
                             <TextBlock Text="Listen address" Foreground="{StaticResource Muted}"/>
@@ -686,44 +743,6 @@
 
                             <Button Content="Save settings" Click="OnDnsSave" Foreground="{StaticResource Cyan}" HorizontalAlignment="Left" Margin="0,0,0,14"
                                     ToolTip="Saves, and restarts the DNS server if it is running."/>
-
-                            <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,4,0,12"/>
-
-                            <TextBlock Text="POINT THIS PC TO SPECTRANETWORKMANAGER" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,0,4"/>
-                            <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
-                                       Text="One click points your network adapters to SpectraNetworkManager (127.0.0.1 / ::1) to block ads and trackers across your entire PC. Backs up your existing DNS first, with an automatic 60-second rollback if unconfirmed."/>
-
-                            <!-- Status banner -->
-                            <Border x:Name="DnsSwitchBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,10" Visibility="Collapsed">
-                                <StackPanel>
-                                    <TextBlock x:Name="DnsSwitchStatus" FontWeight="SemiBold" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="DnsSwitchDetails" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
-                                </StackPanel>
-                            </Border>
-
-                            <TextBlock Text="Select network adapters to point at SpectraNetworkManager:" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4"/>
-                            <ItemsControl x:Name="DnsAdaptersList" Margin="0,0,0,6">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2,0,2">
-                                            <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" FontSize="11"/>
-                                        </CheckBox>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-
-                            <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="True" Margin="0,0,0,8"
-                                      ToolTip="Recommended. If SpectraNetworkManager is stopped, your computer can still reach your previous DNS servers."/>
-
-                            <WrapPanel Margin="0,0,0,12">
-                                <Button x:Name="DnsApplySwitchButton" Content="Point PC to SpectraNetworkManager..." Click="OnDnsSwitchApply" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
-                                <Button x:Name="DnsRestoreSwitchButton" Content="Restore original DNS" Click="OnDnsSwitchRestore" Margin="0,0,8,6"/>
-                                <Button Content="Refresh adapters" Click="OnDnsRefreshAdapters" Margin="0,0,8,6"/>
-                            </WrapPanel>
-
-                            <TextBlock Text="BROWSER SECURE DNS (DoH) NOTICE" FontWeight="SemiBold" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,0,0,2"/>
-                            <TextBlock Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12"
-                                       Text="Browsers (Chrome, Edge) sometimes bypass Windows DNS with built-in DNS-over-HTTPS. In Chrome/Edge settings under Privacy &amp; Security -> Use secure DNS, select 'With your current service provider' (or disable it)."/>
 
                             <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,0,0,12"/>
 

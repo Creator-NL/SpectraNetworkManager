@@ -1631,6 +1631,7 @@ public partial class MainWindow : Window
         CustomAllowBox.Text = string.Join("\r\n", c.CustomAllow);
         LocalRecordsBox.Text = string.Join("\r\n", c.LocalRecords.Select(r => $"{r.Domain} | {r.RecordType} | {r.Value}"));
         ConditionalForwardingBox.Text = string.Join("\r\n", c.ConditionalForwarding.Select(f => $"{f.DomainSuffix} | {f.TargetServer}"));
+        DnsCustomRulesButton.Content = $"🛡️ Custom Rules ({c.CustomBlock.Count} blocked, {c.CustomAllow.Count} allowed)";
         }
         finally
         {
@@ -1970,6 +1971,101 @@ public partial class MainWindow : Window
         DnsGrid.SelectedItem = null;
     }
 
+    private bool _dnsSidebarCollapsed;
+
+    private void OnToggleDnsSidebar(object sender, RoutedEventArgs e)
+    {
+        _dnsSidebarCollapsed = !_dnsSidebarCollapsed;
+        if (_dnsSidebarCollapsed)
+        {
+            DnsSidebarCol.Width = new GridLength(0);
+            DnsSplitterCol.Width = new GridLength(0);
+            DnsSidebarBorder.Visibility = Visibility.Collapsed;
+            DnsToggleSidebarButton.Content = "⚙️ Settings & Adapters ▶";
+            DnsToggleSidebarButton.ToolTip = "Show the Settings and Adapters sidebar";
+        }
+        else
+        {
+            DnsSidebarCol.Width = new GridLength(390);
+            DnsSplitterCol.Width = new GridLength(10);
+            DnsSidebarBorder.Visibility = Visibility.Visible;
+            DnsToggleSidebarButton.Content = "◀ Hide Sidebar";
+            DnsToggleSidebarButton.ToolTip = "Collapse the Settings and Adapters sidebar";
+        }
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _lanDeviceNames = new();
+
+    private string FormatClientDisplay(string client)
+    {
+        if (client == "127.0.0.1" || client == "::1" || client == "localhost")
+        {
+            return $"{client} (This PC)";
+        }
+        if (_lanDeviceNames.TryGetValue(client, out var name) && !string.Equals(name, client, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{client} ({name})";
+        }
+        return client;
+    }
+
+    private string ResolveInitiator(DnsRow row)
+    {
+        string client = row.Client;
+        if (client == "127.0.0.1" || client == "::1" || client == "localhost")
+        {
+            string domain = row.Domain.TrimEnd('.');
+            var matchingConn = Rows.FirstOrDefault(c =>
+                !string.IsNullOrEmpty(c.Host) && (
+                    c.Host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+                    c.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase) ||
+                    domain.EndsWith("." + c.Host, StringComparison.OrdinalIgnoreCase)));
+
+            if (matchingConn != null)
+            {
+                return $"{matchingConn.Program} (PID {matchingConn.Pid})";
+            }
+
+            return "This PC (Windows App / System)";
+        }
+
+        if (_lanDeviceNames.TryGetValue(client, out var cachedName))
+        {
+            return $"{cachedName} (LAN Device)";
+        }
+
+        _ = ResolveLanClientAsync(client);
+        return "LAN Device (Resolving...)";
+    }
+
+    private async Task ResolveLanClientAsync(string clientIp)
+    {
+        if (_lanDeviceNames.ContainsKey(clientIp)) return;
+        try
+        {
+            if (IPAddress.TryParse(clientIp, out var ip))
+            {
+                var hostEntry = await Dns.GetHostEntryAsync(ip);
+                if (!string.IsNullOrWhiteSpace(hostEntry.HostName))
+                {
+                    _lanDeviceNames[clientIp] = hostEntry.HostName;
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (DnsGrid.SelectedItem is DnsRow current && current.Client == clientIp)
+                        {
+                            InspectorClient.Text = FormatClientDisplay(current.Client);
+                            InspectorInitiator.Text = $"{hostEntry.HostName} (LAN Device)";
+                        }
+                    });
+                }
+            }
+        }
+        catch
+        {
+            _lanDeviceNames[clientIp] = clientIp;
+        }
+    }
+
     private void ShowDnsInspector(DnsRow row)
     {
         var analysis = DomainIntelligence.Analyze(row.Domain, row.IsBlocked, row.IsFailed);
@@ -2052,7 +2148,8 @@ public partial class MainWindow : Window
         InspectorDescription.Text = analysis.Description;
 
         InspectorRootDomain.Text = analysis.RootDomain;
-        InspectorClient.Text = row.Client;
+        InspectorClient.Text = FormatClientDisplay(row.Client);
+        InspectorInitiator.Text = ResolveInitiator(row);
         InspectorQueryType.Text = row.Type;
         InspectorLatency.Text = $"{row.Ms} ms";
         InspectorOutcome.Text = row.Result;
@@ -2468,6 +2565,9 @@ public partial class MainWindow : Window
     private void RefreshDnsUi()
     {
         DnsBadge.Visibility = _sink.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        HeaderDnsButton.Content = _sink.IsRunning ? "⏹ Stop DNS" : "▶ Start DNS";
+        HeaderDnsButton.Foreground = _sink.IsRunning ? (Brush)FindResource("Amber") : (Brush)FindResource("Cyan");
+        HeaderDnsButton.ToolTip = _sink.IsRunning ? "Stop the running DNS Sinkhole Server" : "Start the DNS Sinkhole Server";
         if (DnsPanel.Visibility != Visibility.Visible) return;
 
         DnsStartButton.IsEnabled = !_sink.IsRunning && !_dnsBusy;
