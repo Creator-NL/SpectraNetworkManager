@@ -2196,6 +2196,7 @@ public partial class MainWindow : Window
         InspectorClient.Text = FormatClientDisplay(row.Client);
         InspectorInitiator.Text = ResolveInitiator(row);
         InspectorQueryType.Text = row.Type;
+        InspectorQueryTypeDesc.Text = row.TypeDescription;
         InspectorLatency.Text = $"{row.Ms} ms";
         InspectorOutcome.Text = row.Result;
 
@@ -2249,6 +2250,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnInspectorWhois(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            OpenWhoisLookup(row.Domain);
+        }
+    }
+
     private void OnInspectorLookup(object sender, RoutedEventArgs e)
     {
         if (DnsGrid.SelectedItem is DnsRow row)
@@ -2269,6 +2278,14 @@ public partial class MainWindow : Window
 
     private async void OnDnsContextMenuAllow(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: true);
 
+    private void OnDnsContextMenuWhois(object sender, RoutedEventArgs e)
+    {
+        if (DnsGrid.SelectedItem is DnsRow row)
+        {
+            OpenWhoisLookup(row.Domain);
+        }
+    }
+
     private void OnDnsContextMenuLookup(object sender, RoutedEventArgs e)
     {
         if (DnsGrid.SelectedItem is DnsRow row)
@@ -2282,6 +2299,24 @@ public partial class MainWindow : Window
         if (DnsGrid.SelectedItem is DnsRow row)
         {
             CopyDomainToClipboard(row.Domain);
+        }
+    }
+
+    private void OpenWhoisLookup(string domain)
+    {
+        string d = DomainFilter.Normalize(domain).TrimStart('*').TrimStart('.');
+        if (string.IsNullOrWhiteSpace(d)) return;
+        string root = DomainIntelligence.GetRootDomain(d);
+        if (!string.IsNullOrWhiteSpace(root)) d = root;
+
+        try
+        {
+            string url = $"https://who.is/whois/{Uri.EscapeDataString(d)}";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open browser for WHOIS lookup", ex);
         }
     }
 

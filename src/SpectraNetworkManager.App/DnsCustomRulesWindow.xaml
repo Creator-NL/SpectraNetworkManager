@@ -46,15 +46,34 @@
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" Margin="8,0,0,0">
+                        <Button Content="🗑️ Remove Selected" Click="OnRemoveSelectedBlockedClick" Margin="0,0,6,0" Padding="8,2"
+                                Foreground="{StaticResource Magenta}" ToolTip="Remove all currently selected rules (or press Delete)"/>
+                        <Button Content="💥 Clear All" Click="OnClearAllBlockedClick" Padding="8,2"
+                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom blocked rules"/>
+                    </StackPanel>
                     <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
                     <TextBox x:Name="SearchBlockedBox" TextChanged="OnSearchBlockedChanged" VerticalContentAlignment="Center"
                              ToolTip="Filter custom blocked domains"/>
                 </DockPanel>
 
-                <DataGrid x:Name="BlockedGrid" Grid.Row="1" SelectionMode="Single" Margin="0,0,0,10">
+                <DataGrid x:Name="BlockedGrid" Grid.Row="1" SelectionMode="Extended" Margin="0,0,0,10"
+                          KeyDown="OnBlockedGridKeyDown">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="🗑️ Remove Selected" Click="OnRemoveSelectedBlockedClick" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem Header="🛡️ Move Selected to Whitelist" Click="OnMoveSelectedToAllowedClick" Foreground="{StaticResource Cyan}"/>
+                            <Separator/>
+                            <MenuItem Header="🔎 WHOIS Lookup" Click="OnWhoisBlockedContextItem"/>
+                            <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnLookupBlockedContextItem"/>
+                            <MenuItem Header="📋 Copy Domain" Click="OnCopyBlockedContextItem"/>
+                            <Separator/>
+                            <MenuItem Header="💥 Clear All Custom Blocked Rules" Click="OnClearAllBlockedClick" Foreground="{StaticResource Amber}"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="BLOCKED DOMAIN" Binding="{Binding Domain}" Width="*" Foreground="{StaticResource Magenta}"/>
-                        <DataGridTemplateColumn Header="ACTIONS" Width="260">
+                        <DataGridTemplateColumn Header="ACTIONS" Width="280">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -62,6 +81,8 @@
                                                 Foreground="{StaticResource Amber}" ToolTip="Remove from custom blocklist (undo block)"/>
                                         <Button Content="🛡️ Allow" Click="OnMoveToAllowedItem" Padding="6,1" Margin="0,0,4,0"
                                                 Foreground="{StaticResource Cyan}" ToolTip="Move to custom allow list"/>
+                                        <Button Content="🔎" Click="OnWhoisBlockedItemButton" Padding="4,1" Margin="0,0,4,0"
+                                                ToolTip="Lookup domain WHOIS registration &amp; owner"/>
                                         <Button Content="🌐" Click="OnLookupBlockedItem" Padding="4,1" Margin="0,0,4,0"
                                                 ToolTip="Search online on VirusTotal"/>
                                         <Button Content="📋" Click="OnCopyBlockedItem" Padding="4,1"
@@ -91,15 +112,34 @@
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" Margin="8,0,0,0">
+                        <Button Content="🗑️ Remove Selected" Click="OnRemoveSelectedAllowedClick" Margin="0,0,6,0" Padding="8,2"
+                                Foreground="{StaticResource Magenta}" ToolTip="Remove all currently selected rules (or press Delete)"/>
+                        <Button Content="💥 Clear All" Click="OnClearAllAllowedClick" Padding="8,2"
+                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom whitelisted rules"/>
+                    </StackPanel>
                     <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
                     <TextBox x:Name="SearchAllowedBox" TextChanged="OnSearchAllowedChanged" VerticalContentAlignment="Center"
                              ToolTip="Filter custom allowed domains"/>
                 </DockPanel>
 
-                <DataGrid x:Name="AllowedGrid" Grid.Row="1" SelectionMode="Single" Margin="0,0,0,10">
+                <DataGrid x:Name="AllowedGrid" Grid.Row="1" SelectionMode="Extended" Margin="0,0,0,10"
+                          KeyDown="OnAllowedGridKeyDown">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="🗑️ Remove Selected" Click="OnRemoveSelectedAllowedClick" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem Header="🚫 Move Selected to Blocklist" Click="OnMoveSelectedToBlockedClick" Foreground="{StaticResource Magenta}"/>
+                            <Separator/>
+                            <MenuItem Header="🔎 WHOIS Lookup" Click="OnWhoisAllowedContextItem"/>
+                            <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnLookupAllowedContextItem"/>
+                            <MenuItem Header="📋 Copy Domain" Click="OnCopyAllowedContextItem"/>
+                            <Separator/>
+                            <MenuItem Header="💥 Clear All Whitelist Rules" Click="OnClearAllAllowedClick" Foreground="{StaticResource Amber}"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="ALLOWED DOMAIN (WHITELIST)" Binding="{Binding Domain}" Width="*" Foreground="{StaticResource Cyan}"/>
-                        <DataGridTemplateColumn Header="ACTIONS" Width="260">
+                        <DataGridTemplateColumn Header="ACTIONS" Width="280">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -107,6 +147,8 @@
                                                 Foreground="{StaticResource Amber}" ToolTip="Remove from whitelist"/>
                                         <Button Content="🚫 Block" Click="OnMoveToBlockedItem" Padding="6,1" Margin="0,0,4,0"
                                                 Foreground="{StaticResource Magenta}" ToolTip="Move to custom blocklist"/>
+                                        <Button Content="🔎" Click="OnWhoisAllowedItemButton" Padding="4,1" Margin="0,0,4,0"
+                                                ToolTip="Lookup domain WHOIS registration &amp; owner"/>
                                         <Button Content="🌐" Click="OnLookupAllowedItem" Padding="4,1" Margin="0,0,4,0"
                                                 ToolTip="Search online on VirusTotal"/>
                                         <Button Content="📋" Click="OnCopyAllowedItem" Padding="4,1"
@@ -206,7 +248,9 @@
         <DockPanel Grid.Row="3" Margin="0,14,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
                 <Button Content="📥 Import List..." Click="OnImportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
+
                         Foreground="{StaticResource Cyan}" ToolTip="Import domains or wildcard rules from a Hosts file or text list into the active list"/>
+
                 <Button Content="💾 Export List..." Click="OnExportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
                         Foreground="{StaticResource Cyan}" ToolTip="Export domains as a Hosts file (0.0.0.0 domain) or plain domain list"/>
                 <Button Content="Close" Click="OnCloseClick" Padding="18,4"/>

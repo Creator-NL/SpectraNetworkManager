@@ -300,6 +300,71 @@ public sealed class DnsService : IDisposable
         Cache.Clear();
     }
 
+    /// <summary>Removes a batch of domains from both custom block and custom allow lists in a single transaction.</summary>
+    public async Task RemoveCustomRulesBatchAsync(IEnumerable<string> domains, CancellationToken ct = default)
+    {
+        var toRemoveSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in domains)
+        {
+            string norm = DomainFilter.Normalize(d);
+            if (norm.Length > 0) toRemoveSet.Add(norm);
+        }
+
+        if (toRemoveSet.Count == 0) return;
+
+        Settings.CustomBlock.RemoveAll(r => toRemoveSet.Contains(DomainFilter.Normalize(r)));
+        Settings.CustomAllow.RemoveAll(r => toRemoveSet.Contains(DomainFilter.Normalize(r)));
+
+        _store.Save(Settings);
+        await Task.Run(ReloadFilter, ct).ConfigureAwait(false);
+        Cache.Clear();
+    }
+
+    /// <summary>Clears the entire custom allow list or custom block list in a single transaction.</summary>
+    public async Task ClearCustomRulesAsync(bool allow, CancellationToken ct = default)
+    {
+        if (allow)
+        {
+            if (Settings.CustomAllow.Count == 0) return;
+            Settings.CustomAllow.Clear();
+        }
+        else
+        {
+            if (Settings.CustomBlock.Count == 0) return;
+            Settings.CustomBlock.Clear();
+        }
+
+        _store.Save(Settings);
+        await Task.Run(ReloadFilter, ct).ConfigureAwait(false);
+        Cache.Clear();
+    }
+
+    /// <summary>Moves a collection of rules from one list to the other (e.g. from Blocklist to Whitelist).</summary>
+    public async Task MoveRulesAsync(IEnumerable<string> domains, bool toAllow, CancellationToken ct = default)
+    {
+        var rules = domains.Select(DomainFilter.Normalize).Where(d => d.Length > 0).ToList();
+        if (rules.Count == 0) return;
+
+        var targetList = toAllow ? Settings.CustomAllow : Settings.CustomBlock;
+        var opposingList = toAllow ? Settings.CustomBlock : Settings.CustomAllow;
+
+        var targetSet = new HashSet<string>(targetList, StringComparer.OrdinalIgnoreCase);
+        var moveSet = new HashSet<string>(rules, StringComparer.OrdinalIgnoreCase);
+
+        opposingList.RemoveAll(r => moveSet.Contains(DomainFilter.Normalize(r)));
+        foreach (var r in rules)
+        {
+            if (targetSet.Add(r))
+            {
+                targetList.Add(r);
+            }
+        }
+
+        _store.Save(Settings);
+        await Task.Run(ReloadFilter, ct).ConfigureAwait(false);
+        Cache.Clear();
+    }
+
     /// <summary>Checks whether the domain matches any user's custom block rule.</summary>
     public bool IsCustomBlocked(string domain) =>
         Settings.CustomBlock.Any(r => DomainFilter.MatchesCustomRule(r, domain));

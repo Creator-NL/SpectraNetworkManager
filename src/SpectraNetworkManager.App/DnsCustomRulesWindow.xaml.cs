@@ -144,6 +144,92 @@ public partial class DnsCustomRulesWindow : Window
         PanelSubscriptions.Visibility = TabSubscriptions.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // --- Bulk & Multi-Selection Handlers (Blocked Grid) ---
+
+    private async void OnRemoveSelectedBlockedClick(object sender, RoutedEventArgs e)
+    {
+        var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(this, "Please select one or more rules to remove.", "Remove Selected", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string msg = selected.Count == 1
+            ? $"Are you sure you want to remove '{selected[0]}' from your custom blocklist?"
+            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your custom blocklist?";
+
+        if (MessageBox.Show(this, msg, "Confirm Remove Selected", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        await _sink.RemoveCustomRulesBatchAsync(selected);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from custom blocklist.";
+    }
+
+    private async void OnClearAllBlockedClick(object sender, RoutedEventArgs e)
+    {
+        int count = _sink.Settings.CustomBlock.Count;
+        if (count == 0)
+        {
+            MessageBox.Show(this, "The custom blocklist is already empty.", "Clear Blocklist", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} custom blocked rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        await _sink.ClearCustomRulesAsync(allow: false);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Cleared all {count:N0} custom blocked rules.";
+    }
+
+    private void OnBlockedGridKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete)
+        {
+            OnRemoveSelectedBlockedClick(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private async void OnMoveSelectedToAllowedClick(object sender, RoutedEventArgs e)
+    {
+        var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0) return;
+
+        await _sink.MoveRulesAsync(selected, toAllow: true);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to whitelist.";
+    }
+
+    private void OnWhoisBlockedContextItem(object sender, RoutedEventArgs e)
+    {
+        if (BlockedGrid.SelectedItem is CustomRuleRow row) OpenWhois(row.Domain);
+    }
+
+    private void OnWhoisBlockedItemButton(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.DataContext is CustomRuleRow row) OpenWhois(row.Domain);
+    }
+
+    private void OnLookupBlockedContextItem(object sender, RoutedEventArgs e)
+    {
+        if (BlockedGrid.SelectedItem is CustomRuleRow row) OpenVirusTotal(row.Domain);
+    }
+
+    private void OnCopyBlockedContextItem(object sender, RoutedEventArgs e)
+    {
+        var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count > 0)
+        {
+            CopyClipboard(string.Join(Environment.NewLine, selected));
+        }
+    }
+
     // --- Blocked Tab Actions ---
 
     private async void OnRemoveBlockedItem(object sender, RoutedEventArgs e)
@@ -201,6 +287,92 @@ public partial class DnsCustomRulesWindow : Window
         LoadData();
         _onChanged();
         DialogStatusText.Text = $"Added '{domain}' to custom blocklist.";
+    }
+
+    // --- Bulk & Multi-Selection Handlers (Allowed Grid) ---
+
+    private async void OnRemoveSelectedAllowedClick(object sender, RoutedEventArgs e)
+    {
+        var selected = AllowedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(this, "Please select one or more rules to remove.", "Remove Selected", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string msg = selected.Count == 1
+            ? $"Are you sure you want to remove '{selected[0]}' from your whitelist?"
+            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your whitelist?";
+
+        if (MessageBox.Show(this, msg, "Confirm Remove Selected", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        await _sink.RemoveCustomRulesBatchAsync(selected);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from whitelist.";
+    }
+
+    private async void OnClearAllAllowedClick(object sender, RoutedEventArgs e)
+    {
+        int count = _sink.Settings.CustomAllow.Count;
+        if (count == 0)
+        {
+            MessageBox.Show(this, "The whitelist is already empty.", "Clear Whitelist", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} whitelist rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        await _sink.ClearCustomRulesAsync(allow: true);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Cleared all {count:N0} custom whitelist rules.";
+    }
+
+    private void OnAllowedGridKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete)
+        {
+            OnRemoveSelectedAllowedClick(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private async void OnMoveSelectedToBlockedClick(object sender, RoutedEventArgs e)
+    {
+        var selected = AllowedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0) return;
+
+        await _sink.MoveRulesAsync(selected, toAllow: false);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to custom blocklist.";
+    }
+
+    private void OnWhoisAllowedContextItem(object sender, RoutedEventArgs e)
+    {
+        if (AllowedGrid.SelectedItem is CustomRuleRow row) OpenWhois(row.Domain);
+    }
+
+    private void OnWhoisAllowedItemButton(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.DataContext is CustomRuleRow row) OpenWhois(row.Domain);
+    }
+
+    private void OnLookupAllowedContextItem(object sender, RoutedEventArgs e)
+    {
+        if (AllowedGrid.SelectedItem is CustomRuleRow row) OpenVirusTotal(row.Domain);
+    }
+
+    private void OnCopyAllowedContextItem(object sender, RoutedEventArgs e)
+    {
+        var selected = AllowedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count > 0)
+        {
+            CopyClipboard(string.Join(Environment.NewLine, selected));
+        }
     }
 
     // --- Allowed Tab Actions ---
@@ -345,6 +517,21 @@ public partial class DnsCustomRulesWindow : Window
         {
             DialogStatusText.Text = "Update failed: " + ex.Message;
         }
+    }
+
+    private void OpenWhois(string domain)
+    {
+        string d = DomainFilter.Normalize(domain).TrimStart('*').TrimStart('.');
+        if (string.IsNullOrWhiteSpace(d)) return;
+        string root = DomainIntelligence.GetRootDomain(d);
+        if (!string.IsNullOrWhiteSpace(root)) d = root;
+
+        try
+        {
+            string url = $"https://who.is/whois/{Uri.EscapeDataString(d)}";
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch { }
     }
 
     private void OpenVirusTotal(string domain)

@@ -525,6 +525,7 @@
                                 <MenuItem Header="🚫 Always Block Domain" Click="OnDnsContextMenuBlock" Foreground="{StaticResource Magenta}"/>
                                 <MenuItem Header="🛡️ Always Allow Domain" Click="OnDnsContextMenuAllow" Foreground="{StaticResource Cyan}"/>
                                 <Separator/>
+                                <MenuItem Header="🔎 WHOIS Lookup" Click="OnDnsContextMenuWhois"/>
                                 <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnDnsContextMenuLookup"/>
                                 <MenuItem Header="📋 Copy Domain" Click="OnDnsContextMenuCopy"/>
                                 <Separator/>
@@ -548,60 +549,113 @@
                             <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="80"/>
                             <DataGridTextColumn Header="CLIENT" Binding="{Binding Client, Mode=OneWay}" Width="120"/>
                             <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain, Mode=OneWay}" Width="260"/>
-                            <DataGridTextColumn Header="TYPE" Binding="{Binding Type, Mode=OneWay}" Width="70"/>
+                            <DataGridTemplateColumn Header="TYPE" Width="70">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Type, Mode=OneWay}" ToolTip="{Binding TypeToolTip, Mode=OneWay}" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="RESULT" Binding="{Binding Result, Mode=OneWay}" Width="90"/>
                             <DataGridTextColumn Header="MS" Binding="{Binding Ms, Mode=OneWay}" Width="55"/>
                             <DataGridTextColumn Header="DETAIL" Binding="{Binding Detail, Mode=OneWay}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
 
-                    <!-- DOMAIN INSPECTOR / INTELLIGENCE PANEL -->
+                    <!-- DOMAIN INSPECTOR / INTELLIGENCE PANEL (FROM -> TO FLOW) -->
                     <Border x:Name="DnsInspectorPanel" Grid.Row="1" Visibility="Collapsed"
                             Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
                             BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="14,10">
                         <StackPanel>
-                            <!-- Header: Domain name, Category badge, Advice badge, Close button -->
-                            <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                            <!-- Top bar with Close button -->
+                            <DockPanel LastChildFill="True" Margin="0,0,0,8">
                                 <Button DockPanel.Dock="Right" Content="✕" Click="OnCloseDnsInspector"
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource Muted}"
                                         Width="24" Height="24" Cursor="Hand" ToolTip="Close details"
                                         VerticalAlignment="Center"/>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock x:Name="InspectorDomainText" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
-                                    <Border x:Name="InspectorCategoryBadge" CornerRadius="3" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center" Background="#2222E8FF">
-                                        <TextBlock x:Name="InspectorCategoryText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
-                                    </Border>
-                                    <Border x:Name="InspectorAdviceBadge" CornerRadius="3" Padding="6,2" Margin="6,0,0,0" VerticalAlignment="Center" Background="#22FF2BD6">
-                                        <TextBlock x:Name="InspectorAdviceBadgeText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
-                                    </Border>
+                                    <TextBlock Text="QUERY FLOW" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Magenta}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="  //  Origin (Caller / Client) ➔ Destination (Target Domain)" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </DockPanel>
 
-                            <!-- Service Name & Description -->
-                            <TextBlock x:Name="InspectorServiceName" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource Text}" Margin="0,0,0,2"/>
-                            <TextBlock x:Name="InspectorDescription" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <!-- Two Column Flow: FROM (Left) ➔ TO (Right) -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
 
-                            <!-- Query Meta Details -->
-                            <WrapPanel Margin="0,0,0,8">
-                                <TextBlock Text="Root: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorRootDomain" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
-                                <TextBlock Text="Client: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorClient" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
-                                <TextBlock Text="Caller: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorInitiator" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Margin="0,0,16,0"/>
-                                <TextBlock Text="Type: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorQueryType" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
-                                <TextBlock Text="Latency: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorLatency" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,16,0"/>
-                                <TextBlock Text="Status: " FontSize="11" Foreground="{StaticResource Muted}"/>
-                                <TextBlock x:Name="InspectorOutcome" FontSize="11" Foreground="{StaticResource Text}"/>
-                            </WrapPanel>
+                                <!-- LEFT CARD: FROM (Caller / Client Origin) -->
+                                <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock Text="FROM (CALLER / CLIENT)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,6"/>
+                                        <DockPanel Margin="0,0,0,4">
+                                            <TextBlock Text="Caller Program:" FontSize="11" Foreground="{StaticResource Muted}" Width="95"/>
+                                            <TextBlock x:Name="InspectorInitiator" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="Bold" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,4">
+                                            <TextBlock Text="Client Device:" FontSize="11" Foreground="{StaticResource Muted}" Width="95"/>
+                                            <TextBlock x:Name="InspectorClient" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Query Type:" FontSize="11" Foreground="{StaticResource Muted}" Width="95"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock x:Name="InspectorQueryType" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Amber}" Margin="0,0,6,0"/>
+                                                <TextBlock x:Name="InspectorQueryTypeDesc" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
 
-                            <!-- Advice / Recommendation Box -->
+                                <!-- MIDDLE DIRECTIONAL ARROW -->
+                                <TextBlock Grid.Column="1" Text="➔" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Cyan}"
+                                           VerticalAlignment="Center" Margin="10,0"/>
+
+                                <!-- RIGHT CARD: TO (Destination / Target Domain) -->
+                                <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,4" LastChildFill="True">
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Border x:Name="InspectorCategoryBadge" CornerRadius="3" Padding="6,2" Margin="4,0,0,0" Background="#2222E8FF">
+                                                    <TextBlock x:Name="InspectorCategoryText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                                </Border>
+                                                <Border x:Name="InspectorAdviceBadge" CornerRadius="3" Padding="6,2" Margin="4,0,0,0" Background="#22FF2BD6">
+                                                    <TextBlock x:Name="InspectorAdviceBadgeText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="TO (TARGET DOMAIN)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}"/>
+                                        </DockPanel>
+                                        <TextBlock x:Name="InspectorDomainText" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}" TextWrapping="Wrap" Margin="0,0,0,3"/>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Service / Org:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="InspectorServiceName" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Root Domain:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="InspectorRootDomain" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <TextBlock x:Name="InspectorDescription" FontSize="10" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- Advice & Status summary bar -->
                             <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,8">
                                 <DockPanel LastChildFill="True">
-                                    <TextBlock x:Name="InspectorAdviceTitle" DockPanel.Dock="Left" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Magenta}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                    <TextBlock x:Name="InspectorAdviceDetail" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                                        <TextBlock Text="Status: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorOutcome" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Text}" Margin="0,0,10,0"/>
+                                        <TextBlock Text="Latency: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorLatency" FontSize="11" Foreground="{StaticResource Text}"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock x:Name="InspectorAdviceTitle" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Magenta}" Margin="0,0,8,0"/>
+                                        <TextBlock x:Name="InspectorAdviceDetail" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                    </StackPanel>
                                 </DockPanel>
                             </Border>
 
@@ -615,6 +669,8 @@
                                         ToolTip="Removes this domain from your custom list and restores default filtering."/>
                                 <Button Content="🛡️ All Custom Rules..." Click="OnOpenCustomRulesWindow" Margin="0,0,8,0"
                                         ToolTip="Open Custom Rules &amp; Blocklist Manager"/>
+                                <Button Content="🔎 WHOIS Lookup" Click="OnInspectorWhois" Margin="0,0,8,0" Foreground="{StaticResource Cyan}"
+                                        ToolTip="Lookup domain registration, owner organization, and nameservers."/>
                                 <Button Content="🌐 Search Online (VirusTotal)" Click="OnInspectorLookup" Margin="0,0,8,0"
                                         ToolTip="Opens VirusTotal threat analysis in default web browser."/>
                                 <Button Content="📋 Copy Domain" Click="OnInspectorCopy" Margin="0,0,8,0"

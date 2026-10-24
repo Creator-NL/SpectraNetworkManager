@@ -220,4 +220,34 @@ public sealed record DnsRow(string Time, string Client, string Domain, string Ty
         e.Outcome == DnsOutcome.Blocked,
         e.Outcome == DnsOutcome.Failed,
         e);
+
+    public string TypeToolTip => (Type?.ToUpperInvariant() ?? "") switch
+    {
+        "A" => "A (IPv4 Address Record)\nTranslates a domain name into an IPv4 address (e.g. 192.0.2.1) for web and network connections.",
+        "AAAA" => "AAAA (IPv6 Address Record)\nTranslates a domain name into a 128-bit IPv6 address (e.g. 2001:db8::1).",
+        "PTR" => "PTR (Pointer / Reverse DNS)\nTranslates an IP address back into a hostname (reverse lookup, e.g. .ip6.arpa or .in-addr.arpa).",
+        "HTTPS" => "HTTPS (Service Binding / RFC 9460)\nModern DNS record used by browsers to discover HTTP/3, TLS configurations, and encrypted parameters directly before connecting.",
+        "CNAME" => "CNAME (Canonical Name)\nAn alias that maps a domain name to another canonical domain name.",
+        "MX" => "MX (Mail Exchange)\nDirects email traffic to the domain's mail servers.",
+        "TXT" => "TXT (Text Record)\nCarries human or machine-readable text, commonly used for SPF, DKIM, and domain ownership verification.",
+        "SRV" => "SRV (Service Record)\nSpecifies the location (hostname and port) of servers for specified services (LDAP, SIP, gaming, VoIP).",
+        "SOA" => "SOA (Start of Authority)\nSupplies administrative information about a DNS zone (primary nameserver, admin contact, serial number).",
+        "NS" => "NS (Name Server)\nDelegates a DNS zone to an authoritative name server.",
+        _ => $"DNS Query Type: {Type}"
+    };
+
+    public string TypeDescription => (Type?.ToUpperInvariant() ?? "") switch
+    {
+        "A" => "(IPv4 Address Lookup)",
+        "AAAA" => "(IPv6 Address Lookup)",
+        "PTR" => "(Reverse IP-to-Name Lookup)",
+        "HTTPS" => "(Encrypted Web Service Binding)",
+        "CNAME" => "(Domain Alias Redirect)",
+        "MX" => "(Mail Server Exchange)",
+        "TXT" => "(Domain Verification / SPF)",
+        "SRV" => "(Service Locator)",
+        "SOA" => "(Zone Authority)",
+        "NS" => "(Authoritative Name Server)",
+        _ => "(DNS Query)"
+    };
 }
