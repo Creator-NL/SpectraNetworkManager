@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using SpectraNetworkManager.Sinkhole;
 
@@ -146,5 +146,35 @@ public class DnsServerEndToEndTests : IDisposable
         });
 
         await Task.WhenAll(tasks);
+    }
+
+    [Fact]
+    public async Task ForwardedAndCachedQuery_RecordsAnsweredIpsInDetail()
+    {
+        _fakeUpstream.Handler = (q, isTcp) =>
+        {
+            if (DnsQuery.TryParse(q, out var query, out _) && query is not null)
+            {
+                return DnsWire.BuildResponse(query, DnsRcode.NoError, new[]
+                {
+                    (DnsType.A, new byte[] { 162, 159, 138, 232 }),
+                    (DnsType.A, new byte[] { 162, 159, 137, 232 })
+                }, ttl: 300);
+            }
+            return null;
+        };
+
+        var server = StartServer();
+
+        // Query 1: Forwarded
+        await QueryServerUdpAsync(server.LocalEndPoint!, "discord.com", DnsType.A, id: 301);
+        var recent = _activity.Recent();
+        Assert.NotEmpty(recent);
+        Assert.Equal("162.159.138.232, 162.159.137.232", recent[0].Detail);
+
+        // Query 2: Cached
+        await QueryServerUdpAsync(server.LocalEndPoint!, "discord.com", DnsType.A, id: 302);
+        recent = _activity.Recent();
+        Assert.Equal("162.159.138.232, 162.159.137.232", recent[0].Detail);
     }
 }

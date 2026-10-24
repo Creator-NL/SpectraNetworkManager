@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Net;
 using SpectraNetworkManager.Core;
 using SpectraNetworkManager.Sinkhole;
@@ -202,6 +202,10 @@ public sealed record PublisherRow(string Name);
 /// <summary>One line in the DNS query log.</summary>
 public sealed record DnsRow(string Time, string Client, string Domain, string Type, string Result, string Detail, int Ms, bool IsBlocked, bool IsFailed, DnsLogEntry Entry)
 {
+    public string ClientDisplay => (Client == "127.0.0.1" || Client == "::1" || Client == "localhost")
+        ? $"{Client} (This PC)"
+        : Client;
+
     public static DnsRow From(DnsLogEntry e) => new(
         e.Time.ToString("HH:mm:ss"),
         e.Client,

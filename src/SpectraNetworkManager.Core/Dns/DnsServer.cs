@@ -324,7 +324,13 @@ public sealed class DnsServer : IDisposable
         var cached = _cache.TryGet(key, q.Id, DateTimeOffset.Now);
         if (cached is not null)
         {
-            Log(DnsOutcome.Cached, decision.Action == FilterAction.Allowed ? decision.Reason : null);
+            string? detail = decision.Action == FilterAction.Allowed ? decision.Reason : null;
+            if (string.IsNullOrEmpty(detail))
+            {
+                var addrs = DnsWire.AddressAnswers(cached);
+                if (addrs.Count > 0) detail = string.Join(", ", addrs);
+            }
+            Log(DnsOutcome.Cached, detail);
             return Fit(cached, q, tcp);
         }
 
@@ -361,7 +367,13 @@ public sealed class DnsServer : IDisposable
         }
 
         _cache.Put(key, answer, DateTimeOffset.Now);
-        Log(DnsOutcome.Forwarded, decision.Action == FilterAction.Allowed ? decision.Reason : null);
+        string? fwdDetail = decision.Action == FilterAction.Allowed ? decision.Reason : null;
+        if (string.IsNullOrEmpty(fwdDetail))
+        {
+            var addrs = DnsWire.AddressAnswers(answer);
+            if (addrs.Count > 0) fwdDetail = string.Join(", ", addrs);
+        }
+        Log(DnsOutcome.Forwarded, fwdDetail);
         return Fit(answer, q, tcp);
     }
 

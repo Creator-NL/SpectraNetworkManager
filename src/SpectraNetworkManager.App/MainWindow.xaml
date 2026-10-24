@@ -277,8 +277,8 @@
                     <RadioButton x:Name="TrafficRange7d" Content="7 Days" GroupName="trafficRange"
                                  Margin="0,0,20,0" VerticalAlignment="Center" Checked="OnTrafficRangeChanged"/>
                     <Button Content="Refresh" Padding="14,3" Margin="0,0,10,0" Click="OnRefreshTraffic"/>
-                    <Button Content="Export CSV" Padding="14,3" Margin="0,0,10,0" Click="OnExportTrafficCsv"/>
-                    <Button Content="Export JSON" Padding="14,3" Margin="0,0,10,0" Click="OnExportTrafficJson"/>
+                    <Button Content="Export" Padding="14,3" Margin="0,0,10,0" Click="OnExportTraffic" ToolTip="Export Traffic data to CSV or JSON format."/>
+
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
@@ -375,7 +375,25 @@
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
                        Text="Every decision you made, even for programs that are not running right now. FIREWALL shows whether Windows Firewall really contains the matching block rules (MISSING = the rules were removed outside SpectraNetworkManager)."/>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <StackPanel Grid.Row="1" Margin="0,0,0,8">
+                <!-- Missing Firewall Rules Warning Banner -->
+                <Border x:Name="MissingRulesBanner" Visibility="Collapsed"
+                        Background="#2A1B24" BorderBrush="{StaticResource Magenta}" BorderThickness="1"
+                        CornerRadius="4" Padding="12,8" Margin="0,0,0,8">
+                    <DockPanel LastChildFill="True">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="FixRulesButton" Content="⚡ Fix / Reapply Rules" Click="OnFixMissingRules"
+                                    Foreground="{StaticResource Magenta}" FontWeight="SemiBold" Padding="12,4"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="⚠️" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="MissingRulesBannerText"
+                                       Text="Attention: Block rules are missing from Windows Firewall and currently inactive!"
+                                       Foreground="{StaticResource Magenta}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+                <StackPanel Orientation="Horizontal">
                 <Button x:Name="RulesRefreshButton" Content="Refresh" Margin="0,0,8,0" Click="OnRefreshRules"/>
                 <Button x:Name="RulesEditButton" Content="Edit block..." Margin="0,0,8,0" Click="OnRulesEdit"
                         ToolTip="Change direction, ports or addresses of the selected block (or turn an Allow into a block)."/>
@@ -384,6 +402,7 @@
                 <Button x:Name="RulesForgetButton" Content="Forget decision" Margin="0,0,8,0" Click="OnRulesForget"
                         ToolTip="Remove the selected decision and its firewall rules."/>
                 <Button x:Name="RulesPanicButton" Content="PANIC: undo all SpectraNetworkManager changes" Click="OnPanic" Foreground="{StaticResource Magenta}"/>
+            </StackPanel>
             </StackPanel>
             <DataGrid x:Name="RulesGrid" Grid.Row="2" ItemsSource="{Binding RuleRows}" SelectionMode="Single">
                 <DataGrid.Columns>
@@ -547,7 +566,7 @@
                         </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="80"/>
-                            <DataGridTextColumn Header="CLIENT" Binding="{Binding Client, Mode=OneWay}" Width="120"/>
+                            <DataGridTextColumn Header="NIC / IP" Binding="{Binding ClientDisplay, Mode=OneWay}" Width="145"/>
                             <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain, Mode=OneWay}" Width="260"/>
                             <DataGridTemplateColumn Header="TYPE" Width="70">
                                 <DataGridTemplateColumn.CellTemplate>
@@ -597,7 +616,7 @@
                                             <TextBlock x:Name="InspectorInitiator" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="Bold" TextWrapping="Wrap"/>
                                         </DockPanel>
                                         <DockPanel Margin="0,0,0,4">
-                                            <TextBlock Text="Client Device:" FontSize="11" Foreground="{StaticResource Muted}" Width="95"/>
+                                            <TextBlock Text="NIC / Client IP:" FontSize="11" Foreground="{StaticResource Muted}" Width="95"/>
                                             <TextBlock x:Name="InspectorClient" FontSize="11" Foreground="{StaticResource Text}"/>
                                         </DockPanel>
                                         <DockPanel Margin="0,0,0,2">

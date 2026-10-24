@@ -192,6 +192,7 @@ public partial class MainWindow : Window
                     if (entry != null)
                     {
                         var row = DnsRow.From(entry);
+                        RecordDomainResolution(entry.Domain, entry.Detail);
                         DnsRows.Insert(0, row);
                         while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
                     }
@@ -280,7 +281,12 @@ public partial class MainWindow : Window
         {
             if (conn.Process != null && conn.Connection.Remote?.Address != null)
             {
-                RecordProcessSocket(conn.Connection.Remote.Address.ToString(), conn.Process.Name, conn.Process.Pid);
+                string rIp = conn.Connection.Remote.Address.ToString();
+                RecordProcessSocket(rIp, conn.Process.Name, conn.Process.Pid);
+                if (_resolvedDomainByIp.TryGetValue(rIp, out var dom))
+                {
+                    RecordProcessSocket(dom, conn.Process.Name, conn.Process.Pid);
+                }
             }
         }
 
@@ -305,6 +311,8 @@ public partial class MainWindow : Window
             if (row.Path.Length > 0) row.SetSignature(_signatures.TryGet(row.Path));
             if (resolve && row.RemoteAddress is not null)
                 row.Host = _dns.Request(row.RemoteAddress) ?? "";
+            if (row.Host.Length == 0 && row.RemoteAddress is not null && _resolvedDomainByIp.TryGetValue(row.RemoteAddress.ToString(), out var knownDom))
+                row.Host = knownDom;
             _rows[key] = row;
             Rows.Add(row);
         }
@@ -1173,6 +1181,18 @@ public partial class MainWindow : Window
         Publishers.Clear();
         foreach (var name in _rules.TrustedPublishers.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
             Publishers.Add(new PublisherRow(name));
+
+        int missingCount = RuleRows.Count(r => r.Decision == "Blocked" && (r.Firewall == "MISSING" || r.Firewall.StartsWith("PARTIAL", StringComparison.OrdinalIgnoreCase)));
+        if (missingCount > 0)
+        {
+            MissingRulesBannerText.Text = $"Attention: {missingCount} block rule(s) are missing from Windows Firewall and currently inactive!";
+            FixRulesButton.Content = $"⚡ Fix {missingCount} Rule{(missingCount > 1 ? "s" : "")}";
+            MissingRulesBanner.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            MissingRulesBanner.Visibility = Visibility.Collapsed;
+        }
     }
 
     // Compares the number of firewall rules we expect for a block with the number that really exist.
@@ -1189,6 +1209,74 @@ public partial class MainWindow : Window
         if (actual == 0) return "MISSING";
         if (actual < expected) return $"PARTIAL {actual}/{expected}";
         return actual == expected ? "active" : "active (+extra)";
+    }
+
+    private async void OnFixMissingRules(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin && _engineClient?.IsConnected != true)
+        {
+            Info("Reapplying firewall rules requires Administrator rights.\n\nRestart SpectraNetworkManager as Administrator to apply block rules.");
+            return;
+        }
+
+        FixRulesButton.IsEnabled = false;
+        StatusText.Text = "Reapplying missing firewall rules...";
+
+        try
+        {
+            var missingRules = RuleRows
+                .Where(r => r.Decision == "Blocked" && (r.Firewall == "MISSING" || r.Firewall.StartsWith("PARTIAL", StringComparison.OrdinalIgnoreCase)))
+                .Select(r => r.Rule)
+                .ToList();
+
+            if (missingRules.Count == 0)
+            {
+                MissingRulesBanner.Visibility = Visibility.Collapsed;
+                StatusText.Text = "All block rules are already active in Windows Firewall.";
+                return;
+            }
+
+            int fixedCount = 0;
+            if (_engineClient?.IsConnected == true)
+            {
+                foreach (var rule in missingRules)
+                {
+                    try
+                    {
+                        await _engineClient.SendRequestAsync(IpcConstants.Actions.AddRule, rule);
+                        fixedCount++;
+                    }
+                    catch (Exception) { }
+                }
+            }
+            else
+            {
+                await Task.Run(() =>
+                {
+                    foreach (var rule in missingRules)
+                    {
+                        try
+                        {
+                            var plan = RulePlanner.Plan(rule.Direction, rule.EffectiveScope);
+                            _enforcer.Block(rule.Path, plan);
+                            fixedCount++;
+                        }
+                        catch (Exception) { }
+                    }
+                });
+            }
+
+            await RefreshRulesAsync();
+            StatusText.Text = $"Successfully reapplied {fixedCount} missing firewall rule(s). All block rules are now active.";
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to reapply firewall rules", ex);
+        }
+        finally
+        {
+            FixRulesButton.IsEnabled = true;
+        }
     }
 
     // -- panic --
@@ -2025,6 +2113,28 @@ public partial class MainWindow : Window
         return client;
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, HashSet<string>> _resolvedIpsByDomain = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _resolvedDomainByIp = new(StringComparer.OrdinalIgnoreCase);
+
+    private void RecordDomainResolution(string domain, string? detail)
+    {
+        if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(detail)) return;
+        string cleanDomain = domain.TrimEnd('.');
+
+        var parts = detail.Split(new[] { ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var p in parts)
+        {
+            if (IPAddress.TryParse(p.Trim(), out var ip))
+            {
+                string ipStr = ip.ToString();
+                _resolvedDomainByIp[ipStr] = cleanDomain;
+                _resolvedIpsByDomain.AddOrUpdate(cleanDomain,
+                    _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ipStr },
+                    (_, set) => { lock (set) { set.Add(ipStr); } return set; });
+            }
+        }
+    }
+
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Program, int Pid, DateTimeOffset LastSeen)> _recentProcessByHostOrIp = new(StringComparer.OrdinalIgnoreCase);
 
     private void RecordProcessSocket(string hostOrIp, string program, int pid)
@@ -2051,7 +2161,20 @@ public partial class MainWindow : Window
                 return $"{matchingConn.Program} (PID {matchingConn.Pid})";
             }
 
-            var cutoff = DateTimeOffset.UtcNow.AddMinutes(-5);
+            if (_resolvedIpsByDomain.TryGetValue(domain, out var domainIps))
+            {
+                lock (domainIps)
+                {
+                    var connByIp = Rows.FirstOrDefault(c =>
+                        c.RemoteAddress != null && domainIps.Contains(c.RemoteAddress.ToString()));
+                    if (connByIp != null)
+                    {
+                        return $"{connByIp.Program} (PID {connByIp.Pid})";
+                    }
+                }
+            }
+
+            var cutoff = DateTimeOffset.UtcNow.AddMinutes(-10);
             foreach (var kvp in _recentProcessByHostOrIp)
             {
                 if (kvp.Value.LastSeen > cutoff)
@@ -2063,7 +2186,48 @@ public partial class MainWindow : Window
                     {
                         return $"{kvp.Value.Program} (PID {kvp.Value.Pid})";
                     }
+
+                    if (domainIps != null)
+                    {
+                        lock (domainIps)
+                        {
+                            if (domainIps.Contains(kvp.Key))
+                            {
+                                return $"{kvp.Value.Program} (PID {kvp.Value.Pid})";
+                            }
+                        }
+                    }
                 }
+            }
+
+            if (!string.IsNullOrEmpty(row.Detail))
+            {
+                var detailConn = Rows.FirstOrDefault(c =>
+                    c.RemoteAddress != null && row.Detail.Contains(c.RemoteAddress.ToString()));
+                if (detailConn != null)
+                {
+                    return $"{detailConn.Program} (PID {detailConn.Pid})";
+                }
+            }
+
+            try
+            {
+                string root = DomainIntelligence.Analyze(domain, false, false).RootDomain;
+                string rootBase = root.Split('.')[0];
+                if (!string.IsNullOrEmpty(rootBase) && rootBase.Length >= 4)
+                {
+                    var appMatch = Rows.FirstOrDefault(c =>
+                        c.Program.StartsWith(rootBase, StringComparison.OrdinalIgnoreCase) ||
+                        c.Program.Contains(rootBase, StringComparison.OrdinalIgnoreCase));
+                    if (appMatch != null)
+                    {
+                        return $"{appMatch.Program} (PID {appMatch.Pid})";
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through
             }
 
             if (row.IsBlocked)
@@ -2417,6 +2581,7 @@ public partial class MainWindow : Window
             {
                 foreach (var item in history)
                 {
+                    RecordDomainResolution(item.Domain, item.Detail);
                     DnsRows.Add(DnsRow.From(item));
                 }
                 _dnsLastTop = history[0];
@@ -2696,7 +2861,11 @@ public partial class MainWindow : Window
         var recent = _sink.Activity.Recent(300);
         int known = _dnsLastTop is null ? recent.Count : recent.ToList().FindIndex(x => ReferenceEquals(x, _dnsLastTop));
         if (known < 0) known = recent.Count;
-        for (int i = known - 1; i >= 0; i--) DnsRows.Insert(0, DnsRow.From(recent[i]));
+        for (int i = known - 1; i >= 0; i--)
+        {
+            RecordDomainResolution(recent[i].Domain, recent[i].Detail);
+            DnsRows.Insert(0, DnsRow.From(recent[i]));
+        }
         while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
         if (recent.Count > 0) _dnsLastTop = recent[0];
     }
@@ -3098,6 +3267,57 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             RotatingFileLogger.LogError("Failed to refresh traffic stats", ex);
+        }
+    }
+
+    private void OnExportTraffic(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"spectranetworkmanager-traffic-{DateTime.Now:yyyyMMdd-HHmmss}",
+                DefaultExt = ".csv",
+                Filter = "CSV Table (*.csv)|*.csv|JSON Data (*.json)|*.json|All files (*.*)|*.*",
+                FilterIndex = 1
+            };
+
+            if (sfd.ShowDialog(this) == true)
+            {
+                string ext = System.IO.Path.GetExtension(sfd.FileName).ToLowerInvariant();
+                if (ext == ".json" || (string.IsNullOrEmpty(ext) && sfd.FilterIndex == 2))
+                {
+                    var payload = new
+                    {
+                        ExportedAt = DateTimeOffset.UtcNow,
+                        TopTalkers = TopTalkers,
+                        RecentConnections = ConnectionHistory
+                    };
+                    string json = System.Text.Json.JsonSerializer.Serialize(payload, IndentedJsonOptions);
+                    File.WriteAllText(sfd.FileName, json, System.Text.Encoding.UTF8);
+                }
+                else
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.AppendLine("Program,BytesIn,BytesOut,TotalBytes,LastActive");
+                    foreach (var t in TopTalkers)
+                    {
+                        sb.AppendLine($"\"{t.Program.Replace("\"", "\"\"")}\",{t.BytesIn},{t.BytesOut},{t.TotalBytes},\"{t.LastActive:O}\"");
+                    }
+                    sb.AppendLine();
+                    sb.AppendLine("Program,Remote,Port,Protocol,FirstSeen,LastSeen");
+                    foreach (var c in ConnectionHistory)
+                    {
+                        sb.AppendLine($"\"{c.Program.Replace("\"", "\"\"")}\",\"{c.Remote}\",{c.Port},\"{c.Proto}\",\"{c.FirstSeen:O}\",\"{c.LastSeen:O}\"");
+                    }
+                    File.WriteAllText(sfd.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                }
+                Info($"Traffic data exported to {sfd.FileName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Info($"Failed to export traffic data: {ex.Message}");
         }
     }
 
