@@ -18,11 +18,11 @@
         <!-- Header -->
         <DockPanel Grid.Row="0">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Spectra" FontSize="26" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
-                <TextBlock Text="NetworkManager" FontSize="18" FontWeight="SemiBold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="0,0,0,1"/>
-
-                <TextBlock Text="  //  live network monitor" FontSize="14" Foreground="{StaticResource Magenta}"
-                           VerticalAlignment="Center" Margin="0,0,0,1"/>
+                <TextBlock FontFamily="Bahnschrift" VerticalAlignment="Center">
+                    <Run Text="Spectra" FontSize="26" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                    <Run Text="NetworkManager" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                    <Run Text="  //  live network monitor" FontSize="14" Foreground="{StaticResource Magenta}"/>
+                </TextBlock>
                 <Border x:Name="AdminStateBadge" Margin="18,0,0,4" Padding="10,2" VerticalAlignment="Bottom"
                         Background="{StaticResource Selected}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" CornerRadius="3"
                         ToolTip="Current privilege mode. Click 'Switch' to change modes.">
@@ -140,6 +140,7 @@
                         <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
                         <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
                         <MenuItem Header="End Process (Kill)" Click="OnKillConnectionProcess"/>
+                        <MenuItem Header="🛑 Stop Windows Service..." Click="OnStopConnectionService"/>
                         <Separator/>
                         <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
                         <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
@@ -212,6 +213,9 @@
                         ToolTip="Block this program's inbound and outbound traffic using Windows Firewall."/>
                 <Button x:Name="CloseConnectionsButton" Content="Close connections" Margin="0,0,8,0" Click="OnCloseProgramConnections"
                         ToolTip="Immediately terminate all open IPv4 TCP connections currently active for the selected program."/>
+
+                <Button x:Name="StopProgramServiceButton" Content="Stop service" Margin="0,0,8,0" Click="OnStopProgramService"
+                        ToolTip="Stops the Windows Service associated with the selected program (if running as a service)."/>
                 <Button x:Name="ForgetButton" Content="Forget decision" Margin="0,0,8,0" Click="OnForgetProgram"
                         ToolTip="Remove your decision (and the block, if any) for this program."/>
                 <Button x:Name="TrustButton" Content="Trust publisher" Margin="0,0,8,0" Click="OnTrustPublisher"
@@ -225,6 +229,7 @@
                     <ContextMenu>
                         <MenuItem Header="Close Open Connections" Click="OnCloseProgramConnections"/>
                         <MenuItem Header="End Process (Kill)" Click="OnKillProgramProcess"/>
+                        <MenuItem Header="🛑 Stop Windows Service..." Click="OnStopProgramService"/>
                         <Separator/>
                         <MenuItem Header="Block..." Click="OnBlockProgram"/>
                         <MenuItem Header="Allow" Click="OnAllowProgram"/>
@@ -537,7 +542,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <DataGrid x:Name="DnsGrid" Grid.Row="0" ItemsSource="{Binding DnsRows}" SelectionMode="Single"
+                    <DataGrid x:Name="DnsGrid" Grid.Row="0" ItemsSource="{Binding DnsRows}" SelectionMode="Single" PreviewMouseLeftButtonDown="OnDnsGridPreviewMouseLeftButtonDown"
                               SelectionChanged="OnDnsGridSelectionChanged">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
@@ -870,8 +875,6 @@
             <Button DockPanel.Dock="Right" Content="Copy Support Info" Padding="10,2" Margin="10,0,0,0" FontSize="11"
                     Foreground="{StaticResource Cyan}" Click="OnCopySupportInfo"
                     ToolTip="Copies a sanitized system and SpectraNetworkManager diagnostics report to clipboard with personal user paths redacted."/>
-            <TextBlock x:Name="StatusAdminIndicator" DockPanel.Dock="Right" Text="[ Mode: Administrator ]" FontSize="11"
-                       Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="10,0,14,0"/>
             <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" Text="Starting..." VerticalAlignment="Center"/>
         </DockPanel>
     </Grid>

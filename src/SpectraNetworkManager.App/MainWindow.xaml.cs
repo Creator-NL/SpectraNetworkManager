@@ -283,7 +283,7 @@ public partial class MainWindow : Window
 
         foreach (var conn in tick.Connections)
         {
-            if (conn.Process != null && conn.Connection.Remote?.Address != null)
+            if (conn.Process != null && conn.Connection.Remote?.Address != null && conn.Process.Pid > 4 && !conn.Process.Name.StartsWith("(none", StringComparison.OrdinalIgnoreCase))
             {
                 string rIp = conn.Connection.Remote.Address.ToString();
                 RecordProcessSocket(rIp, conn.Process.Name, conn.Process.Pid);
@@ -376,8 +376,7 @@ public partial class MainWindow : Window
         int processes = Rows.Select(r => r.Pid).Distinct().Count();
         int undecided = Programs.Count(p => p.IsNew);
         string strict = StrictActive ? "STRICT MODE ON  |  " : "";
-        string admin = _isAdmin ? "Administrator" : "Not elevated (blocking, some program names and the Firewall blocks view need Administrator)";
-        StatusText.Text = $"{strict}{Rows.Count} entries  |  {established} established  |  {listening} listening  |  {processes} processes  |  {undecided} programs without a decision  |  {admin}";
+        StatusText.Text = $"{strict}{Rows.Count} entries  |  {established} established  |  {listening} listening  |  {processes} processes  |  {undecided} programs without a decision";
     }
 
     // ---- programs view ---------------------------------------------------------------------
@@ -1087,6 +1086,51 @@ public partial class MainWindow : Window
         StatusText.Text = ok
             ? $"Terminated process {row.Program} (PID {row.Pid})."
             : $"Could not terminate PID {row.Pid} (it may have exited or requires Administrator rights).";
+        _monitor.Poll();
+    }
+
+    private async void OnStopConnectionService(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null) return;
+        await PromptAndStopServiceAsync(row.Pid, row.Program, row.Path);
+    }
+
+    private async void OnStopProgramService(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null) return;
+        int pid = Rows.FirstOrDefault(c => !string.IsNullOrEmpty(row.Path) && string.Equals(c.Path, row.Path, StringComparison.OrdinalIgnoreCase))?.Pid
+                  ?? Rows.FirstOrDefault(c => string.Equals(c.Program, row.Name, StringComparison.OrdinalIgnoreCase))?.Pid
+                  ?? 0;
+        await PromptAndStopServiceAsync(pid, row.Name, row.Path);
+    }
+
+    private async Task PromptAndStopServiceAsync(int pid, string programName, string path)
+    {
+        var services = WindowsServiceManager.GetServicesForProcess(pid, programName);
+        if (services.Count == 0)
+        {
+            MessageBox.Show(this,
+                $"Process \"{programName}\" (PID {pid}) does not appear to be running as a registered Windows Service.\n\n" +
+                "To terminate standard application processes, use 'End Process (Kill)' or 'Close connections'.",
+                "Not a Windows Service", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string serviceList = string.Join("\n", services.Select(s => $"• {s.DisplayName} ({s.ServiceName}) - {s.StateDescription}"));
+        var answer = MessageBox.Show(this,
+            $"Stop the following Windows Service(s) for \"{programName}\"?\n\n{serviceList}\n\n" +
+            (services.Count > 1 ? "Stopping this process will stop all services hosted in it." : ""),
+            "Stop Windows Service", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        foreach (var svc in services)
+        {
+            var res = await WindowsServiceManager.StopServiceAsync(svc.ServiceName);
+            StatusText.Text = res.Message;
+        }
+
         _monitor.Poll();
     }
 
@@ -2083,6 +2127,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnDnsGridPreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject dep)
+        {
+            var row = FindVisualParent<DataGridRow>(dep)?.DataContext as DnsRow
+                      ?? (dep as FrameworkElement)?.DataContext as DnsRow;
+            if (row != null)
+            {
+                DnsGrid.SelectedItem = row;
+                ShowDnsInspector(row);
+            }
+        }
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        DependencyObject? parentObject = VisualTreeHelper.GetParent(child);
+        if (parentObject == null) return null;
+        if (parentObject is T parent) return parent;
+        return FindVisualParent<T>(parentObject);
+    }
+
     private void OnCloseDnsInspector(object sender, RoutedEventArgs e) => CloseDnsInspector();
 
     private void CloseDnsInspector()
@@ -2155,7 +2221,7 @@ public partial class MainWindow : Window
 
     private void RecordProcessSocket(string hostOrIp, string program, int pid)
     {
-        if (string.IsNullOrWhiteSpace(hostOrIp) || string.IsNullOrWhiteSpace(program)) return;
+        if (pid <= 4 || string.IsNullOrWhiteSpace(hostOrIp) || string.IsNullOrWhiteSpace(program) || program.StartsWith("(none", StringComparison.OrdinalIgnoreCase)) return;
         _recentProcessByHostOrIp[hostOrIp] = (program, pid, DateTimeOffset.UtcNow);
     }
 
@@ -2313,94 +2379,104 @@ public partial class MainWindow : Window
 
     private void ShowDnsInspector(DnsRow row)
     {
-        var analysis = DomainIntelligence.Analyze(row.Domain, row.IsBlocked, row.IsFailed);
-
-        InspectorDomainText.Text = row.Domain;
-        InspectorCategoryText.Text = analysis.CategoryName.ToUpperInvariant();
-
-        bool isCustomBlock = _sink.IsCustomBlocked(row.Domain);
-        bool isCustomAllow = _sink.IsCustomAllowed(row.Domain);
-
-        if (isCustomBlock)
+        if (row == null) return;
+        try
         {
-            InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0x2B, 0xD6));
-            InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Magenta");
-            InspectorAdviceBadgeText.Text = "CUSTOM BLOCKED RULE";
+            var analysis = DomainIntelligence.Analyze(row.Domain, row.IsBlocked, row.IsFailed);
 
-            InspectorAdviceTitle.Foreground = (Brush)FindResource("Magenta");
-            InspectorAdviceTitle.Text = "Manually Blocked by You:";
-            InspectorAdviceDetail.Text = "This domain was explicitly added to your personal blocklist. Click 'Remove Custom Rule (Undo)' to revert.";
+            InspectorDomainText.Text = row.Domain;
+            InspectorCategoryText.Text = analysis.CategoryName.ToUpperInvariant();
 
-            InspectorBlockButton.Visibility = Visibility.Collapsed;
-            InspectorAllowButton.Visibility = Visibility.Visible;
-            InspectorRemoveCustomButton.Visibility = Visibility.Visible;
-            InspectorRemoveCustomButton.Content = "✕ Remove from Blocklist (Undo)";
-        }
-        else if (isCustomAllow)
-        {
-            InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0x22, 0xE8, 0xFF));
-            InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Cyan");
-            InspectorAdviceBadgeText.Text = "CUSTOM WHITELIST RULE";
+            bool isCustomBlock = _sink.IsCustomBlocked(row.Domain);
+            bool isCustomAllow = _sink.IsCustomAllowed(row.Domain);
 
-            InspectorAdviceTitle.Foreground = (Brush)FindResource("Cyan");
-            InspectorAdviceTitle.Text = "Manually Whitelisted by You:";
-            InspectorAdviceDetail.Text = "This domain is explicitly whitelisted in your personal allow list. Click 'Remove Custom Rule (Undo)' to revert.";
-
-            InspectorBlockButton.Visibility = Visibility.Visible;
-            InspectorAllowButton.Visibility = Visibility.Collapsed;
-            InspectorRemoveCustomButton.Visibility = Visibility.Visible;
-            InspectorRemoveCustomButton.Content = "✕ Remove from Whitelist (Undo)";
-        }
-        else
-        {
-            InspectorBlockButton.Visibility = Visibility.Visible;
-            InspectorAllowButton.Visibility = Visibility.Visible;
-            InspectorRemoveCustomButton.Visibility = Visibility.Collapsed;
-            InspectorAdviceBadgeText.Text = analysis.AdviceTitle.ToUpperInvariant();
-
-            Brush adviceBrush;
-            Brush adviceBgBrush;
-            switch (analysis.Advice)
+            if (isCustomBlock)
             {
-                case BlockAdvice.SafeToBlock:
-                    adviceBrush = (Brush)FindResource("Magenta");
-                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
-                    break;
-                case BlockAdvice.CautionBreakagePossible:
-                    adviceBrush = (Brush)FindResource("Amber");
-                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
-                    break;
-                case BlockAdvice.EssentialKeepAllowed:
-                    adviceBrush = (Brush)FindResource("Cyan");
-                    adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
-                    break;
-                default:
-                    adviceBrush = row.IsBlocked ? (Brush)FindResource("Magenta") : (Brush)FindResource("Cyan");
-                    adviceBgBrush = row.IsBlocked
-                        ? new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
-                        : new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
-                    break;
+                InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0x2B, 0xD6));
+                InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Magenta");
+                InspectorAdviceBadgeText.Text = "CUSTOM BLOCKED RULE";
+
+                InspectorAdviceTitle.Foreground = (Brush)FindResource("Magenta");
+                InspectorAdviceTitle.Text = "Manually Blocked by You:";
+                InspectorAdviceDetail.Text = "This domain was explicitly added to your personal blocklist. Click 'Remove Custom Rule (Undo)' to revert.";
+
+                InspectorBlockButton.Visibility = Visibility.Collapsed;
+                InspectorAllowButton.Visibility = Visibility.Visible;
+                InspectorRemoveCustomButton.Visibility = Visibility.Visible;
+                InspectorRemoveCustomButton.Content = "✕ Remove from Blocklist (Undo)";
+            }
+            else if (isCustomAllow)
+            {
+                InspectorAdviceBadge.Background = new SolidColorBrush(Color.FromArgb(0x44, 0x22, 0xE8, 0xFF));
+                InspectorAdviceBadgeText.Foreground = (Brush)FindResource("Cyan");
+                InspectorAdviceBadgeText.Text = "CUSTOM WHITELIST RULE";
+
+                InspectorAdviceTitle.Foreground = (Brush)FindResource("Cyan");
+                InspectorAdviceTitle.Text = "Manually Whitelisted by You:";
+                InspectorAdviceDetail.Text = "This domain is explicitly whitelisted in your personal allow list. Click 'Remove Custom Rule (Undo)' to revert.";
+
+                InspectorBlockButton.Visibility = Visibility.Visible;
+                InspectorAllowButton.Visibility = Visibility.Collapsed;
+                InspectorRemoveCustomButton.Visibility = Visibility.Visible;
+                InspectorRemoveCustomButton.Content = "✕ Remove from Whitelist (Undo)";
+            }
+            else
+            {
+                InspectorBlockButton.Visibility = Visibility.Visible;
+                InspectorAllowButton.Visibility = Visibility.Visible;
+                InspectorRemoveCustomButton.Visibility = Visibility.Collapsed;
+                InspectorAdviceBadgeText.Text = analysis.AdviceTitle.ToUpperInvariant();
+
+                Brush adviceBrush;
+                Brush adviceBgBrush;
+                switch (analysis.Advice)
+                {
+                    case BlockAdvice.SafeToBlock:
+                        adviceBrush = (Brush)FindResource("Magenta");
+                        adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
+                        break;
+                    case BlockAdvice.CautionBreakagePossible:
+                        adviceBrush = (Brush)FindResource("Amber");
+                        adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
+                        break;
+                    case BlockAdvice.EssentialKeepAllowed:
+                        adviceBrush = (Brush)FindResource("Cyan");
+                        adviceBgBrush = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                        break;
+                    default:
+                        adviceBrush = row.IsBlocked ? (Brush)FindResource("Magenta") : (Brush)FindResource("Cyan");
+                        adviceBgBrush = row.IsBlocked
+                            ? new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
+                            : new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                        break;
+                }
+
+                InspectorAdviceBadge.Background = adviceBgBrush;
+                InspectorAdviceBadgeText.Foreground = adviceBrush;
+                InspectorAdviceTitle.Foreground = adviceBrush;
+                InspectorAdviceTitle.Text = analysis.AdviceTitle + ":";
+                InspectorAdviceDetail.Text = analysis.AdviceDetail;
             }
 
-            InspectorAdviceBadge.Background = adviceBgBrush;
-            InspectorAdviceBadgeText.Foreground = adviceBrush;
-            InspectorAdviceTitle.Foreground = adviceBrush;
-            InspectorAdviceTitle.Text = analysis.AdviceTitle + ":";
-            InspectorAdviceDetail.Text = analysis.AdviceDetail;
+            InspectorServiceName.Text = analysis.ServiceName;
+            InspectorDescription.Text = analysis.Description;
+
+            InspectorRootDomain.Text = analysis.RootDomain;
+            InspectorClient.Text = FormatClientDisplay(row.Client);
+            InspectorInitiator.Text = !string.IsNullOrEmpty(row.CallerProgram)
+                ? row.CallerProgram
+                : ResolveInitiator(row);
+            InspectorQueryType.Text = row.Type;
+            InspectorQueryTypeDesc.Text = row.TypeDescription;
+            InspectorLatency.Text = $"{row.Ms} ms";
+            InspectorOutcome.Text = row.Result;
+
+            DnsInspectorPanel.Visibility = Visibility.Visible;
         }
-
-        InspectorServiceName.Text = analysis.ServiceName;
-        InspectorDescription.Text = analysis.Description;
-
-        InspectorRootDomain.Text = analysis.RootDomain;
-        InspectorClient.Text = FormatClientDisplay(row.Client);
-        InspectorInitiator.Text = ResolveInitiator(row);
-        InspectorQueryType.Text = row.Type;
-        InspectorQueryTypeDesc.Text = row.TypeDescription;
-        InspectorLatency.Text = $"{row.Ms} ms";
-        InspectorOutcome.Text = row.Result;
-
-        DnsInspectorPanel.Visibility = Visibility.Visible;
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"ShowDnsInspector failed for '{row.Domain}': {ex.Message}");
+        }
     }
 
     private async void OnInspectorRemoveCustom(object sender, RoutedEventArgs e)
@@ -3548,9 +3624,6 @@ public partial class MainWindow : Window
             SwitchElevationButton.Content = "👤 Switch to Normal Mode";
             SwitchElevationButton.Foreground = (Brush)FindResource("Text");
             SwitchElevationButton.ToolTip = "Restart SpectraNetworkManager in standard user mode without Administrator privileges.";
-
-            StatusAdminIndicator.Text = "[ Privilege: Administrator ]";
-            StatusAdminIndicator.Foreground = (Brush)FindResource("Cyan");
         }
         else
         {
@@ -3558,14 +3631,11 @@ public partial class MainWindow : Window
             AdminStateText.Text = "STANDARD USER";
             AdminStateText.Foreground = (Brush)FindResource("Amber");
             AdminStateBadge.BorderBrush = (Brush)FindResource("Amber");
-            AdminStateBadge.ToolTip = "Running in Standard User mode.\nSystem firewall rules and system DNS changes require Administrator privileges.";
+            AdminStateBadge.ToolTip = "Running in Standard User mode.\nNot elevated: Blocking, some program names, and the Firewall blocks view need Administrator privileges.\nClick 'Switch to Administrator' to elevate.";
 
             SwitchElevationButton.Content = "🛡️ Switch to Administrator";
             SwitchElevationButton.Foreground = (Brush)FindResource("Cyan");
             SwitchElevationButton.ToolTip = "Restart SpectraNetworkManager with full Administrator privileges (prompts UAC elevation).";
-
-            StatusAdminIndicator.Text = "[ Privilege: Standard User ]";
-            StatusAdminIndicator.Foreground = (Brush)FindResource("Amber");
         }
 
         AlwaysAdminCheck.IsChecked = _appSettings.Settings.AlwaysStartAsAdministrator;
