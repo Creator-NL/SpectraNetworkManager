@@ -51,6 +51,7 @@ public partial class MainWindow : Window
 
     private readonly NetworkHistoryDatabase _historyDb = new();
     private readonly EtwBandwidthMonitor _etw = new();
+    private readonly EtwDnsClientMonitor _dnsEtw = new();
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
     private bool _trayBalloonShown;
@@ -85,6 +86,7 @@ public partial class MainWindow : Window
         if (_isAdmin)
         {
             _etw.TryStart();
+            _dnsEtw.TryStart();
         }
 
         _rowsView = CollectionViewSource.GetDefaultView(Rows);
@@ -113,6 +115,7 @@ public partial class MainWindow : Window
             _promptToast?.Close();
             _trayIcon?.Dispose();
             _etw.Dispose();
+            _dnsEtw.Dispose();
             _historyDb.Dispose();
             _engineClient?.Dispose();
             _signatures.Dispose();
@@ -191,7 +194,8 @@ public partial class MainWindow : Window
                     var entry = msg.DeserializePayload<DnsLogEntry>();
                     if (entry != null)
                     {
-                        var row = DnsRow.From(entry);
+                        string caller = ResolveInitiator(entry.Domain, entry.Client, entry.Detail, entry.Outcome == DnsOutcome.Blocked);
+                        var row = DnsRow.From(entry, caller);
                         RecordDomainResolution(entry.Domain, entry.Detail);
                         DnsRows.Insert(0, row);
                         while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
@@ -286,6 +290,18 @@ public partial class MainWindow : Window
                 if (_resolvedDomainByIp.TryGetValue(rIp, out var dom))
                 {
                     RecordProcessSocket(dom, conn.Process.Name, conn.Process.Pid);
+
+                    string programWithPid = $"{conn.Process.Name} (PID {conn.Process.Pid})";
+                    for (int i = 0; i < Math.Min(50, DnsRows.Count); i++)
+                    {
+                        var r = DnsRows[i];
+                        if ((r.Domain.Equals(dom, StringComparison.OrdinalIgnoreCase) ||
+                             (!string.IsNullOrEmpty(r.Detail) && r.Detail.Contains(rIp, StringComparison.OrdinalIgnoreCase))) &&
+                            (string.IsNullOrEmpty(r.CallerProgram) || r.CallerProgram.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            r.CallerProgram = programWithPid;
+                        }
+                    }
                 }
             }
         }
@@ -2104,7 +2120,7 @@ public partial class MainWindow : Window
     {
         if (client == "127.0.0.1" || client == "::1" || client == "localhost")
         {
-            return $"{client} (This PC)";
+            return client;
         }
         if (_lanDeviceNames.TryGetValue(client, out var name) && !string.Equals(name, client, StringComparison.OrdinalIgnoreCase))
         {
@@ -2143,12 +2159,19 @@ public partial class MainWindow : Window
         _recentProcessByHostOrIp[hostOrIp] = (program, pid, DateTimeOffset.UtcNow);
     }
 
-    private string ResolveInitiator(DnsRow row)
+    private string ResolveInitiator(DnsRow row) =>
+        ResolveInitiator(row.Domain, row.Client, row.Detail, row.IsBlocked);
+
+    private string ResolveInitiator(string rawDomain, string client, string? detail, bool isBlocked)
     {
-        string client = row.Client;
         if (client == "127.0.0.1" || client == "::1" || client == "localhost")
         {
-            string domain = row.Domain.TrimEnd('.');
+            string domain = rawDomain.TrimEnd('.');
+
+            if (_dnsEtw.TryGetCaller(domain, out var etwCaller))
+            {
+                return $"{etwCaller.Program} (PID {etwCaller.Pid})";
+            }
 
             var matchingConn = Rows.FirstOrDefault(c =>
                 !string.IsNullOrEmpty(c.Host) && (
@@ -2182,7 +2205,7 @@ public partial class MainWindow : Window
                     if (kvp.Key.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
                         kvp.Key.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase) ||
                         domain.EndsWith("." + kvp.Key, StringComparison.OrdinalIgnoreCase) ||
-                        (!string.IsNullOrEmpty(row.Detail) && row.Detail.Contains(kvp.Key)))
+                        (!string.IsNullOrEmpty(detail) && detail.Contains(kvp.Key)))
                     {
                         return $"{kvp.Value.Program} (PID {kvp.Value.Pid})";
                     }
@@ -2200,10 +2223,10 @@ public partial class MainWindow : Window
                 }
             }
 
-            if (!string.IsNullOrEmpty(row.Detail))
+            if (!string.IsNullOrEmpty(detail))
             {
                 var detailConn = Rows.FirstOrDefault(c =>
-                    c.RemoteAddress != null && row.Detail.Contains(c.RemoteAddress.ToString()));
+                    c.RemoteAddress != null && detail.Contains(c.RemoteAddress.ToString()));
                 if (detailConn != null)
                 {
                     return $"{detailConn.Program} (PID {detailConn.Pid})";
@@ -2225,17 +2248,30 @@ public partial class MainWindow : Window
                     }
                 }
             }
-            catch
+            catch { }
+
+            if (!domain.StartsWith("wpad", StringComparison.OrdinalIgnoreCase) &&
+                !domain.Contains("msftconnecttest", StringComparison.OrdinalIgnoreCase) &&
+                !domain.Contains("windowsupdate", StringComparison.OrdinalIgnoreCase))
             {
-                // Fall through
+                var browser = Rows.FirstOrDefault(c =>
+                    (c.Program.Equals("firefox.exe", StringComparison.OrdinalIgnoreCase) ||
+                     c.Program.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase) ||
+                     c.Program.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase) ||
+                     c.Program.Equals("brave.exe", StringComparison.OrdinalIgnoreCase)) &&
+                    (c.RemotePort == 443 || c.RemotePort == 80));
+                if (browser != null)
+                {
+                    return $"{browser.Program} (PID {browser.Pid})";
+                }
             }
 
-            if (row.IsBlocked)
+            if (isBlocked)
             {
-                return "This PC (Blocked Query - No Connection)";
+                return "svchost.exe (Blocked)";
             }
 
-            return "This PC (Windows Service / DNS Prefetch)";
+            return "svchost.exe (Windows Service)";
         }
 
         if (_lanDeviceNames.TryGetValue(client, out var cachedName))
@@ -2244,7 +2280,7 @@ public partial class MainWindow : Window
         }
 
         _ = ResolveLanClientAsync(client);
-        return "LAN Device (Resolving...)";
+        return $"LAN Device ({client})";
     }
 
     private async Task ResolveLanClientAsync(string clientIp)
@@ -2582,7 +2618,8 @@ public partial class MainWindow : Window
                 foreach (var item in history)
                 {
                     RecordDomainResolution(item.Domain, item.Detail);
-                    DnsRows.Add(DnsRow.From(item));
+                    string caller = ResolveInitiator(item.Domain, item.Client, item.Detail, item.Outcome == DnsOutcome.Blocked);
+                    DnsRows.Add(DnsRow.From(item, caller));
                 }
                 _dnsLastTop = history[0];
             }
@@ -2864,7 +2901,8 @@ public partial class MainWindow : Window
         for (int i = known - 1; i >= 0; i--)
         {
             RecordDomainResolution(recent[i].Domain, recent[i].Detail);
-            DnsRows.Insert(0, DnsRow.From(recent[i]));
+            string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
+            DnsRows.Insert(0, DnsRow.From(recent[i], caller));
         }
         while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
         if (recent.Count > 0) _dnsLastTop = recent[0];

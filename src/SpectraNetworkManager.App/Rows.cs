@@ -18,6 +18,7 @@ public sealed class ConnectionRow : INotifyPropertyChanged
         Protocol = c.Protocol.ToString().ToUpperInvariant();
         Local = Display.Endpoint(c.Local);
         RemoteAddress = c.Protocol == SpectraNetworkManager.Core.Protocol.Udp ? null : c.Remote?.Address;
+        RemotePort = c.Protocol == SpectraNetworkManager.Core.Protocol.Udp ? 0 : (c.Remote?.Port ?? 0);
         Remote = c.Protocol == SpectraNetworkManager.Core.Protocol.Udp ? "*" : Display.Endpoint(c.Remote);
         Pid = c.ProcessId;
         Program = view.Process.Name;
@@ -30,6 +31,7 @@ public sealed class ConnectionRow : INotifyPropertyChanged
     public string Local { get; }
     public string Remote { get; }
     public IPAddress? RemoteAddress { get; }
+    public int RemotePort { get; }
     public int Pid { get; }
     public string Program { get; }
     public string Path { get; }
@@ -200,13 +202,30 @@ public sealed record RuleRow(string Name, string Decision, string Direction, str
 public sealed record PublisherRow(string Name);
 
 /// <summary>One line in the DNS query log.</summary>
-public sealed record DnsRow(string Time, string Client, string Domain, string Type, string Result, string Detail, int Ms, bool IsBlocked, bool IsFailed, DnsLogEntry Entry)
+public sealed record DnsRow(string Time, string Client, string Domain, string Type, string Result, string Detail, int Ms, bool IsBlocked, bool IsFailed, DnsLogEntry Entry) : INotifyPropertyChanged
 {
-    public string ClientDisplay => (Client == "127.0.0.1" || Client == "::1" || Client == "localhost")
-        ? $"{Client} (This PC)"
-        : Client;
+    private string _callerProgram = "";
 
-    public static DnsRow From(DnsLogEntry e) => new(
+    public string ClientDisplay => Client;
+
+    public string CallerProgram
+    {
+        get => _callerProgram;
+        set
+        {
+            if (_callerProgram != value)
+            {
+                _callerProgram = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CallerProgram)));
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public static DnsRow From(DnsLogEntry e, string caller = "")
+    {
+        var row = new DnsRow(
         e.Time.ToString("HH:mm:ss"),
         e.Client,
         e.Domain,
@@ -224,6 +243,9 @@ public sealed record DnsRow(string Time, string Client, string Domain, string Ty
         e.Outcome == DnsOutcome.Blocked,
         e.Outcome == DnsOutcome.Failed,
         e);
+        row._callerProgram = caller;
+        return row;
+    }
 
     public string TypeToolTip => (Type?.ToUpperInvariant() ?? "") switch
     {

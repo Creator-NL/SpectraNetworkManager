@@ -566,7 +566,8 @@
                         </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="80"/>
-                            <DataGridTextColumn Header="NIC / IP" Binding="{Binding ClientDisplay, Mode=OneWay}" Width="145"/>
+                            <DataGridTextColumn Header="NIC / IP" Binding="{Binding Client, Mode=OneWay}" Width="95"/>
+                            <DataGridTextColumn Header="CALLER PROGRAM" Binding="{Binding CallerProgram, Mode=OneWay}" Width="170"/>
                             <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain, Mode=OneWay}" Width="260"/>
                             <DataGridTemplateColumn Header="TYPE" Width="70">
                                 <DataGridTemplateColumn.CellTemplate>
