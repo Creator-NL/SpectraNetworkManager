@@ -1,4 +1,4 @@
-﻿using SpectraNetworkManager.Sinkhole;
+using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Platform.Windows;
 
@@ -16,7 +16,9 @@ public sealed record NetworkAdapterDnsInfo(
     IReadOnlyList<string> Ipv4Servers,
     bool Ipv4IsDhcp,
     IReadOnlyList<string> Ipv6Servers,
-    bool Ipv6IsDhcp);
+    bool Ipv6IsDhcp,
+    bool HasDefaultGateway = false,
+    string AdapterKind = "Ethernet");
 
 /// <summary>
 /// Abstraction for querying and modifying system adapter DNS settings.

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 
 namespace SpectraNetworkManager.Ui;
 
@@ -11,7 +11,14 @@ public sealed class AdapterListItem : INotifyPropertyChanged
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
     public string CurrentDns { get; init; } = "";
-    public string DisplayText => $"{Name} ({Description}) — DNS: {CurrentDns}";
+    public bool IsWireless { get; init; }
+    public bool IsVirtual { get; init; }
+    public bool HasDefaultGateway { get; init; }
+    public string AdapterKind { get; init; } = "Ethernet";
+
+    public string Icon => IsWireless ? "📶" : (IsVirtual ? "🖧" : "🔌");
+    public string GatewayBadge => HasDefaultGateway ? " [Internet Gateway]" : "";
+    public string DisplayText => $"{Icon} {Name} ({Description}){GatewayBadge} — DNS: {CurrentDns}";
 
     public bool IsSelected
     {

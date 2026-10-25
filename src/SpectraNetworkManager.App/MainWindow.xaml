@@ -833,7 +833,12 @@
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock Text="Select network adapters to point at SpectraNetworkManager:" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4"/>
+                            <DockPanel Margin="0,0,0,4">
+                                <CheckBox x:Name="DnsShowVirtualAdaptersBox" DockPanel.Dock="Right" Content="Show virtual / VPN" FontSize="11"
+                                          Checked="OnDnsRefreshAdapters" Unchecked="OnDnsRefreshAdapters"
+                                          ToolTip="Also show virtual switches (Hyper-V, VMware, VirtualBox) and VPN tunnel adapters."/>
+                                <TextBlock Text="Select network adapters to point at SpectraNetworkManager:" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center"/>
+                            </DockPanel>
                             <ItemsControl x:Name="DnsAdaptersList" Margin="0,0,0,6">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
@@ -843,6 +848,8 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <TextBlock x:Name="DnsNoAdaptersHint" Text="No active Ethernet or Wi-Fi adapters detected. Tick 'Show virtual / VPN' or click 'Refresh adapters'."
+                                       Foreground="{StaticResource Amber}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="Collapsed"/>
 
                             <CheckBox x:Name="DnsFallbackModeBox" Content="Fallback mode (keep previous DNS as secondary backup)" IsChecked="False" Margin="0,0,0,8" Checked="OnFallbackModeChanged" Unchecked="OnFallbackModeChanged"
                                       ToolTip="Recommended. If SpectraNetworkManager is stopped, your computer can still reach your previous DNS servers."/>

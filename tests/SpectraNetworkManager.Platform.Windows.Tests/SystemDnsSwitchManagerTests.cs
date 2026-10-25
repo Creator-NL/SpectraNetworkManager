@@ -1,4 +1,4 @@
-﻿using SpectraNetworkManager.Platform.Windows;
+using SpectraNetworkManager.Platform.Windows;
 using SpectraNetworkManager.Sinkhole;
 using Xunit;
 
@@ -127,5 +127,86 @@ public class SystemDnsSwitchManagerTests : IDisposable
 
         Assert.Equal(1, _fakeSwitch.RestoredCount);
         Assert.Equal(DnsSwitchPhase.Off, manager.State.Phase);
+    }
+
+    [Theory]
+    [InlineData("Ethernet", "Realtek PCIe GbE Family Controller", System.Net.NetworkInformation.NetworkInterfaceType.Ethernet, false, true)]
+    [InlineData("Ethernet 2", "Realtek Gaming 2.5GbE Family Controller", System.Net.NetworkInformation.NetworkInterfaceType.GigabitEthernet, true, true)]
+    [InlineData("ASUS LAN", "Intel(R) Ethernet Controller I225-V", System.Net.NetworkInformation.NetworkInterfaceType.Ethernet, false, true)]
+    [InlineData("Killer", "Killer E3100G 2.5 Gigabit Ethernet Controller", System.Net.NetworkInformation.NetworkInterfaceType.Ethernet, false, true)]
+    public void ClassifyAdapter_PhysicalEthernetAndRealtekPcieGbe_AreNeverMarkedVirtualEvenWhenWmiSaysVirtual(
+        string name,
+        string description,
+        System.Net.NetworkInformation.NetworkInterfaceType type,
+        bool hasGateway,
+        bool wmiReportedVirtual)
+    {
+        var (isNoise, isVirtual, isWireless, kind) = WindowsSystemDnsSwitch.ClassifyAdapter(
+            name, description, type, hasGateway, wmiReportedVirtual);
+
+        Assert.False(isNoise);
+        Assert.False(isVirtual);
+        Assert.False(isWireless);
+        Assert.Equal("Ethernet", kind);
+    }
+
+    [Theory]
+    [InlineData("Wi-Fi", "Intel(R) Wi-Fi 6E AX210 160MHz", System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211)]
+    [InlineData("WLAN", "MediaTek Wi-Fi 6E MT7922 (RZ616) 160MHz Wireless LAN Card", System.Net.NetworkInformation.NetworkInterfaceType.Ethernet)]
+    [InlineData("Wi-Fi", "Realtek 8822CE Wireless LAN 802.11ac PCI-E NIC", System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211)]
+    public void ClassifyAdapter_WirelessAdapters_AreDetectedAsWiFiAndNotVirtual(
+        string name,
+        string description,
+        System.Net.NetworkInformation.NetworkInterfaceType type)
+    {
+        var (isNoise, isVirtual, isWireless, kind) = WindowsSystemDnsSwitch.ClassifyAdapter(
+            name, description, type, hasDefaultGateway: true, wmiReportedVirtual: true);
+
+        Assert.False(isNoise);
+        Assert.False(isVirtual);
+        Assert.True(isWireless);
+        Assert.Equal("Wi-Fi", kind);
+    }
+
+    [Fact]
+    public void ClassifyAdapter_VirtualSwitchWithDefaultGateway_IsNotHiddenAsVirtual()
+    {
+        var (isNoise, isVirtual, _, _) = WindowsSystemDnsSwitch.ClassifyAdapter(
+            "vEthernet (Default Switch)",
+            "Hyper-V Virtual Ethernet Adapter",
+            System.Net.NetworkInformation.NetworkInterfaceType.Ethernet,
+            hasDefaultGateway: true,
+            wmiReportedVirtual: true);
+
+        Assert.False(isNoise);
+        Assert.False(isVirtual);
+    }
+
+    [Fact]
+    public void ClassifyAdapter_VirtualSwitchWithoutGateway_IsMarkedVirtual()
+    {
+        var (isNoise, isVirtual, _, kind) = WindowsSystemDnsSwitch.ClassifyAdapter(
+            "vEthernet (WSL)",
+            "Hyper-V Virtual Ethernet Adapter",
+            System.Net.NetworkInformation.NetworkInterfaceType.Ethernet,
+            hasDefaultGateway: false,
+            wmiReportedVirtual: true);
+
+        Assert.False(isNoise);
+        Assert.True(isVirtual);
+        Assert.Equal("Virtual / VPN", kind);
+    }
+
+    [Fact]
+    public void GetAdaptersNative_ReturnsAdaptersInProcessWithoutThrowing()
+    {
+        var adapters = WindowsSystemDnsSwitch.GetAdaptersNative();
+        Assert.NotNull(adapters);
+        foreach (var a in adapters)
+        {
+            Assert.True(a.InterfaceIndex > 0);
+            Assert.False(string.IsNullOrWhiteSpace(a.Name));
+            Assert.False(string.IsNullOrWhiteSpace(a.Description));
+        }
     }
 }

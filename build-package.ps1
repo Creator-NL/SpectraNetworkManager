@@ -40,9 +40,9 @@ if (Test-Path "publish") {
     Remove-Item -Recurse -Force "publish"
 }
 
-dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true -o publish/app
+dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/app
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish App failed!"; exit $LASTEXITCODE }
-dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true -o publish/engine
+dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/engine
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish Engine failed!"; exit $LASTEXITCODE }
 Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green
 
@@ -88,7 +88,8 @@ $portableZip = "installer\output\SpectraNetworkManager-v$Version-Portable.zip"
 if (Test-Path $portableZip) {
     Remove-Item -Force $portableZip
 }
-Compress-Archive -Path "publish\app\*" -DestinationPath $portableZip -CompressionLevel Optimal
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path "publish\app").Path, (Join-Path (Resolve-Path "installer\output").Path "SpectraNetworkManager-v$Version-Portable.zip"), [System.IO.Compression.CompressionLevel]::Optimal, $false)
 Write-Host "Portable package created at $portableZip" -ForegroundColor Green
 
 # 4. Compute SHA-256 checksums

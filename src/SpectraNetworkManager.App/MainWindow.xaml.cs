@@ -2889,13 +2889,31 @@ public partial class MainWindow : Window
     {
         try
         {
-            var adapters = await Task.Run(() => new WindowsSystemDnsSwitch().GetAdaptersAsync());
+            var adapters = await Task.Run(() => _dnsSwitch.GetAdaptersAsync());
+            bool showVirtual = DnsShowVirtualAdaptersBox?.IsChecked == true;
+
+            var filtered = adapters
+                .Where(a => !a.IsVirtual || a.HasDefaultGateway || showVirtual)
+                .ToList();
+
+            // Safety fallback: if filtering virtual adapters leaves 0 results while adapters exist (e.g. VPN-only or custom virtual bridge), show all
+            if (filtered.Count == 0 && adapters.Count > 0)
+            {
+                filtered = adapters.ToList();
+            }
+
+            bool anyGateway = filtered.Any(a => a.HasDefaultGateway);
 
             DnsAdapters.Clear();
-            foreach (var a in adapters)
+            foreach (var a in filtered)
             {
                 string dnsDesc = a.Ipv4Servers.Count > 0 ? string.Join(", ", a.Ipv4Servers) : (a.Ipv4IsDhcp ? "DHCP" : "None");
                 if (a.Ipv6Servers.Count > 0) dnsDesc += $" / IPv6: {string.Join(", ", a.Ipv6Servers)}";
+
+                bool isUp = a.Status.Equals("Up", StringComparison.OrdinalIgnoreCase);
+                bool defaultSelected = anyGateway
+                    ? (isUp && (a.HasDefaultGateway || !a.IsVirtual))
+                    : (isUp && !a.IsVirtual);
 
                 DnsAdapters.Add(new AdapterListItem
                 {
@@ -2903,8 +2921,22 @@ public partial class MainWindow : Window
                     Name = a.Name,
                     Description = a.Description,
                     CurrentDns = dnsDesc,
-                    IsSelected = a.Status.Equals("Up", StringComparison.OrdinalIgnoreCase) && !a.IsVirtual,
+                    IsWireless = a.IsWireless,
+                    IsVirtual = a.IsVirtual,
+                    HasDefaultGateway = a.HasDefaultGateway,
+                    AdapterKind = a.AdapterKind,
+                    IsSelected = defaultSelected,
                 });
+            }
+
+            if (DnsAdapters.Count > 0 && !DnsAdapters.Any(x => x.IsSelected))
+            {
+                DnsAdapters[0].IsSelected = true;
+            }
+
+            if (DnsNoAdaptersHint != null)
+            {
+                DnsNoAdaptersHint.Visibility = DnsAdapters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
         }
         catch (Exception ex)
@@ -2918,7 +2950,7 @@ public partial class MainWindow : Window
         bool isActive = _dnsSwitch.IsActive;
         bool isPending = _dnsSwitch.IsPending;
 
-        DnsApplySwitchButton.IsEnabled = !isActive && !isPending && _sink.IsRunning;
+        DnsApplySwitchButton.IsEnabled = !isActive && !isPending;
         DnsRestoreSwitchButton.IsEnabled = isActive || isPending;
 
         if (isPending)
@@ -2943,22 +2975,48 @@ public partial class MainWindow : Window
 
     private async void OnDnsRefreshAdapters(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded) return;
         await RefreshAdaptersListAsync();
         UpdateDnsSwitchUi();
+    }
+
+    private void PromptRestartAsAdminForDns(string actionDescription)
+    {
+        var res = MessageBox.Show(this,
+            $"{actionDescription} requires Administrator privileges.\n\n" +
+            "Would you like to restart SpectraNetworkManager as Administrator now?",
+            "Administrator Privileges Required",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (res == MessageBoxResult.Yes)
+        {
+            string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
+            if (ElevationHelper.StartProcessElevated(exe))
+            {
+                _isExiting = true;
+                _promptToast?.Close();
+                _trayIcon?.Dispose();
+                System.Windows.Application.Current.Shutdown(0);
+            }
+        }
     }
 
     private async void OnDnsSwitchApply(object sender, RoutedEventArgs e)
     {
         if (!_isAdmin)
         {
-            Info("Changing Windows system DNS requires Administrator rights.\n\nClose SpectraNetworkManager and start it again with 'Run as administrator'.");
+            PromptRestartAsAdminForDns("Pointing Windows system DNS to SpectraNetworkManager");
             return;
         }
 
         if (!_sink.IsRunning)
         {
-            Info("Please start the SpectraNetworkManager DNS server first before pointing Windows to it.");
-            return;
+            await StartDnsAsync();
+            if (!_sink.IsRunning)
+            {
+                return;
+            }
         }
 
         var selected = DnsAdapters.Where(a => a.IsSelected).Select(a => a.InterfaceIndex).ToList();
@@ -3007,7 +3065,7 @@ public partial class MainWindow : Window
     {
         if (!_isAdmin)
         {
-            Info("Restoring Windows system DNS requires Administrator rights.\n\nClose SpectraNetworkManager and start it again with 'Run as administrator'.");
+            PromptRestartAsAdminForDns("Restoring Windows system DNS settings");
             return;
         }
 
@@ -3037,6 +3095,11 @@ public partial class MainWindow : Window
         HeaderDnsButton.Foreground = _sink.IsRunning ? (Brush)FindResource("Amber") : (Brush)FindResource("Cyan");
         HeaderDnsButton.ToolTip = _sink.IsRunning ? "Stop the running DNS Sinkhole Server" : "Start the DNS Sinkhole Server";
         if (DnsPanel.Visibility != Visibility.Visible) return;
+
+        if (DnsAdapters.Count == 0)
+        {
+            _ = RefreshAdaptersListAsync();
+        }
 
         DnsStartButton.IsEnabled = !_sink.IsRunning && !_dnsBusy;
         DnsStopButton.IsEnabled = _sink.IsRunning;
