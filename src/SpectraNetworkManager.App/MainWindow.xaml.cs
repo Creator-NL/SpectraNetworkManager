@@ -24,7 +24,8 @@ public partial class MainWindow : Window
 {
     private const int MaxEventLines = 300;
 
-    private readonly ConnectionMonitor _monitor = new(new IpHelperConnectionSource(), new ProcessResolver());
+    private static readonly ProcessResolver _processResolver = new();
+    private readonly ConnectionMonitor _monitor = new(new IpHelperConnectionSource(), _processResolver);
     private readonly IBlockEventSource _blockLog = new NativeWfpBlockEventSubscriber();
     private readonly ReverseDnsCache _dns = new();
     private readonly RuleStore _rules = new(RuleStore.DefaultPath);
@@ -38,7 +39,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly ICollectionView _rowsView;
     private readonly ICollectionView _programsView;
+    private readonly ICollectionView _startupView;
     private readonly bool _isAdmin = IsAdministrator();
+    private DnsRow? _inspectedDnsRow;
+    private bool _isUpdatingDnsRows;
 
     // Ask mode: programs waiting for an Allow / Block answer
     private readonly Queue<ProgramSummary> _askQueue = new();
@@ -66,6 +70,7 @@ public partial class MainWindow : Window
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
+    public ObservableCollection<StartupRow> StartupItems { get; } = new();
     public ObservableCollection<RuleRow> RuleRows { get; } = new();
     public ObservableCollection<PublisherRow> Publishers { get; } = new();
     public ObservableCollection<DnsRow> DnsRows { get; } = new();
@@ -101,6 +106,9 @@ public partial class MainWindow : Window
 
         _programsView = CollectionViewSource.GetDefaultView(Programs);
         _programsView.Filter = ProgramFilter;
+
+        _startupView = CollectionViewSource.GetDefaultView(StartupItems);
+        _startupView.Filter = StartupFilter;
 
         _dns.Resolved += OnHostResolved;
         _signatures.Verified += OnSignatureVerified;
@@ -197,8 +205,16 @@ public partial class MainWindow : Window
                         string caller = ResolveInitiator(entry.Domain, entry.Client, entry.Detail, entry.Outcome == DnsOutcome.Blocked);
                         var row = DnsRow.From(entry, caller);
                         RecordDomainResolution(entry.Domain, entry.Detail);
-                        DnsRows.Insert(0, row);
-                        while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
+                        _isUpdatingDnsRows = true;
+                        try
+                        {
+                            DnsRows.Insert(0, row);
+                            while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
+                        }
+                        finally
+                        {
+                            _isUpdatingDnsRows = false;
+                        }
                     }
                     break;
                 case IpcConstants.Events.BandwidthUpdate:
@@ -300,6 +316,10 @@ public partial class MainWindow : Window
                             (string.IsNullOrEmpty(r.CallerProgram) || r.CallerProgram.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)))
                         {
                             r.CallerProgram = programWithPid;
+                            if (ReferenceEquals(r, _inspectedDnsRow) && DnsInspectorPanel.Visibility == Visibility.Visible)
+                            {
+                                InspectorInitiator.Text = programWithPid;
+                            }
                         }
                     }
                 }
@@ -313,10 +333,14 @@ public partial class MainWindow : Window
             if (!IsNoise(closed)) AddEvent(tick.Time, "-", closed, opened: false);
         }
 
+        var activeKeys = new HashSet<ConnectionKey>(tick.Connections.Count);
+        var alivePids = new HashSet<int>();
         bool resolve = ResolveHosts.IsChecked == true;
         foreach (var view in tick.Connections)
         {
+            if (view.Connection.ProcessId > 0) alivePids.Add(view.Connection.ProcessId);
             var key = ConnectionKey.From(view.Connection);
+            activeKeys.Add(key);
             if (_rows.TryGetValue(key, out var existing))
             {
                 existing.StateValue = view.Connection.State;
@@ -331,6 +355,32 @@ public partial class MainWindow : Window
                 row.Host = knownDom;
             _rows[key] = row;
             Rows.Add(row);
+        }
+
+        // Reconcile any stale connection rows whose closed diff was missed
+        if (_rows.Count > activeKeys.Count)
+        {
+            foreach (var staleKey in _rows.Keys.Where(k => !activeKeys.Contains(k)).ToList())
+            {
+                if (_rows.Remove(staleKey, out var gone))
+                {
+                    Rows.Remove(gone);
+                }
+            }
+        }
+
+        // Periodically prune terminated PIDs from DNS caller caches so dead processes never linger as ghost callers
+        if (_tickCount % 5 == 0)
+        {
+            _dnsEtw.Prune(alivePids);
+            var staleCutoff = DateTimeOffset.UtcNow.AddSeconds(-45);
+            foreach (var kv in _recentProcessByHostOrIp.ToList())
+            {
+                if (!alivePids.Contains(kv.Value.Pid) && kv.Value.LastSeen < staleCutoff)
+                {
+                    _recentProcessByHostOrIp.TryRemove(kv.Key, out _);
+                }
+            }
         }
 
         foreach (var opened in tick.Opened)
@@ -428,6 +478,10 @@ public partial class MainWindow : Window
             foreach (var row in Rows)
                 if (row.Path.Equals(path, StringComparison.OrdinalIgnoreCase))
                     row.SetSignature(info);
+
+            foreach (var sRow in StartupItems)
+                if (sRow.ExecutablePath.Equals(path, StringComparison.OrdinalIgnoreCase))
+                    sRow.Update(sRow.Entry, info, DescribeStartupFirewall(sRow.ExecutablePath));
 
             if (info.IsAlarming && _alarmed.Add(path) && Programs.Any(p => p.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
                 AddAlert(DateTimeOffset.Now, $"WARNING: {System.IO.Path.GetFileName(path)} - {info.Describe()}");
@@ -940,6 +994,34 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private void PurgeTerminatedProcess(int pid)
+    {
+        if (pid <= 0) return;
+        _processResolver.Remove(pid);
+        _dnsEtw.PurgePid(pid);
+        foreach (var kv in _recentProcessByHostOrIp.Where(kv => kv.Value.Pid == pid).ToList())
+        {
+            _recentProcessByHostOrIp.TryRemove(kv.Key, out _);
+        }
+        foreach (var kv in _rows.Where(kv => kv.Value.Pid == pid).ToList())
+        {
+            if (_rows.Remove(kv.Key, out var gone))
+            {
+                Rows.Remove(gone);
+            }
+        }
+    }
+
+    private async Task ForceMonitorRefreshAsync()
+    {
+        try
+        {
+            var tick = await Task.Run(_monitor.Poll);
+            Apply(tick);
+        }
+        catch { }
+    }
+
     private async void OnCloseProgramConnections(object sender, RoutedEventArgs e)
     {
         var row = SelectedProgram();
@@ -954,7 +1036,7 @@ public partial class MainWindow : Window
         {
             StatusText.Text = $"No active IPv4 TCP connections found to close for {row.Name}.";
         }
-        _monitor.Poll();
+        await ForceMonitorRefreshAsync();
         RefreshProgramRows();
     }
 
@@ -983,7 +1065,11 @@ public partial class MainWindow : Window
 
                 foreach (var p in running)
                 {
-                    if (await TerminateProcessAsync(p.Id)) killed++;
+                    if (await TerminateProcessAsync(p.Id))
+                    {
+                        killed++;
+                        PurgeTerminatedProcess(p.Id);
+                    }
                 }
             }
             catch { }
@@ -992,7 +1078,7 @@ public partial class MainWindow : Window
         StatusText.Text = killed > 0
             ? $"Terminated {killed} process instance(s) of {row.Name}."
             : $"Could not terminate process for {row.Name}. It may already have exited or requires Administrator rights.";
-        _monitor.Poll();
+        await ForceMonitorRefreshAsync();
         RefreshProgramRows();
     }
 
@@ -1057,7 +1143,7 @@ public partial class MainWindow : Window
                 ? $"Terminated {closed} TCP connection(s) for PID {row.Pid} ({row.Program})."
                 : $"No active IPv4 TCP connections closed for PID {row.Pid}.";
         }
-        _monitor.Poll();
+        await ForceMonitorRefreshAsync();
     }
 
     private async void OnCloseConnectionProgram(object sender, RoutedEventArgs e)
@@ -1069,7 +1155,7 @@ public partial class MainWindow : Window
         StatusText.Text = closed > 0
             ? $"Terminated {closed} active TCP connection(s) for {row.Program}."
             : $"No active IPv4 TCP connections found to close for {row.Program}.";
-        _monitor.Poll();
+        await ForceMonitorRefreshAsync();
     }
 
     private async void OnKillConnectionProcess(object sender, RoutedEventArgs e)
@@ -1083,10 +1169,11 @@ public partial class MainWindow : Window
         if (answer != MessageBoxResult.Yes) return;
 
         bool ok = await TerminateProcessAsync(row.Pid);
+        if (ok) PurgeTerminatedProcess(row.Pid);
         StatusText.Text = ok
             ? $"Terminated process {row.Program} (PID {row.Pid})."
             : $"Could not terminate PID {row.Pid} (it may have exited or requires Administrator rights).";
-        _monitor.Poll();
+        await ForceMonitorRefreshAsync();
     }
 
     private async void OnStopConnectionService(object sender, RoutedEventArgs e)
@@ -1131,7 +1218,8 @@ public partial class MainWindow : Window
             StatusText.Text = res.Message;
         }
 
-        _monitor.Poll();
+        PurgeTerminatedProcess(pid);
+        await ForceMonitorRefreshAsync();
     }
 
     private void OnBlockConnectionProgram(object sender, RoutedEventArgs e)
@@ -2095,7 +2183,8 @@ public partial class MainWindow : Window
 
     private async Task ChangeDnsRuleAsync(bool allow)
     {
-        if (DnsGrid.SelectedItem is not DnsRow row)
+        var row = (DnsGrid.SelectedItem as DnsRow) ?? _inspectedDnsRow;
+        if (row is null)
         {
             Info("Select a line in the query log first.");
             return;
@@ -2121,7 +2210,12 @@ public partial class MainWindow : Window
 
     private void OnDnsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        if (_isUpdatingDnsRows) return;
+        if (e.AddedItems.Count > 0 && e.AddedItems[0] is DnsRow added)
+        {
+            ShowDnsInspector(added);
+        }
+        else if (DnsGrid.SelectedItem is DnsRow row)
         {
             ShowDnsInspector(row);
         }
@@ -2131,29 +2225,36 @@ public partial class MainWindow : Window
     {
         if (e.OriginalSource is DependencyObject dep)
         {
-            var row = FindVisualParent<DataGridRow>(dep)?.DataContext as DnsRow
-                      ?? (dep as FrameworkElement)?.DataContext as DnsRow;
+            var dataGridRow = FindVisualParent<DataGridRow>(dep);
+            var row = dataGridRow?.DataContext as DnsRow
+                      ?? (dep as FrameworkElement)?.DataContext as DnsRow
+                      ?? (dep as FrameworkContentElement)?.DataContext as DnsRow;
             if (row != null)
             {
-                DnsGrid.SelectedItem = row;
                 ShowDnsInspector(row);
             }
         }
     }
 
-    private static T? FindVisualParent<T>(DependencyObject child) where T : DependencyObject
+    private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
     {
-        DependencyObject? parentObject = VisualTreeHelper.GetParent(child);
-        if (parentObject == null) return null;
-        if (parentObject is T parent) return parent;
-        return FindVisualParent<T>(parentObject);
+        while (child != null)
+        {
+            if (child is T match) return match;
+            child = child is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(child)
+                : LogicalTreeHelper.GetParent(child);
+        }
+        return null;
     }
 
     private void OnCloseDnsInspector(object sender, RoutedEventArgs e) => CloseDnsInspector();
 
     private void CloseDnsInspector()
     {
+        _inspectedDnsRow = null;
         DnsInspectorPanel.Visibility = Visibility.Collapsed;
+        DnsGrid.UnselectAll();
         DnsGrid.SelectedItem = null;
     }
 
@@ -2362,7 +2463,8 @@ public partial class MainWindow : Window
                     _lanDeviceNames[clientIp] = hostEntry.HostName;
                     Dispatcher.Invoke(() =>
                     {
-                        if (DnsGrid.SelectedItem is DnsRow current && current.Client == clientIp)
+                        var current = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+                        if (current != null && current.Client == clientIp)
                         {
                             InspectorClient.Text = FormatClientDisplay(current.Client);
                             InspectorInitiator.Text = $"{hostEntry.HostName} (LAN Device)";
@@ -2380,6 +2482,7 @@ public partial class MainWindow : Window
     private void ShowDnsInspector(DnsRow row)
     {
         if (row == null) return;
+        _inspectedDnsRow = row;
         try
         {
             var analysis = DomainIntelligence.Analyze(row.Domain, row.IsBlocked, row.IsFailed);
@@ -2481,7 +2584,8 @@ public partial class MainWindow : Window
 
     private async void OnInspectorRemoveCustom(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             await _sink.RemoveCustomRuleAsync(row.Domain);
             LoadDnsSettingsIntoUi();
@@ -2497,7 +2601,8 @@ public partial class MainWindow : Window
         {
             LoadDnsSettingsIntoUi();
             RefreshDnsUi();
-            if (DnsGrid.SelectedItem is DnsRow row)
+            var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+            if (row != null)
             {
                 ShowDnsInspector(row);
             }
@@ -2510,7 +2615,8 @@ public partial class MainWindow : Window
 
     private async void OnInspectorBlock(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             await ChangeDnsRuleAsync(allow: false);
             ShowDnsInspector(row with { IsBlocked = true, Result = "BLOCKED" });
@@ -2519,7 +2625,8 @@ public partial class MainWindow : Window
 
     private async void OnInspectorAllow(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             await ChangeDnsRuleAsync(allow: true);
             ShowDnsInspector(row with { IsBlocked = false, Result = "ok" });
@@ -2528,7 +2635,8 @@ public partial class MainWindow : Window
 
     private void OnInspectorWhois(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             OpenWhoisLookup(row.Domain);
         }
@@ -2536,7 +2644,8 @@ public partial class MainWindow : Window
 
     private void OnInspectorLookup(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             OpenDomainOnlineLookup(row.Domain);
         }
@@ -2544,7 +2653,8 @@ public partial class MainWindow : Window
 
     private void OnInspectorCopy(object sender, RoutedEventArgs e)
     {
-        if (DnsGrid.SelectedItem is DnsRow row)
+        var row = _inspectedDnsRow ?? (DnsGrid.SelectedItem as DnsRow);
+        if (row != null)
         {
             CopyDomainToClipboard(row.Domain);
         }
@@ -2974,13 +3084,21 @@ public partial class MainWindow : Window
         var recent = _sink.Activity.Recent(300);
         int known = _dnsLastTop is null ? recent.Count : recent.ToList().FindIndex(x => ReferenceEquals(x, _dnsLastTop));
         if (known < 0) known = recent.Count;
-        for (int i = known - 1; i >= 0; i--)
+        _isUpdatingDnsRows = true;
+        try
         {
-            RecordDomainResolution(recent[i].Domain, recent[i].Detail);
-            string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
-            DnsRows.Insert(0, DnsRow.From(recent[i], caller));
+            for (int i = known - 1; i >= 0; i--)
+            {
+                RecordDomainResolution(recent[i].Domain, recent[i].Detail);
+                string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
+                DnsRows.Insert(0, DnsRow.From(recent[i], caller));
+            }
+            while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
         }
-        while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
+        finally
+        {
+            _isUpdatingDnsRows = false;
+        }
         if (recent.Count > 0) _dnsLastTop = recent[0];
     }
 
@@ -3036,11 +3154,25 @@ public partial class MainWindow : Window
     private bool ProgramFilter(object item)
     {
         var p = (ProgramRow)item;
-        string q = SearchBox.Text.Trim();
+        string q = ProgramsSearchBox?.Text.Trim() ?? "";
         if (q.Length == 0) return true;
         return p.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
             || p.Path.Contains(q, StringComparison.OrdinalIgnoreCase)
-            || p.Signer.Contains(q, StringComparison.OrdinalIgnoreCase);
+            || p.Signer.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || p.Verdict.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool StartupFilter(object item)
+    {
+        var s = (StartupRow)item;
+        string q = StartupSearchBox?.Text.Trim() ?? "";
+        if (q.Length == 0) return true;
+        return s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.Command.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.Publisher.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.Location.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.Status.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.FirewallStatus.Contains(q, StringComparison.OrdinalIgnoreCase);
     }
 
     // These handlers can fire while the XAML is still being loaded, so ignore them until the window is ready.
@@ -3048,7 +3180,18 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded) return;
         _rowsView.Refresh();
+    }
+
+    private void OnProgramsFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
         _programsView.Refresh();
+    }
+
+    private void OnStartupFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _startupView.Refresh();
     }
 
     private async void OnViewChanged(object sender, RoutedEventArgs e)
@@ -3056,17 +3199,196 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         ConnectionsPanel.Visibility = ConnectionsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ProgramsPanel.Visibility = ProgramsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        StartupPanel.Visibility = StartupTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         TrafficPanel.Visibility = TrafficTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BlocksPanel.Visibility = BlocksTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
+        if (StartupTab.IsChecked == true) RefreshStartupItems();
         if (StrictTab.IsChecked == true) UpdateStrictUi();
         if (DnsTab.IsChecked == true) RefreshDnsUi();
         if (RulesTab.IsChecked == true) await RefreshRulesAsync();
         if (TrafficTab.IsChecked == true) await RefreshTrafficAsync();
         if (BlocksTab.IsChecked == true) await LoadBlocksAsync();
+    }
+
+    // ---- Startup Manager -------------------------------------------------------------------
+
+    private string DescribeStartupFirewall(string? exePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath)) return "-";
+        var rule = _rules.Find(exePath);
+        if (rule == null) return "No rule";
+        return rule.Action == RuleAction.Block ? "Blocked" : "Allowed";
+    }
+
+    private void RefreshStartupItems()
+    {
+        try
+        {
+            var entries = StartupManager.GetAllEntries();
+            var selectedId = (StartupGrid.SelectedItem as StartupRow)?.Id;
+
+            StartupItems.Clear();
+            foreach (var entry in entries)
+            {
+                SignatureInfo? sig = null;
+                if (!string.IsNullOrWhiteSpace(entry.ExecutablePath) && File.Exists(entry.ExecutablePath))
+                {
+                    sig = _signatures.TryGet(entry.ExecutablePath);
+                }
+
+                string fw = DescribeStartupFirewall(entry.ExecutablePath);
+                StartupItems.Add(new StartupRow(entry, sig, fw));
+            }
+
+            if (selectedId != null)
+            {
+                StartupGrid.SelectedItem = StartupItems.FirstOrDefault(r => r.Id == selectedId);
+            }
+
+            int enabledCount = StartupItems.Count(s => !s.IsDisabled);
+            int disabledCount = StartupItems.Count(s => s.IsDisabled);
+            StatusText.Text = $"Startup Manager: {StartupItems.Count} auto-start item(s) found ({enabledCount} enabled, {disabledCount} disabled).";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not scan startup items", ex);
+        }
+    }
+
+    private StartupRow? SelectedStartupItem()
+    {
+        if (StartupGrid.SelectedItem is StartupRow row) return row;
+        Info("Select a startup item in the list first.");
+        return null;
+    }
+
+    private void OnRefreshStartupItems(object sender, RoutedEventArgs e) => RefreshStartupItems();
+
+    private async void OnDisableStartupItem(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+        if (row.IsDisabled)
+        {
+            Info($"\"{row.Name}\" is already disabled.");
+            return;
+        }
+
+        var res = await StartupManager.SetEnabledAsync(row.Entry, enable: false);
+        if (!res.Success)
+        {
+            Info(res.Message);
+            return;
+        }
+
+        RefreshStartupItems();
+        StatusText.Text = res.Message;
+    }
+
+    private async void OnEnableStartupItem(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+        if (!row.IsDisabled)
+        {
+            Info($"\"{row.Name}\" is already enabled.");
+            return;
+        }
+
+        var res = await StartupManager.SetEnabledAsync(row.Entry, enable: true);
+        if (!res.Success)
+        {
+            Info(res.Message);
+            return;
+        }
+
+        RefreshStartupItems();
+        StatusText.Text = res.Message;
+    }
+
+    private async void OnDeleteStartupItem(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        var answer = MessageBox.Show(this,
+            $"Permanently delete auto-start entry \"{row.Name}\"?\n\n" +
+            $"Location: {row.Location}\n" +
+            $"Command: {row.Command}\n\n" +
+            "Tip: If you only want to turn it off temporarily so you can re-enable it later, use 'Turn Off (Disable)' instead.",
+            "Remove Startup Item Permanently", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        var res = await StartupManager.DeleteEntryAsync(row.Entry);
+        if (!res.Success)
+        {
+            Info(res.Message);
+            return;
+        }
+
+        RefreshStartupItems();
+        StatusText.Text = res.Message;
+    }
+
+    private void OnBlockStartupItem(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        if (string.IsNullOrWhiteSpace(row.ExecutablePath) || !File.Exists(row.ExecutablePath))
+        {
+            Info($"Could not locate a valid executable file on disk for \"{row.Name}\":\n\n{row.Command}");
+            return;
+        }
+
+        var existing = _rules.Find(row.ExecutablePath);
+        if (TryBlock(row.ExecutablePath, row.Name, existing))
+        {
+            AfterDecision();
+            RefreshStartupItems();
+        }
+    }
+
+    private void OnOpenStartupLocation(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        string targetPath = !string.IsNullOrWhiteSpace(row.ExecutablePath) && File.Exists(row.ExecutablePath)
+            ? row.ExecutablePath
+            : row.Command;
+
+        try
+        {
+            if (File.Exists(targetPath))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{targetPath}\"");
+            }
+            else
+            {
+                Info($"The file was not found on disk:\n\n{targetPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open file location", ex);
+        }
+    }
+
+    private void OnCopyStartupCommand(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null || string.IsNullOrWhiteSpace(row.Command)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(row.Command);
+            StatusText.Text = $"Copied startup command to clipboard: {row.Command}";
+        }
+        catch { }
     }
 
     // ---- firewall blocks -------------------------------------------------------------------

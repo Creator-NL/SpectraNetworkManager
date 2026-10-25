@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Net;
+using System.Runtime.CompilerServices;
 using SpectraNetworkManager.Core;
+using SpectraNetworkManager.Platform.Windows;
 using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Ui;
@@ -201,7 +203,49 @@ public sealed record RuleRow(string Name, string Decision, string Direction, str
 /// <summary>One line in the "Trusted publishers" grid.</summary>
 public sealed record PublisherRow(string Name);
 
-/// <summary>One line in the DNS query log.</summary>
+/// <summary>One line in the "Startup" grid.</summary>
+public sealed class StartupRow : INotifyPropertyChanged
+{
+    private StartupEntry _entry;
+    private SignatureInfo? _signature;
+    private string _firewallStatus;
+
+    public StartupRow(StartupEntry entry, SignatureInfo? signature, string firewallStatus)
+    {
+        _entry = entry;
+        _signature = signature;
+        _firewallStatus = firewallStatus;
+    }
+
+    public StartupEntry Entry => _entry;
+    public string Id => _entry.Id;
+    public bool IsEnabled => _entry.IsEnabled;
+    public bool IsDisabled => !_entry.IsEnabled;
+    public string Status => _entry.IsEnabled ? "● ENABLED" : "○ DISABLED";
+    public string Name => _entry.Name;
+    public string ExecutablePath => _entry.ExecutablePath;
+    public string Command => _entry.RawCommand;
+    public string Location => _entry.LocationDisplay;
+
+    public string Publisher => _signature?.Describe()
+        ?? (!string.IsNullOrWhiteSpace(_entry.ExecutablePath) && System.IO.File.Exists(_entry.ExecutablePath) ? "checking..." : "(file not found)");
+
+    public bool IsUnsigned => _signature is { IsAlarming: true };
+
+    public string FirewallStatus => _firewallStatus;
+
+    public void Update(StartupEntry entry, SignatureInfo? signature, string firewallStatus)
+    {
+        _entry = entry;
+        _signature = signature;
+        _firewallStatus = firewallStatus;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+/// <summary>One line in the DNS query log. Uses reference equality so mutable properties never corrupt WPF DataGrid selection hashtables.</summary>
 public sealed record DnsRow(string Time, string Client, string Domain, string Type, string Result, string Detail, int Ms, bool IsBlocked, bool IsFailed, DnsLogEntry Entry) : INotifyPropertyChanged
 {
     private string _callerProgram = "";
@@ -220,6 +264,9 @@ public sealed record DnsRow(string Time, string Client, string Domain, string Ty
             }
         }
     }
+
+    public bool Equals(DnsRow? other) => ReferenceEquals(this, other);
+    public override int GetHashCode() => RuntimeHelpers.GetHashCode(this);
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

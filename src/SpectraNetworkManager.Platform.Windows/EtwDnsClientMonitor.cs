@@ -61,7 +61,7 @@ public sealed class EtwDnsClientMonitor : IDisposable
 
                     string cleanDomain = queryName.Trim().TrimEnd('.');
                     var proc = _processResolver.Resolve(data.ProcessID);
-                    if (!string.IsNullOrEmpty(proc.Name))
+                    if (!string.IsNullOrEmpty(proc.Name) && !proc.Name.StartsWith("(none", StringComparison.OrdinalIgnoreCase))
                     {
                         _recentCallers[cleanDomain] = (proc.Name, data.ProcessID, DateTimeOffset.UtcNow);
                     }
@@ -98,6 +98,24 @@ public sealed class EtwDnsClientMonitor : IDisposable
         }
         caller = default;
         return false;
+    }
+
+    public void PurgePid(int pid)
+    {
+        if (pid <= 0) return;
+        _processResolver.Remove(pid);
+        foreach (var kvp in _recentCallers)
+        {
+            if (kvp.Value.Pid == pid)
+            {
+                _recentCallers.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
+    public void Prune(IReadOnlySet<int> alivePids)
+    {
+        _processResolver.Prune(alivePids);
     }
 
     private static bool IsAdministrator()

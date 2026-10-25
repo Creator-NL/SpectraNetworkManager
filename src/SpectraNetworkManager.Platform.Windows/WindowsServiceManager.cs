@@ -223,56 +223,59 @@ public static class WindowsServiceManager
     }
 
     /// <summary>
-    /// Stops the specified Windows Service. Prompts UAC elevation if not already running as Administrator.
+    /// Stops the specified Windows Service on a background thread. Prompts UAC elevation if not already running as Administrator.
     /// </summary>
-    public static async Task<(bool Success, string Message)> StopServiceAsync(string serviceName)
+    public static Task<(bool Success, string Message)> StopServiceAsync(string serviceName)
     {
         if (string.IsNullOrWhiteSpace(serviceName))
-            return (false, "Invalid service name.");
+            return Task.FromResult((false, "Invalid service name."));
 
-        IntPtr hSC = OpenSCManager(null, null, SC_MANAGER_CONNECT);
-        if (hSC != IntPtr.Zero)
+        return Task.Run(async () =>
         {
-            IntPtr hService = OpenService(hSC, serviceName, SERVICE_STOP | SERVICE_QUERY_STATUS);
-            if (hService != IntPtr.Zero)
+            IntPtr hSC = OpenSCManager(null, null, SC_MANAGER_CONNECT);
+            if (hSC != IntPtr.Zero)
             {
-                try
+                IntPtr hService = OpenService(hSC, serviceName, SERVICE_STOP | SERVICE_QUERY_STATUS);
+                if (hService != IntPtr.Zero)
                 {
-                    var status = new SERVICE_STATUS();
-                    if (ControlService(hService, SERVICE_CONTROL_STOP, ref status))
+                    try
                     {
-                        // Wait up to 5 seconds for service to reach stopped state
-                        var sw = Stopwatch.StartNew();
-                        while (sw.ElapsedMilliseconds < 5000)
+                        var status = new SERVICE_STATUS();
+                        if (ControlService(hService, SERVICE_CONTROL_STOP, ref status))
                         {
-                            await Task.Delay(250);
-                            if (QueryServiceStatus(hService, ref status) && status.dwCurrentState == SERVICE_STOPPED)
+                            // Wait up to 5 seconds for service to reach stopped state
+                            var sw = Stopwatch.StartNew();
+                            while (sw.ElapsedMilliseconds < 5000)
                             {
-                                return (true, $"Service '{serviceName}' was stopped successfully.");
+                                await Task.Delay(250);
+                                if (QueryServiceStatus(hService, ref status) && status.dwCurrentState == SERVICE_STOPPED)
+                                {
+                                    return (true, $"Service '{serviceName}' was stopped successfully.");
+                                }
                             }
+                            return (true, $"Stop command delivered to '{serviceName}'.");
                         }
-                        return (true, $"Stop command delivered to '{serviceName}'.");
+                    }
+                    finally
+                    {
+                        CloseServiceHandle(hService);
+                        CloseServiceHandle(hSC);
                     }
                 }
-                finally
+                else
                 {
-                    CloseServiceHandle(hService);
+                    int error = Marshal.GetLastWin32Error();
                     CloseServiceHandle(hSC);
+                    // Error 5 is ERROR_ACCESS_DENIED (requires Administrator)
+                    if (error == 5)
+                    {
+                        return await RunElevatedScStopAsync(serviceName);
+                    }
                 }
             }
-            else
-            {
-                int error = Marshal.GetLastWin32Error();
-                CloseServiceHandle(hSC);
-                // Error 5 is ERROR_ACCESS_DENIED (requires Administrator)
-                if (error == 5)
-                {
-                    return await RunElevatedScStopAsync(serviceName);
-                }
-            }
-        }
 
-        return await RunElevatedScStopAsync(serviceName);
+            return await RunElevatedScStopAsync(serviceName);
+        });
     }
 
     private static async Task<(bool Success, string Message)> RunElevatedScStopAsync(string serviceName)

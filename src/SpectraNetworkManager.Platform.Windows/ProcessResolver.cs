@@ -1,15 +1,16 @@
-﻿using System.Diagnostics;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text;
 using SpectraNetworkManager.Core;
 
 namespace SpectraNetworkManager.Platform.Windows;
 
-/// <summary>Maps a PID to a program name and full image path, with a small cache.</summary>
+/// <summary>Maps a PID to a program name and full image path, with a thread-safe cache.</summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProcessResolver : IProcessResolver
 {
-    private readonly Dictionary<int, ProcessInfo> _cache = new();
+    private readonly ConcurrentDictionary<int, ProcessInfo> _cache = new();
 
     public ProcessInfo Resolve(int pid)
     {
@@ -19,11 +20,16 @@ public sealed class ProcessResolver : IProcessResolver
         return info;
     }
 
+    public void Remove(int pid) => _cache.TryRemove(pid, out _);
+
     // PIDs are reused by Windows, so drop entries for processes that are gone.
     public void Prune(IReadOnlySet<int> alivePids)
     {
-        foreach (var pid in _cache.Keys.Where(p => !alivePids.Contains(p)).ToList())
-            _cache.Remove(pid);
+        foreach (var pid in _cache.Keys)
+        {
+            if (!alivePids.Contains(pid))
+                _cache.TryRemove(pid, out _);
+        }
     }
 
     private static ProcessInfo Lookup(int pid)
