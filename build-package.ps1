@@ -75,7 +75,7 @@ if (-not $isccPath) {
     Write-Host "Using Inno Setup compiler: $isccPath" -ForegroundColor DarkGray
     $proc = Start-Process -FilePath $isccPath -ArgumentList "installer\SpectraNetworkManager.iss" -Wait -NoNewWindow -PassThru
     if ($proc.ExitCode -eq 0) {
-        Write-Host "Installer created at installer\output\SpectraNetworkManager-Setup-v$Version.exe" -ForegroundColor Green
+        Write-Host "Installer created at installer\output\SpectraNetworkManager-v$Version-Setup.exe" -ForegroundColor Green
     } else {
         Write-Error "Inno Setup compilation failed with exit code $($proc.ExitCode)."
         exit $proc.ExitCode
@@ -94,7 +94,7 @@ Write-Host "Portable package created at $portableZip" -ForegroundColor Green
 
 # 4. Compute SHA-256 checksums
 Write-Host "`n[4/4] Generating SHA-256 checksums..." -ForegroundColor Yellow
-$installerExe = "installer\output\SpectraNetworkManager-Setup-v$Version.exe"
+$installerExe = "installer\output\SpectraNetworkManager-v$Version-Setup.exe"
 $hashes = @()
 if (Test-Path $installerExe) {
     $hash = Get-FileHash $installerExe -Algorithm SHA256
