@@ -157,4 +157,40 @@ public class WindowsPlatformTests
             ElevationHelper.SetAlwaysRunAsAdminRegistry(dummyPath, false);
         }
     }
+
+    [Fact]
+    public void StartupManager_TryParseScheduledTaskXml_ResolvesWorkingDirectoryAndLogonTrigger()
+    {
+        string sysDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string xml = $"""
+            <?xml version="1.0" encoding="UTF-16"?>
+            <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <Triggers>
+                <LogonTrigger>
+                  <Enabled>true</Enabled>
+                </LogonTrigger>
+              </Triggers>
+              <Settings>
+                <Enabled>true</Enabled>
+              </Settings>
+              <Actions Context="Author">
+                <Exec>
+                  <Command>notepad.exe</Command>
+                  <Arguments>--auto-run</Arguments>
+                  <WorkingDirectory>{sysDir}</WorkingDirectory>
+                </Exec>
+              </Actions>
+            </Task>
+            """;
+
+        bool ok = StartupManager.TryParseScheduledTaskXml("PurpleTest", @"\PurpleTest", null, xml, out var entry);
+        Assert.True(ok);
+        Assert.NotNull(entry);
+        Assert.Equal("PurpleTest", entry!.Name);
+        Assert.Equal(StartupSourceKind.ScheduledTask, entry.SourceKind);
+        Assert.Equal("Task Scheduler (Logon)", entry.LocationDisplay);
+        Assert.True(entry.IsEnabled);
+        Assert.Equal(Path.Combine(sysDir, "notepad.exe"), entry.ExecutablePath, ignoreCase: true);
+        Assert.Contains("--auto-run", entry.RawCommand);
+    }
 }

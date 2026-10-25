@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.Win32;
 using SpectraNetworkManager.Core;
 
@@ -16,8 +17,11 @@ public enum StartupSourceKind
     HklmRunOnce,
     HklmWow64Run,
     HklmWow64RunOnce,
+    HkcuPoliciesRun,
+    HklmPoliciesRun,
     UserStartupFolder,
-    CommonStartupFolder
+    CommonStartupFolder,
+    ScheduledTask
 }
 
 public sealed record StartupEntry(
@@ -31,8 +35,8 @@ public sealed record StartupEntry(
     bool RequiresAdmin);
 
 /// <summary>
-/// Discovers and manages Windows auto-start programs across Registry Run/RunOnce keys
-/// (HKCU, HKLM 64-bit, HKLM WOW6432Node 32-bit) and Windows Startup folders.
+/// Discovers and manages Windows auto-start programs across Registry Run/RunOnce/Policies keys
+/// (HKCU, HKLM 64-bit, HKLM WOW6432Node 32-bit), Windows Startup folders, and Windows Task Scheduler.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class StartupManager
@@ -41,6 +45,7 @@ public static class StartupManager
     private const string RunOnceSubKey = @"Software\Microsoft\Windows\CurrentVersion\RunOnce";
     private const string Wow64RunSubKey = @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run";
     private const string Wow64RunOnceSubKey = @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce";
+    private const string PoliciesRunSubKey = @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run";
 
     private const string ApprovedRunSubKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     private const string ApprovedRun32SubKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32";
@@ -69,11 +74,17 @@ public static class StartupManager
         ScanRegistryKey(RegistryHive.CurrentUser, RegistryView.Default, RunOnceSubKey, null,
             StartupSourceKind.HkcuRunOnce, @"Registry: HKCU\...\RunOnce", requiresAdmin: false, entries);
 
+        ScanRegistryKey(RegistryHive.CurrentUser, RegistryView.Default, PoliciesRunSubKey, null,
+            StartupSourceKind.HkcuPoliciesRun, @"Registry: HKCU\...\Policies\Run", requiresAdmin: false, entries);
+
         ScanRegistryKey(RegistryHive.LocalMachine, RegistryView.Registry64, RunSubKey, ApprovedRunSubKey,
             StartupSourceKind.HklmRun, @"Registry: HKLM\...\Run", requiresAdmin: true, entries);
 
         ScanRegistryKey(RegistryHive.LocalMachine, RegistryView.Registry64, RunOnceSubKey, null,
             StartupSourceKind.HklmRunOnce, @"Registry: HKLM\...\RunOnce", requiresAdmin: true, entries);
+
+        ScanRegistryKey(RegistryHive.LocalMachine, RegistryView.Registry64, PoliciesRunSubKey, null,
+            StartupSourceKind.HklmPoliciesRun, @"Registry: HKLM\...\Policies\Run", requiresAdmin: true, entries);
 
         ScanRegistryKey(RegistryHive.LocalMachine, RegistryView.Registry64, Wow64RunSubKey, ApprovedRun32SubKey,
             StartupSourceKind.HklmWow64Run, @"Registry: HKLM (32-bit)\...\Run", requiresAdmin: true, entries);
@@ -90,7 +101,10 @@ public static class StartupManager
         ScanStartupFolder(commonStartup, RegistryHive.LocalMachine, ApprovedFolderSubKey,
             StartupSourceKind.CommonStartupFolder, "Startup Folder (All Users)", requiresAdmin: true, entries);
 
-        // 3. Merge items disabled in Spectra Vault
+        // 3. Scheduled Tasks (Logon / Boot / Third-party background tasks)
+        ScanScheduledTasks(entries);
+
+        // 4. Merge items disabled in Spectra Vault
         foreach (var v in vault)
         {
             if (!entries.ContainsKey(v.Id))
@@ -156,7 +170,14 @@ public static class StartupManager
                     SaveVault(vault);
                 }
 
-                if (entry.SourceKind is StartupSourceKind.UserStartupFolder or StartupSourceKind.CommonStartupFolder)
+                if (entry.SourceKind == StartupSourceKind.ScheduledTask)
+                {
+                    string taskPath = GetScheduledTaskPath(entry);
+                    bool ok = await RunSchtasksAsync($"/Delete /TN \"{taskPath}\" /F");
+                    if (!ok) return (false, "Administrator privileges were required or declined to delete the Scheduled Task.");
+                    return (true, $"Permanently deleted Scheduled Task '{entry.Name}'.");
+                }
+                else if (entry.SourceKind is StartupSourceKind.UserStartupFolder or StartupSourceKind.CommonStartupFolder)
                 {
                     if (File.Exists(entry.RawCommand))
                     {
@@ -198,6 +219,14 @@ public static class StartupManager
 
     private static async Task<(bool Success, string Message)> DisableEntryCoreAsync(StartupEntry entry)
     {
+        if (entry.SourceKind == StartupSourceKind.ScheduledTask)
+        {
+            string taskPath = GetScheduledTaskPath(entry);
+            bool ok = await RunSchtasksAsync($"/Change /TN \"{taskPath}\" /Disable");
+            if (!ok) return (false, "Administrator permission is required to turn off this Scheduled Task.");
+            return (true, $"Turned off Scheduled Task '{entry.Name}'.");
+        }
+
         var vault = LoadVault();
         vault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
 
@@ -273,6 +302,14 @@ public static class StartupManager
 
     private static async Task<(bool Success, string Message)> EnableEntryCoreAsync(StartupEntry entry)
     {
+        if (entry.SourceKind == StartupSourceKind.ScheduledTask)
+        {
+            string taskPath = GetScheduledTaskPath(entry);
+            bool ok = await RunSchtasksAsync($"/Change /TN \"{taskPath}\" /Enable");
+            if (!ok) return (false, "Administrator permission is required to turn on this Scheduled Task.");
+            return (true, $"Turned on Scheduled Task '{entry.Name}'.");
+        }
+
         var vault = LoadVault();
         var vaultMatch = vault.FirstOrDefault(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
 
@@ -543,12 +580,233 @@ public static class StartupManager
         return null;
     }
 
+    private static void ScanScheduledTasks(Dictionary<string, StartupEntry> target)
+    {
+        int before = target.Count;
+
+        // 1. Primary: Query Windows Task Scheduler COM API ("Schedule.Service") which works for both Standard Users and Admins
+        try
+        {
+            Type? schedType = Type.GetTypeFromProgID("Schedule.Service");
+            if (schedType != null)
+            {
+                dynamic? service = Activator.CreateInstance(schedType);
+                if (service != null)
+                {
+                    service.Connect();
+                    dynamic rootFolder = service.GetFolder("\\");
+                    ScanTaskSchedulerFolder(rootFolder, target);
+                }
+            }
+        }
+        catch { }
+
+        // 2. Fallback: Direct XML scan of C:\Windows\System32\Tasks (works when elevated or for readable task files)
+        if (target.Count == before)
+        {
+            try
+            {
+                string tasksRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
+                if (Directory.Exists(tasksRoot))
+                {
+                    ScanTasksDirectoryFallback(tasksRoot, tasksRoot, target);
+                }
+            }
+            catch { }
+        }
+    }
+
+    private static void ScanTaskSchedulerFolder(dynamic folder, Dictionary<string, StartupEntry> target)
+    {
+        try
+        {
+            string folderPath = (string)folder.Path;
+            if (folderPath.StartsWith(@"\Microsoft\Windows", StringComparison.OrdinalIgnoreCase))
+            {
+                return; // Skip built-in Windows OS internal maintenance tasks
+            }
+
+            dynamic tasks = folder.GetTasks(1); // 1 = TASK_ENUM_HIDDEN
+            foreach (dynamic task in tasks)
+            {
+                try
+                {
+                    string name = (string)task.Name;
+                    string path = (string)task.Path;
+                    bool enabled = (bool)task.Enabled;
+                    string xml = (string)task.Xml;
+
+                    if (TryParseScheduledTaskXml(name, path, enabled, xml, out var entry) && entry != null)
+                    {
+                        target[entry.Id] = entry;
+                    }
+                }
+                catch { }
+            }
+
+            dynamic subFolders = folder.GetFolders(0);
+            foreach (dynamic sub in subFolders)
+            {
+                ScanTaskSchedulerFolder(sub, target);
+            }
+        }
+        catch { }
+    }
+
+    private static void ScanTasksDirectoryFallback(string rootDir, string currentDir, Dictionary<string, StartupEntry> target)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(currentDir))
+            {
+                try
+                {
+                    string relPath = "\\" + Path.GetRelativePath(rootDir, file);
+                    string name = Path.GetFileName(file);
+                    string xml = File.ReadAllText(file);
+                    if (TryParseScheduledTaskXml(name, relPath, null, xml, out var entry) && entry != null)
+                    {
+                        target[entry.Id] = entry;
+                    }
+                }
+                catch { }
+            }
+
+            foreach (var dir in Directory.EnumerateDirectories(currentDir))
+            {
+                string relDir = "\\" + Path.GetRelativePath(rootDir, dir);
+                if (relDir.StartsWith(@"\Microsoft\Windows", StringComparison.OrdinalIgnoreCase)) continue;
+                ScanTasksDirectoryFallback(rootDir, dir, target);
+            }
+        }
+        catch { }
+    }
+
+    public static bool TryParseScheduledTaskXml(string name, string taskPath, bool? enabledOverride, string xml, out StartupEntry? entry)
+    {
+        entry = null;
+        if (string.IsNullOrWhiteSpace(xml)) return false;
+
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            var root = doc.Root;
+            if (root == null) return false;
+            XNamespace ns = root.Name.Namespace;
+
+            var exec = root.Descendants(ns + "Exec").FirstOrDefault();
+            if (exec == null) return false;
+
+            string rawCmdElement = exec.Element(ns + "Command")?.Value?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(rawCmdElement)) return false;
+
+            string argsElement = exec.Element(ns + "Arguments")?.Value?.Trim() ?? "";
+            string workDirElement = exec.Element(ns + "WorkingDirectory")?.Value?.Trim() ?? "";
+
+            bool isEnabled = enabledOverride ?? true;
+            var enabledNode = root.Element(ns + "Settings")?.Element(ns + "Enabled");
+            if (enabledOverride == null && enabledNode != null && bool.TryParse(enabledNode.Value.Trim(), out bool parsedEnabled))
+            {
+                isEnabled = parsedEnabled;
+            }
+
+            // Resolve executable path (combining WorkingDirectory + Command when Command is relative like "PurpleLauncher.exe")
+            string expandedCmd = Environment.ExpandEnvironmentVariables(rawCmdElement.Trim('"'));
+            string expandedWorkDir = Environment.ExpandEnvironmentVariables(workDirElement.Trim('"'));
+
+            string exePath = ExtractExecutablePath(rawCmdElement);
+            if ((!Path.IsPathRooted(exePath) || !File.Exists(exePath)) && !string.IsNullOrWhiteSpace(expandedWorkDir))
+            {
+                try
+                {
+                    string combined = Path.Combine(expandedWorkDir, expandedCmd);
+                    if (File.Exists(combined))
+                    {
+                        exePath = combined;
+                    }
+                    else if (!combined.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(combined + ".exe"))
+                    {
+                        exePath = combined + ".exe";
+                    }
+                }
+                catch { }
+            }
+
+            string displayCommand = !string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath)
+                ? (string.IsNullOrWhiteSpace(argsElement) ? $"\"{exePath}\"" : $"\"{exePath}\" {argsElement}")
+                : (string.IsNullOrWhiteSpace(argsElement) ? rawCmdElement : $"{rawCmdElement} {argsElement}");
+
+            bool hasLogon = root.Descendants(ns + "LogonTrigger").Any();
+            bool hasBoot = root.Descendants(ns + "BootTrigger").Any();
+            string triggerKind = hasLogon
+                ? "Task Scheduler (Logon)"
+                : hasBoot
+                    ? "Task Scheduler (Boot)"
+                    : "Task Scheduler (Scheduled)";
+
+            string normalizedPath = taskPath.StartsWith('\\') ? taskPath : "\\" + taskPath;
+            string id = $"{StartupSourceKind.ScheduledTask}|{normalizedPath}";
+
+            entry = new StartupEntry(
+                Id: id,
+                Name: name,
+                RawCommand: displayCommand,
+                ExecutablePath: exePath,
+                LocationDisplay: triggerKind,
+                SourceKind: StartupSourceKind.ScheduledTask,
+                IsEnabled: isEnabled,
+                RequiresAdmin: true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string GetScheduledTaskPath(StartupEntry entry)
+    {
+        const string prefix = "ScheduledTask|";
+        if (entry.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return entry.Id[prefix.Length..];
+        }
+        return entry.Name.StartsWith('\\') ? entry.Name : "\\" + entry.Name;
+    }
+
+    private static async Task<bool> RunSchtasksAsync(string arguments)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                await proc.WaitForExitAsync();
+                if (proc.ExitCode == 0) return true;
+            }
+        }
+        catch { }
+
+        return await RunElevatedCmdAsync($"schtasks {arguments}");
+    }
+
     private static (RegistryHive Hive, string SubKey, string? ApprovedSubKey) GetRegistryMetadata(StartupSourceKind kind) => kind switch
     {
         StartupSourceKind.HkcuRun => (RegistryHive.CurrentUser, RunSubKey, ApprovedRunSubKey),
         StartupSourceKind.HkcuRunOnce => (RegistryHive.CurrentUser, RunOnceSubKey, null),
+        StartupSourceKind.HkcuPoliciesRun => (RegistryHive.CurrentUser, PoliciesRunSubKey, null),
         StartupSourceKind.HklmRun => (RegistryHive.LocalMachine, RunSubKey, ApprovedRunSubKey),
         StartupSourceKind.HklmRunOnce => (RegistryHive.LocalMachine, RunOnceSubKey, null),
+        StartupSourceKind.HklmPoliciesRun => (RegistryHive.LocalMachine, PoliciesRunSubKey, null),
         StartupSourceKind.HklmWow64Run => (RegistryHive.LocalMachine, Wow64RunSubKey, ApprovedRun32SubKey),
         StartupSourceKind.HklmWow64RunOnce => (RegistryHive.LocalMachine, Wow64RunOnceSubKey, null),
         _ => (RegistryHive.CurrentUser, RunSubKey, null)
@@ -558,21 +816,26 @@ public static class StartupManager
     {
         StartupSourceKind.HkcuRun => @"Registry: HKCU\...\Run",
         StartupSourceKind.HkcuRunOnce => @"Registry: HKCU\...\RunOnce",
+        StartupSourceKind.HkcuPoliciesRun => @"Registry: HKCU\...\Policies\Run",
         StartupSourceKind.HklmRun => @"Registry: HKLM\...\Run",
         StartupSourceKind.HklmRunOnce => @"Registry: HKLM\...\RunOnce",
+        StartupSourceKind.HklmPoliciesRun => @"Registry: HKLM\...\Policies\Run",
         StartupSourceKind.HklmWow64Run => @"Registry: HKLM (32-bit)\...\Run",
         StartupSourceKind.HklmWow64RunOnce => @"Registry: HKLM (32-bit)\...\RunOnce",
         StartupSourceKind.UserStartupFolder => "Startup Folder (Current User)",
         StartupSourceKind.CommonStartupFolder => "Startup Folder (All Users)",
+        StartupSourceKind.ScheduledTask => "Task Scheduler",
         _ => "Registry Run"
     };
 
     private static bool IsAdminSource(StartupSourceKind kind) => kind is
         StartupSourceKind.HklmRun or
         StartupSourceKind.HklmRunOnce or
+        StartupSourceKind.HklmPoliciesRun or
         StartupSourceKind.HklmWow64Run or
         StartupSourceKind.HklmWow64RunOnce or
-        StartupSourceKind.CommonStartupFolder;
+        StartupSourceKind.CommonStartupFolder or
+        StartupSourceKind.ScheduledTask;
 
     private static bool TryDeleteRegistryValue(RegistryHive hive, string subKey, string valueName)
     {

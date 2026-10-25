@@ -301,7 +301,7 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
-                       Text="Shows every auto-start entry registered in Windows Registry (Run / RunOnce across 64-bit, 32-bit WOW6432Node, and Current User) and Startup folders — including hidden items not shown in Windows Settings. 'Turn Off (Disable)' safely disables an entry so you can re-enable it later; 'Remove Permanently' deletes it completely."/>
+                       Text="Shows every auto-start entry registered in Windows Registry (Run / RunOnce / Policies across 64-bit, 32-bit WOW6432Node, and Current User), Startup folders, and Windows Task Scheduler (Logon / Boot / Background tasks) — including hidden launchers not shown in Windows Settings. 'Turn Off (Disable)' safely disables an entry so you can re-enable it later; 'Remove Permanently' deletes it completely."/>
             <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="False">
                 <Grid Width="280" Margin="0,0,12,0" VerticalAlignment="Center">
                     <TextBox x:Name="StartupSearchBox" VerticalContentAlignment="Center" TextChanged="OnStartupFilterChanged"
