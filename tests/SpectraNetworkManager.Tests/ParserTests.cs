@@ -1,4 +1,4 @@
-﻿using SpectraNetworkManager.Core;
+using SpectraNetworkManager.Core;
 
 namespace SpectraNetworkManager.Tests;
 
@@ -99,5 +99,55 @@ public class ParserTests
     public void AuthenticodeParser_CommonNameExtraction(string subject, string expected)
     {
         Assert.Equal(expected, AuthenticodeParser.CommonName(subject));
+    }
+
+    private sealed class FakeConnectionSource : IConnectionSource
+    {
+        public List<ConnectionInfo> Current { get; set; } = new();
+        public IReadOnlyList<ConnectionInfo> GetConnections() => Current;
+    }
+
+    private sealed class FakeProcessResolver : IProcessResolver
+    {
+        public ProcessInfo Resolve(int pid) => pid switch
+        {
+            0 => new ProcessInfo(0, "(none / closing)", null),
+            5552 => new ProcessInfo(5552, "firefox.exe", @"C:\Program Files\Mozilla Firefox\firefox.exe"),
+            _ => new ProcessInfo(pid, $"pid-{pid}", null)
+        };
+
+        public void Prune(IReadOnlySet<int> alivePids) { }
+    }
+
+    [Fact]
+    public void ConnectionMonitor_PreservesOwningProcessWhenSocketEntersTimeWaitPidZero()
+    {
+        var source = new FakeConnectionSource();
+        var resolver = new FakeProcessResolver();
+        var monitor = new ConnectionMonitor(source, resolver);
+
+        var local = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 51234);
+        var remote = new System.Net.IPEndPoint(System.Net.IPAddress.Parse("142.250.190.46"), 443);
+
+        // Tick 1: Active established connection owned by firefox.exe (PID 5552)
+        source.Current = new List<ConnectionInfo>
+        {
+            new(Protocol.Tcp, local, remote, ConnectionState.Established, 5552)
+        };
+        var tick1 = monitor.Poll();
+        Assert.Single(tick1.Connections);
+        Assert.Equal("firefox.exe", tick1.Connections[0].Process.Name);
+        Assert.Equal(5552, tick1.Connections[0].Connection.ProcessId);
+
+        // Tick 2: Socket transitions to TIME_WAIT and Windows kernel reports PID 0
+        source.Current = new List<ConnectionInfo>
+        {
+            new(Protocol.Tcp, local, remote, ConnectionState.TimeWait, 0)
+        };
+        var tick2 = monitor.Poll();
+        Assert.Single(tick2.Connections);
+        Assert.Equal("firefox.exe", tick2.Connections[0].Process.Name);
+        Assert.Equal(5552, tick2.Connections[0].Connection.ProcessId);
+        Assert.Equal(ConnectionState.TimeWait, tick2.Connections[0].Connection.State);
     }
 }

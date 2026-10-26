@@ -613,32 +613,52 @@
                 <TextBlock x:Name="DnsNotes" Margin="0,4,0,0" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
             </StackPanel>
 
-            <WrapPanel Grid.Row="1" Margin="0,10,0,10">
-                <Button x:Name="DnsStartButton" Content="Start DNS server" Click="OnDnsStart" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
-                <Button x:Name="DnsStopButton" Content="Stop" Click="OnDnsStop" Margin="0,0,8,6"/>
-                <Button x:Name="DnsPauseButton" Content="Pause blocking" Click="OnDnsPauseClick" Margin="0,0,8,6"
-                        ToolTip="Temporarily disable blocking for 5, 15, or 30 minutes (like Pi-hole)."/>
-                <Button x:Name="DnsTestButton" Content="Test my DNS server" Click="OnDnsSelfTest" Margin="0,0,8,6"
-                        ToolTip="Sends a real query for example.com and for a blocked name to the running server, on its own port."/>
-                <Button Content="Update block lists" Click="OnDnsUpdateLists" Margin="0,0,8,6"
-                        ToolTip="Downloads the lists in the settings (needs internet; with strict mode on, SpectraNetworkManager itself is allowed)."/>
-                <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
-                <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"
-                        ToolTip="Clears the displayed query log, memory counters, and database history."/>
-                <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,8,6"
-                        ToolTip="Export persistent SQLite query history to a CSV file."/>
-                <Button x:Name="DnsCustomRulesButton" Content="🛡️ Custom Rules (0)" Click="OnOpenCustomRulesWindow" Margin="0,0,20,6"
-                        Foreground="{StaticResource Cyan}" ToolTip="View, search, add, or remove domains you have personally blocked or whitelisted."/>
+            <StackPanel Grid.Row="1" Margin="0,10,0,8">
+                <WrapPanel Margin="0,0,0,4">
+                    <Button x:Name="DnsStartButton" Content="Start DNS server" Click="OnDnsStart" Margin="0,0,8,6" Foreground="{StaticResource Cyan}"/>
+                    <Button x:Name="DnsStopButton" Content="Stop" Click="OnDnsStop" Margin="0,0,8,6"/>
+                    <Button x:Name="DnsPauseButton" Content="Pause blocking" Click="OnDnsPauseClick" Margin="0,0,8,6"
+                            ToolTip="Temporarily disable blocking for 5, 15, or 30 minutes (like Pi-hole)."/>
+                    <Button x:Name="DnsTestButton" Content="Test my DNS server" Click="OnDnsSelfTest" Margin="0,0,8,6"
+                            ToolTip="Sends a real query for example.com and for a blocked name to the running server, on its own port."/>
+                    <Button Content="Update block lists" Click="OnDnsUpdateLists" Margin="0,0,8,6"
+                            ToolTip="Downloads the lists in the settings (needs internet; with strict mode on, SpectraNetworkManager itself is allowed)."/>
+                    <Button Content="Flush cache" Click="OnDnsFlush" Margin="0,0,8,6"/>
+                    <Button Content="Clear log" Click="OnDnsClearLog" Margin="0,0,8,6"
+                            ToolTip="Clears the displayed query log, memory counters, and database history."/>
+                    <Button Content="Export CSV" Click="OnDnsExportCsv" Margin="0,0,8,6"
+                            ToolTip="Export persistent SQLite query history to a CSV file."/>
+                    <Button x:Name="DnsCustomRulesButton" Content="🛡️ Custom Rules (0)" Click="OnOpenCustomRulesWindow" Margin="0,0,8,6"
+                            Foreground="{StaticResource Cyan}" ToolTip="View, search, add, or remove domains you have personally blocked or whitelisted."/>
+                </WrapPanel>
 
-
-
-                <TextBox x:Name="DnsCheckBox" Width="220" Margin="0,0,8,6" VerticalContentAlignment="Center"
-                         ToolTip="Type a domain and press Check to see what the filter would do, without sending a query."/>
-                <Button Content="Check" Click="OnDnsCheck" Margin="0,0,10,6"/>
-                <TextBlock x:Name="DnsCheckResult" VerticalAlignment="Center" Margin="0,0,10,6" Foreground="{StaticResource Text}"/>
-                <Button x:Name="DnsToggleSidebarButton" Content="◀ Hide Sidebar" Click="OnToggleDnsSidebar" Margin="0,0,8,6"
-                        ToolTip="Collapse or expand the Settings and Adapters sidebar"/>
-            </WrapPanel>
+                <WrapPanel>
+                    <Grid Width="280" Margin="0,0,8,6" VerticalAlignment="Center">
+                        <TextBox x:Name="DnsCheckBox" VerticalContentAlignment="Center" TextChanged="OnDnsFilterChanged"
+                                 ToolTip="Type to filter the DNS log by caller program, domain, IP, type, or result (or click 'Check blocklist' to test a domain)."/>
+                        <TextBlock Text="Search DNS log (program, domain, IP, type)..." IsHitTestVisible="False"
+                                   Foreground="{StaticResource Muted}" Margin="9,0,0,0" VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=DnsCheckBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <Button Content="Clear" Click="OnClearDnsSearch" Margin="0,0,8,6"
+                            ToolTip="Clear the DNS log search filter"/>
+                    <Button Content="Check blocklist" Click="OnDnsCheck" Margin="0,0,10,6"
+                            ToolTip="Test whether the domain typed in the search box is on any blocklist, without sending a network query."/>
+                    <TextBlock x:Name="DnsCheckResult" VerticalAlignment="Center" Margin="0,0,12,6" Foreground="{StaticResource Text}"/>
+                    <Button x:Name="DnsToggleSidebarButton" Content="◀ Hide Sidebar" Click="OnToggleDnsSidebar" Margin="0,0,8,6"
+                            ToolTip="Collapse or expand the Settings and Adapters sidebar"/>
+                </WrapPanel>
+            </StackPanel>
 
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions>

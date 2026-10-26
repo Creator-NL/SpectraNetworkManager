@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private readonly ICollectionView _rowsView;
     private readonly ICollectionView _programsView;
     private readonly ICollectionView _startupView;
+    private readonly ICollectionView _dnsView;
     private readonly bool _isAdmin = IsAdministrator();
     private DnsRow? _inspectedDnsRow;
     private bool _isUpdatingDnsRows;
@@ -110,6 +111,9 @@ public partial class MainWindow : Window
         _startupView = CollectionViewSource.GetDefaultView(StartupItems);
         _startupView.Filter = StartupFilter;
 
+        _dnsView = CollectionViewSource.GetDefaultView(DnsRows);
+        _dnsView.Filter = DnsRowFilter;
+
         _dns.Resolved += OnHostResolved;
         _signatures.Verified += OnSignatureVerified;
 
@@ -118,6 +122,7 @@ public partial class MainWindow : Window
         _promptToast.BlockRequested += OnToastBlock;
         _promptToast.TrustRequested += OnToastTrust;
         _promptToast.LaterRequested += OnToastLater;
+        _promptToast.InspectRequested += OnToastInspect;
         Closed += (_, _) =>
         {
             _promptToast?.Close();
@@ -313,7 +318,9 @@ public partial class MainWindow : Window
                         var r = DnsRows[i];
                         if ((r.Domain.Equals(dom, StringComparison.OrdinalIgnoreCase) ||
                              (!string.IsNullOrEmpty(r.Detail) && r.Detail.Contains(rIp, StringComparison.OrdinalIgnoreCase))) &&
-                            (string.IsNullOrEmpty(r.CallerProgram) || r.CallerProgram.StartsWith("svchost", StringComparison.OrdinalIgnoreCase)))
+                            (string.IsNullOrEmpty(r.CallerProgram) ||
+                             r.CallerProgram.StartsWith("svchost", StringComparison.OrdinalIgnoreCase) ||
+                             r.CallerProgram.StartsWith("(none", StringComparison.OrdinalIgnoreCase)))
                         {
                             r.CallerProgram = programWithPid;
                             if (ReferenceEquals(r, _inspectedDnsRow) && DnsInspectorPanel.Visibility == Visibility.Visible)
@@ -697,6 +704,38 @@ public partial class MainWindow : Window
     {
         _askCurrent = null;
         ShowNextAsk();
+    }
+
+    private void OnToastInspect(ProgramSummary s)
+    {
+        Show();
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+        Activate();
+        Focus();
+
+        ProgramsTab.IsChecked = true;
+        OnViewChanged(this, new RoutedEventArgs());
+
+        if (ProgramsSearchBox != null && !string.IsNullOrEmpty(ProgramsSearchBox.Text))
+        {
+            ProgramsSearchBox.Text = "";
+        }
+
+        var match = Programs.FirstOrDefault(p =>
+            string.Equals(p.Key, s.Key, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(s.Path) && string.Equals(p.Path, s.Path, StringComparison.OrdinalIgnoreCase)) ||
+            string.Equals(p.Name, s.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (match != null)
+        {
+            ProgramsGrid.SelectedItem = match;
+            ProgramsGrid.ScrollIntoView(match);
+        }
+
+        StatusText.Text = $"Inspecting {s.Name} — review its details, signature, and connections before deciding.";
     }
 
     private bool TryQuickBlock(string path, string name)
@@ -2340,7 +2379,11 @@ public partial class MainWindow : Window
                 return $"{etwCaller.Program} (PID {etwCaller.Pid})";
             }
 
+            static bool IsValidCallerRow(ConnectionRow c) =>
+                c.Pid > 0 && !c.Program.StartsWith("(none", StringComparison.OrdinalIgnoreCase);
+
             var matchingConn = Rows.FirstOrDefault(c =>
+                IsValidCallerRow(c) &&
                 !string.IsNullOrEmpty(c.Host) && (
                     c.Host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
                     c.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase) ||
@@ -2356,6 +2399,7 @@ public partial class MainWindow : Window
                 lock (domainIps)
                 {
                     var connByIp = Rows.FirstOrDefault(c =>
+                        IsValidCallerRow(c) &&
                         c.RemoteAddress != null && domainIps.Contains(c.RemoteAddress.ToString()));
                     if (connByIp != null)
                     {
@@ -2393,6 +2437,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrEmpty(detail))
             {
                 var detailConn = Rows.FirstOrDefault(c =>
+                    IsValidCallerRow(c) &&
                     c.RemoteAddress != null && detail.Contains(c.RemoteAddress.ToString()));
                 if (detailConn != null)
                 {
@@ -2407,8 +2452,9 @@ public partial class MainWindow : Window
                 if (!string.IsNullOrEmpty(rootBase) && rootBase.Length >= 4)
                 {
                     var appMatch = Rows.FirstOrDefault(c =>
-                        c.Program.StartsWith(rootBase, StringComparison.OrdinalIgnoreCase) ||
-                        c.Program.Contains(rootBase, StringComparison.OrdinalIgnoreCase));
+                        IsValidCallerRow(c) && (
+                            c.Program.StartsWith(rootBase, StringComparison.OrdinalIgnoreCase) ||
+                            c.Program.Contains(rootBase, StringComparison.OrdinalIgnoreCase)));
                     if (appMatch != null)
                     {
                         return $"{appMatch.Program} (PID {appMatch.Pid})";
@@ -3238,6 +3284,20 @@ public partial class MainWindow : Window
             || s.FirewallStatus.Contains(q, StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool DnsRowFilter(object item)
+    {
+        var d = (DnsRow)item;
+        string q = DnsCheckBox?.Text.Trim() ?? "";
+        if (q.Length == 0) return true;
+        return d.Domain.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.CallerProgram.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.Client.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.Type.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.Result.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.Detail.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || d.Time.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
     // These handlers can fire while the XAML is still being loaded, so ignore them until the window is ready.
     private void OnFilterChanged(object sender, RoutedEventArgs e)
     {
@@ -3255,6 +3315,23 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded) return;
         _startupView.Refresh();
+    }
+
+    private void OnDnsFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (DnsCheckResult != null)
+        {
+            DnsCheckResult.Text = "";
+        }
+        _dnsView.Refresh();
+    }
+
+    private void OnClearDnsSearch(object sender, RoutedEventArgs e)
+    {
+        DnsCheckBox.Text = "";
+        DnsCheckResult.Text = "";
+        _dnsView.Refresh();
     }
 
     private async void OnViewChanged(object sender, RoutedEventArgs e)

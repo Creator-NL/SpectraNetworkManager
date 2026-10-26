@@ -17,7 +17,10 @@
             BorderBrush="{StaticResource Cyan}"
             BorderThickness="1.5"
             CornerRadius="6"
-            Padding="14,12">
+            Padding="14,12"
+            Cursor="Hand"
+            MouseLeftButtonDown="OnPromptMouseLeftButtonDown"
+            ToolTip="Double-click anywhere on this prompt to open SpectraNetworkManager and inspect this program.">
         <Border.Effect>
             <DropShadowEffect BlurRadius="15" Color="#22E8FF" Opacity="0.35" ShadowDepth="2"/>
         </Border.Effect>
@@ -72,6 +75,8 @@
                 <TextBlock x:Name="WarningText" Text="⚠️ WARNING: Digital signature is not valid!"
                            Foreground="{StaticResource Magenta}" FontWeight="SemiBold" FontSize="11" Margin="0,4,0,0"
                            Visibility="Collapsed"/>
+                <TextBlock Text="🔎 Double-click prompt to open SpectraNetworkManager and inspect"
+                           Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
             </StackPanel>
 
             <!-- Actions -->

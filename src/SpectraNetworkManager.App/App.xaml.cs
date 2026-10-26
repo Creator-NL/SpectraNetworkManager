@@ -1,6 +1,10 @@
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
+using System.Windows.Input;
 using SpectraNetworkManager.Core;
 using SpectraNetworkManager.Core.Ipc;
 using SpectraNetworkManager.Platform.Windows;
@@ -12,6 +16,9 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // 0. Prevent WPF controls (TextBox overtype and DataGrid row edit) from swallowing Push-To-Talk keys like Insert
+        DisableBuiltInInsertKeyCapture();
 
         // 1. Global crash and unhandled exception logging
         SetupGlobalExceptionHandling();
@@ -60,6 +67,65 @@ public partial class App : System.Windows.Application
         MainWindow = mainWindow;
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         mainWindow.Show();
+    }
+
+    private static void DisableBuiltInInsertKeyCapture()
+    {
+        try
+        {
+            // Prevent TextBox/RichTextBox from consuming Insert key for overtype mode
+            CommandManager.RegisterClassCommandBinding(
+                typeof(System.Windows.Controls.Primitives.TextBoxBase),
+                new CommandBinding(
+                    EditingCommands.ToggleInsert,
+                    (_, _) => { },
+                    (_, args) =>
+                    {
+                        args.CanExecute = false;
+                        args.ContinueRouting = false;
+                    }));
+
+            // Prevent DataGrid from consuming Insert key for row editing
+            CommandManager.RegisterClassCommandBinding(
+                typeof(DataGrid),
+                new CommandBinding(
+                    DataGrid.BeginEditCommand,
+                    (_, _) => { },
+                    (_, args) =>
+                    {
+                        if (args.Parameter is System.Windows.Input.KeyEventArgs ke && (ke.Key == Key.Insert || ke.SystemKey == Key.Insert))
+                        {
+                            args.CanExecute = false;
+                            args.ContinueRouting = false;
+                        }
+                    }));
+
+            // Ensure unmodified Insert / Pause / ScrollLock / F13-F24 Push-To-Talk keys are never swallowed by WPF controls
+            EventManager.RegisterClassHandler(
+                typeof(UIElement),
+                UIElement.PreviewKeyDownEvent,
+                new System.Windows.Input.KeyEventHandler(OnPassThroughPushToTalkKey),
+                handledEventsToo: true);
+
+            EventManager.RegisterClassHandler(
+                typeof(UIElement),
+                UIElement.PreviewKeyUpEvent,
+                new System.Windows.Input.KeyEventHandler(OnPassThroughPushToTalkKey),
+                handledEventsToo: true);
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Could not register Insert key passthrough handlers: {ex.Message}");
+        }
+    }
+
+    private static void OnPassThroughPushToTalkKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.Insert && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) == ModifierKeys.None)
+        {
+            e.Handled = false;
+        }
     }
 
     private static bool IsSafeRecoveryRequested(string[] args)

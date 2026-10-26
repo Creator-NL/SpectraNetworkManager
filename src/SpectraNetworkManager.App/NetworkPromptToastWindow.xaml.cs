@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using SpectraNetworkManager.Core;
 
@@ -13,6 +14,7 @@ public partial class NetworkPromptToastWindow : Window
     public event Action<ProgramSummary>? BlockRequested;
     public event Action<ProgramSummary>? TrustRequested;
     public event Action<ProgramSummary>? LaterRequested;
+    public event Action<ProgramSummary>? InspectRequested;
 
     public NetworkPromptToastWindow()
     {
@@ -112,6 +114,15 @@ public partial class NetworkPromptToastWindow : Window
         if (_currentProgram != null)
         {
             LaterRequested?.Invoke(_currentProgram);
+        }
+    }
+
+    private void OnPromptMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2 && _currentProgram != null)
+        {
+            e.Handled = true;
+            InspectRequested?.Invoke(_currentProgram);
         }
     }
 }
