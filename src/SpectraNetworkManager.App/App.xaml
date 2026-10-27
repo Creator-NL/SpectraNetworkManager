@@ -12,6 +12,8 @@
         <SolidColorBrush x:Key="Cyan" Color="#22E8FF"/>
         <SolidColorBrush x:Key="Magenta" Color="#FF2BD6"/>
         <SolidColorBrush x:Key="Text" Color="#D7E3FF"/>
+        <SolidColorBrush x:Key="Foreground" Color="#D7E3FF"/>
+        <SolidColorBrush x:Key="PanelBorder" Color="#243055"/>
         <SolidColorBrush x:Key="Muted" Color="#7F8BB0"/>
         <SolidColorBrush x:Key="Selected" Color="#2A1F4D"/>
         <SolidColorBrush x:Key="Amber" Color="#FFB020"/>

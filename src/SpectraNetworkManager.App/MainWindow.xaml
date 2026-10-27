@@ -869,7 +869,7 @@
                         <DockPanel Grid.Column="0">
                             <TextBlock Text="PROTOCOLS &amp; HEADERS" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Cyan}" Margin="0,0,0,6" DockPanel.Dock="Top"/>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <TextBlock x:Name="PacketInspectorDetailsText" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Foreground}" TextWrapping="Wrap"
+                                <TextBlock x:Name="PacketInspectorDetailsText" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Text}" TextWrapping="Wrap"
                                            Text="Select a packet in the table above to view dissected protocol headers and decoded metadata."/>
                             </ScrollViewer>
                         </DockPanel>
