@@ -38,6 +38,8 @@ public static class EngineStoragePaths
     public static string NetworkHistoryPath => GetMigratedPath("network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");
     public static string AppSettingsPath => GetMigratedPath("app-settings.json");
+    public static string QuarantineVaultPath => GetMigratedPath("quarantine-vault.json");
+    public static string BrowserDohBackupPath => GetMigratedPath("browser-doh-backup.json");
     public static string LogsDirectory
     {
         get

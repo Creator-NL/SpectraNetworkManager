@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Microsoft.Win32;
 
 namespace SpectraNetworkManager.Platform.Windows;
 
@@ -373,14 +374,50 @@ public static class WindowsServiceManager
         });
     }
 
-    private static async Task<(bool Success, string Message)> RunElevatedScStopAsync(string serviceName)
+    public static uint GetServiceStartType(string serviceName)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + serviceName);
+            if (key != null)
+            {
+                object? val = key.GetValue("Start");
+                if (val is int i) return (uint)i;
+                if (val is long l) return (uint)l;
+            }
+        }
+        catch { }
+        return 3; // Demand / Manual default
+    }
+
+    public static async Task<(bool Success, string Message)> SetServiceStartTypeAsync(string serviceName, uint startType)
+    {
+        string mode = startType switch
+        {
+            2 => "auto",
+            3 => "demand",
+            4 => "disabled",
+            _ => "demand"
+        };
+        return await RunElevatedScAsync($"config \"{serviceName}\" start= {mode}");
+    }
+
+    public static async Task<(bool Success, string Message)> StartServiceAsync(string serviceName)
+    {
+        return await RunElevatedScAsync($"start \"{serviceName}\"");
+    }
+
+    private static async Task<(bool Success, string Message)> RunElevatedScStopAsync(string serviceName) =>
+        await RunElevatedScAsync($"stop \"{serviceName}\"");
+
+    private static async Task<(bool Success, string Message)> RunElevatedScAsync(string scArguments)
     {
         try
         {
             var psi = new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/c sc.exe stop \"{serviceName}\"",
+                Arguments = $"/c sc.exe {scArguments}",
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden
@@ -391,8 +428,8 @@ public static class WindowsServiceManager
             {
                 await proc.WaitForExitAsync();
                 return proc.ExitCode == 0
-                    ? (true, $"Service '{serviceName}' was stopped successfully with Administrator privileges.")
-                    : (false, $"sc.exe stop exited with code {proc.ExitCode}.");
+                    ? (true, $"Executed 'sc.exe {scArguments}' successfully.")
+                    : (false, $"sc.exe exited with code {proc.ExitCode}.");
             }
             return (false, "Failed to start elevated sc.exe process.");
         }
@@ -402,7 +439,7 @@ public static class WindowsServiceManager
         }
         catch (Exception ex)
         {
-            return (false, $"Failed to stop service: {ex.Message}");
+            return (false, $"Failed to execute sc command: {ex.Message}");
         }
     }
 }

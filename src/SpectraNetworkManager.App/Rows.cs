@@ -261,7 +261,9 @@ public sealed record RuleRow(string Name, string Decision, string Direction, str
 {
     public static RuleRow From(ProgramRule rule, string firewallStatus) => new(
         System.IO.Path.GetFileName(rule.Path),
-        rule.Action == RuleAction.Block ? "BLOCKED" : "Allowed",
+        rule.Action == RuleAction.Block
+            ? (rule.Note?.Contains("QUARANTINE", StringComparison.OrdinalIgnoreCase) == true ? "QUARANTINED" : "BLOCKED")
+            : "Allowed",
         rule.Action == RuleAction.Block ? ProgramRule.DescribeDirection(rule.Direction) : "-",
         rule.Action == RuleAction.Block ? rule.EffectiveScope.Describe() : "-",
         firewallStatus,

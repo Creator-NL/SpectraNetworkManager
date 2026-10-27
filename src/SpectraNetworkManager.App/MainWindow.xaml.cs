@@ -76,6 +76,9 @@ public partial class MainWindow : Window
     private readonly NetworkScanner _scanner;
     private readonly LocalSocketInventory _localInventory;
     private CancellationTokenSource? _scanCts;
+    private readonly QuarantineVault _quarantineVault = new();
+    private readonly QuarantineManager _quarantineManager;
+    private readonly HostsFileMonitor _hostsMonitor = new();
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
@@ -95,6 +98,9 @@ public partial class MainWindow : Window
         _scanner = new NetworkScanner(_neighborScanner);
         _localInventory = new LocalSocketInventory(new IpHelperConnectionSource(), _processResolver);
         _dnsSwitch = new SystemDnsSwitchManager(null, null, () => _sink.LocalEndPoint);
+        _quarantineManager = new QuarantineManager(_quarantineVault, _rules, _enforcer, new TcpConnectionTerminator(), _signatures);
+        _hostsMonitor.StartMonitoring();
+        _hostsMonitor.HostsFileChanged += OnHostsFileChanged;
         InitializeComponent();
         DataContext = this;
         DnsAdaptersList.ItemsSource = DnsAdapters;
@@ -149,6 +155,7 @@ public partial class MainWindow : Window
             _scanCts?.Dispose();
             _sink.Dispose();
             _dnsSwitch.Dispose();
+            _hostsMonitor.Dispose();
         };
 
         _timer.Tick += async (_, _) => await TickAsync();
@@ -1334,6 +1341,147 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---- 4-Stage Quarantine & Rollback System ----
+
+    private async void OnQuarantineConnectionProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedConnection();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndQuarantineAsync(row.Path, row.Program);
+    }
+
+    private async void OnQuarantineProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndQuarantineAsync(row.Path, row.Name);
+    }
+
+    private async void OnRestoreProgramQuarantine(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndRestoreQuarantineAsync(row.Path, row.Name);
+    }
+
+    private async void OnRestoreSelectedQuarantine(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndRestoreQuarantineAsync(row.Rule.Path, row.Name);
+    }
+
+    private async Task PromptAndQuarantineAsync(string path, string name)
+    {
+        if (ProtectedPrograms.IsProtected(path))
+        {
+            MessageBox.Show(this,
+                $"Cannot quarantine \"{name}\".\n\nThis executable is a protected Windows operating system component required for system stability.",
+                "Protected System Component", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        string selfPath = Environment.ProcessPath ?? "";
+        if (!string.IsNullOrEmpty(selfPath) && string.Equals(Path.GetFullPath(path), Path.GetFullPath(selfPath), StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(this, "SpectraNetworkManager cannot quarantine itself.", "Action Refused", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"Perform 4-Stage Quarantine on \"{name}\"?\n\n" +
+            "This will safely neutralize the program while keeping it 100% reversible:\n" +
+            "1. 🛑 Terminate all active process instances & drop active network sockets.\n" +
+            "2. ⚙️ Identify dedicated Windows services, stop them, and set Startup to Disabled.\n" +
+            "3. 🚀 Disable Registry, Startup folder, and Task Scheduler auto-start entries.\n" +
+            "4. 🧱 Enforce strict Inbound and Outbound Windows Firewall block rules.\n\n" +
+            "A complete snapshot will be saved in the Quarantine Vault for 1-click restore at any time.\n\n" +
+            "Proceed with quarantine?",
+            $"🛡️ Quarantine: {name}", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            StatusText.Text = $"Quarantining {name}...";
+            var (success, msg, snapshot) = await _quarantineManager.QuarantineAsync(path, "Quarantined by user");
+            if (success && snapshot != null)
+            {
+                StatusText.Text = $"Quarantined {name}: {snapshot.SummaryDisplay}";
+                MessageBox.Show(this,
+                    $"\"{name}\" has been successfully quarantined!\n\n" +
+                    $"• Processes terminated: {snapshot.TerminatedPids.Count}\n" +
+                    $"• Sockets closed: {snapshot.ClosedSocketsCount}\n" +
+                    $"• Services disabled: {snapshot.ModifiedServices.Count}\n" +
+                    $"• Startup entries disabled: {snapshot.DisabledStartupEntries.Count}\n" +
+                    $"• Firewall rules applied: {(snapshot.FirewallRulesApplied ? "Inbound + Outbound Block" : "None")}\n\n" +
+                    "You can restore this program anytime from the Rules or Programs tab.",
+                    "Program Quarantined", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, $"Quarantine failed: {msg}", "Quarantine Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Error($"Failed to quarantine {name}", ex);
+        }
+
+        AfterDecision();
+        await RefreshRulesAsync();
+        await ForceMonitorRefreshAsync();
+    }
+
+    private async Task PromptAndRestoreQuarantineAsync(string path, string name)
+    {
+        var snapshot = _quarantineVault.FindByPath(path)
+            ?? _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).FirstOrDefault(s => string.Equals(s.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
+
+        if (snapshot == null)
+        {
+            Info($"No quarantine snapshot was found in the vault for \"{name}\".\n\nIf this program was blocked normally, use 'Allow' or 'Forget decision' in the Rules tab.");
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"Restore \"{name}\" from Quarantine?\n\n" +
+            "This will reverse all quarantine actions:\n" +
+            "1. 🧱 Remove Inbound/Outbound quarantine firewall block rules.\n" +
+            "2. 🚀 Re-enable auto-start registry keys and startup items.\n" +
+            "3. ⚙️ Restore Windows Service start types and prompt to restart if needed.\n\n" +
+            "Proceed with restore?",
+            $"🔄 Restore: {name}", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            StatusText.Text = $"Restoring {name} from quarantine...";
+            var (success, msg) = await _quarantineManager.RestoreAsync(snapshot.Id);
+            if (success)
+            {
+                StatusText.Text = $"Restored {name} from quarantine.";
+                MessageBox.Show(this,
+                    $"\"{name}\" has been restored from quarantine.\n\n" +
+                    "Firewall blocks removed, services re-enabled, and startup entries restored.",
+                    "Restore Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, $"Restore failed: {msg}", "Restore Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Error($"Failed to restore {name}", ex);
+        }
+
+        AfterDecision();
+        await RefreshRulesAsync();
+        await ForceMonitorRefreshAsync();
+    }
+
     // ---- Connection & Process Intelligence Inspector + SHA-256 / VirusTotal / AbuseIPDB / Shodan ----
 
     private void OnConnectionsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1763,6 +1911,8 @@ public partial class MainWindow : Window
                 await DisableStrictAsync();
 
             await _dnsSwitch.RestoreAllAsync();
+            await _quarantineManager.RestoreAllActiveAsync();
+            await BrowserDohGuard.DisableGuardAsync();
 
             int removed = await Task.Run(() => _enforcer.RemoveAll());
             int cleared = _rules.RemoveWhere(r => r.Action == RuleAction.Block);
@@ -2179,10 +2329,77 @@ public partial class MainWindow : Window
         LocalRecordsBox.Text = string.Join("\r\n", c.LocalRecords.Select(r => $"{r.Domain} | {r.RecordType} | {r.Value}"));
         ConditionalForwardingBox.Text = string.Join("\r\n", c.ConditionalForwarding.Select(f => $"{f.DomainSuffix} | {f.TargetServer}"));
         DnsCustomRulesButton.Content = $"🛡️ Custom Rules ({c.CustomBlock.Count} blocked, {c.CustomAllow.Count} allowed)";
+        BrowserDohGuardBox.IsChecked = BrowserDohGuard.GetStatus().IsEnforced;
+        UpdateHostsBannerUi(_hostsMonitor.GetStatus());
         }
         finally
         {
             _isLoadingDnsSettings = false;
+        }
+    }
+
+    private void OnHostsFileChanged(object? sender, HostsFileStatus status)
+    {
+        Dispatcher.BeginInvoke(new Action(() => UpdateHostsBannerUi(status)));
+    }
+
+    private void UpdateHostsBannerUi(HostsFileStatus status)
+    {
+        if (!status.IsClean && status.SuspiciousEntries.Count > 0)
+        {
+            HostsTamperBanner.Visibility = Visibility.Visible;
+            string preview = string.Join(", ", status.SuspiciousEntries.Take(3));
+            if (status.SuspiciousEntries.Count > 3) preview += $" (+{status.SuspiciousEntries.Count - 3} more)";
+            HostsTamperBannerText.Text = $"Attention: Windows hosts file contains {status.SuspiciousEntries.Count} suspicious redirect(s) ({preview})!";
+        }
+        else
+        {
+            HostsTamperBanner.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async void OnRestoreDefaultHosts(object sender, RoutedEventArgs e)
+    {
+        var answer = MessageBox.Show(this,
+            "Are you sure you want to restore the Windows hosts file to clean Microsoft default?\n\n" +
+            "A timestamped backup of the current hosts file will be created automatically in your LocalAppData folder.",
+            "Restore Clean Hosts File", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        var (success, message) = await _hostsMonitor.RestoreDefaultHostsFileAsync();
+        if (success)
+        {
+            MessageBox.Show(this, message, "Hosts Restored", MessageBoxButton.OK, MessageBoxImage.Information);
+            UpdateHostsBannerUi(_hostsMonitor.GetStatus());
+        }
+        else
+        {
+            MessageBox.Show(this, message, "Restore Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void OnBrowserDohGuardChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingDnsSettings) return;
+
+        bool enable = BrowserDohGuardBox.IsChecked == true;
+        try
+        {
+            if (enable)
+            {
+                var res = await BrowserDohGuard.EnableGuardAsync();
+                StatusText.Text = res.Message;
+            }
+            else
+            {
+                var res = await BrowserDohGuard.DisableGuardAsync();
+                StatusText.Text = res.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to update Browser DoH Guard policy", ex);
+            BrowserDohGuardBox.IsChecked = !enable;
         }
     }
 

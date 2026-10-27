@@ -1,4 +1,4 @@
-﻿namespace SpectraNetworkManager.Core;
+namespace SpectraNetworkManager.Core;
 
 /// <summary>Programs the app refuses to block, because blocking them can break Windows or switch off your protection.</summary>
 public static class ProtectedPrograms
@@ -28,6 +28,9 @@ public static class ProtectedPrograms
         }
         return folders;
     }
+
+    public static bool IsProtected(string? path) =>
+        IsProtected(path, DefaultFolders(), null, out _);
 
     public static bool IsProtected(string? path, SignatureInfo? signature, out string reason) =>
         IsProtected(path, DefaultFolders(), signature, out reason);

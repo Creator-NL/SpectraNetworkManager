@@ -14,6 +14,7 @@ using SpectraNetworkManager.Platform.Windows;
 if (args.Contains("--dns", StringComparer.OrdinalIgnoreCase)) return await RunDnsAsync(args);
 if (args.Contains("--test-m1", StringComparer.OrdinalIgnoreCase)) return RunMilestone1SelfTest();
 if (args.Contains("--test-m2", StringComparer.OrdinalIgnoreCase)) return RunMilestone2SelfTest();
+if (args.Contains("--test-m3", StringComparer.OrdinalIgnoreCase)) return RunMilestone3SelfTest();
 
 if (!OperatingSystem.IsWindows())
 {
@@ -355,6 +356,121 @@ static int RunMilestone2SelfTest()
     }
 
     Console.WriteLine("ALL MILESTONE 2 SELF-TESTS PASSED SUCCESSFULLY.");
+    return 0;
+}
+
+int RunMilestone3SelfTest()
+{
+    Console.WriteLine("RUNNING MILESTONE 3 SELF-TESTS (Reversible Active Defense, 4-Stage Quarantine & System Guards)...");
+
+    // 1. QuarantineVault & Snapshot lifecycle
+    string tempVault = Path.Combine(Path.GetTempPath(), $"quarantine-vault-spike-{Guid.NewGuid():N}.json");
+    try
+    {
+        var vault = new QuarantineVault(tempVault);
+        var snapshot = new QuarantineSnapshot
+        {
+            ExecutablePath = @"C:\Suspicious\MaliciousTool.exe",
+            ProgramName = "MaliciousTool.exe",
+            Reason = "User manual 4-stage quarantine",
+            QuarantinedAtUtc = DateTimeOffset.UtcNow,
+            PreviousRuleAction = RuleAction.Allow,
+            TerminatedPids = new List<int> { 4120, 9912 },
+            ClosedSocketsCount = 5,
+            ModifiedServices = new List<QuarantineServiceRecord>
+            {
+                new("MaliciousSvc", "Malicious Windows Service", 2, true)
+            },
+            DisabledStartupEntries = new List<QuarantineStartupRecord>
+            {
+                new("HKCU\\Run\\MaliciousTool", "MaliciousTool", "Registry: HKCU Run")
+            },
+            FirewallRulesApplied = true
+        };
+
+        vault.SaveSnapshot(snapshot);
+
+        var all = vault.GetAll();
+        if (all.Count != 1 || all[0].ProgramName != "MaliciousTool.exe")
+            throw new InvalidOperationException("QuarantineVault save/retrieve failed");
+        if (all[0].TerminatedPids.Count != 2 || all[0].ClosedSocketsCount != 5)
+            throw new InvalidOperationException("QuarantineVault snapshot data corrupted");
+        if (all[0].ModifiedServices.Count != 1 || all[0].DisabledStartupEntries.Count != 1)
+            throw new InvalidOperationException("QuarantineVault services/startup record corrupted");
+        if (!all[0].FirewallRulesApplied)
+            throw new InvalidOperationException("QuarantineVault firewall rule flag lost");
+
+        var active = vault.FindByPath(@"C:\Suspicious\MaliciousTool.exe");
+        if (active == null || active.Id != snapshot.Id)
+            throw new InvalidOperationException("QuarantineVault FindByPath failed");
+
+        Console.WriteLine($"  [OK] QuarantineSnapshot: SummaryDisplay = \"{snapshot.SummaryDisplay}\"");
+
+        // Mark restored
+        vault.MarkRestored(snapshot.Id);
+        if (vault.GetActive().Count != 0)
+            throw new InvalidOperationException("QuarantineVault GetActive should be empty after restore");
+        if (vault.FindByPath(@"C:\Suspicious\MaliciousTool.exe") != null)
+            throw new InvalidOperationException("QuarantineVault FindByPath should be null after restore");
+
+        var restored = vault.GetAll().First();
+        if (!restored.IsRestored || restored.RestoredAtUtc == null)
+            throw new InvalidOperationException("QuarantineVault restored flags not set properly");
+
+        vault.DeleteSnapshot(snapshot.Id);
+        if (vault.GetAll().Count != 0)
+            throw new InvalidOperationException("QuarantineVault DeleteSnapshot failed");
+
+        Console.WriteLine("  [OK] QuarantineVault: Complete lifecycle (create, persist, query, restore, purge) verified.");
+    }
+    finally
+    {
+        try { if (File.Exists(tempVault)) File.Delete(tempVault); } catch { }
+    }
+
+    // 2. ProtectedPrograms OS Guard
+    string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+    string sys32 = Path.Combine(winDir, "System32", "svchost.exe");
+    if (!ProtectedPrograms.IsProtected(sys32))
+        throw new InvalidOperationException("svchost.exe must be flagged as protected system component");
+
+    string userApp = @"C:\Users\Creator\AppData\Local\Programs\SampleApp\SampleApp.exe";
+    if (ProtectedPrograms.IsProtected(userApp))
+        throw new InvalidOperationException("User application should NOT be flagged as protected system component");
+
+    Console.WriteLine("  [OK] ProtectedPrograms: Core Windows system binaries correctly shielded from quarantine.");
+
+    // 3. Bitaxe & IoT DeviceClassifier
+    var bitaxe1 = DeviceClassifier.Classify("44-01-76-A4-A6-24", "");
+    if (bitaxe1.Kind != DeviceKind.IotOrSmartHome || !bitaxe1.Vendor.Contains("Bitaxe", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException($"Bitaxe OUI 440176 failed: {bitaxe1.Kind}, {bitaxe1.Vendor}");
+
+    var bitaxe2 = DeviceClassifier.Classify("94-01-00-6B-E5-FC", "");
+    if (bitaxe2.Kind != DeviceKind.IotOrSmartHome || !bitaxe2.Vendor.Contains("Bitaxe", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException($"Bitaxe OUI 940100 failed: {bitaxe2.Kind}, {bitaxe2.Vendor}");
+
+    var bitaxe3 = DeviceClassifier.Classify("00-11-22-33-44-55", "bitaxe-miner-bedroom");
+    if (bitaxe3.Kind != DeviceKind.IotOrSmartHome)
+        throw new InvalidOperationException($"Bitaxe hostname classifier failed: {bitaxe3.Kind}");
+
+    Console.WriteLine("  [OK] DeviceClassifier: Bitaxe crypto miner OUIs (440176, 940100) and hostname keywords verified.");
+
+    // 4. HostsFileMonitor
+    if (OperatingSystem.IsWindows())
+    {
+        var hostsMonitor = new HostsFileMonitor();
+        var hostsStatus = hostsMonitor.GetStatus();
+        Console.WriteLine($"  [OK] HostsFileMonitor: Exists={hostsStatus.Exists}, ActiveEntries={hostsStatus.TotalActiveEntries}, Clean={hostsStatus.IsClean}, Suspicious={hostsStatus.SuspiciousEntries.Count}.");
+    }
+
+    // 5. BrowserDohGuard
+    if (OperatingSystem.IsWindows())
+    {
+        var dohStatus = BrowserDohGuard.GetStatus();
+        Console.WriteLine($"  [OK] BrowserDohGuard: Enforced={dohStatus.IsEnforced}, Details=\"{dohStatus.Details}\".");
+    }
+
+    Console.WriteLine("ALL MILESTONE 3 SELF-TESTS PASSED SUCCESSFULLY.");
     return 0;
 }
 
