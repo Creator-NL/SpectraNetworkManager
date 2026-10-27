@@ -75,6 +75,9 @@
                          ToolTip="Evidence-based process investigation, threat attribution, and local AI threat assessment."/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+            <RadioButton x:Name="QuarantineTab" Content="Quarantine" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                         ToolTip="Active Defense Quarantine Vault. Inspect and restore quarantined applications."/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="DnsTab" Content="DNS" GroupName="view"
@@ -1024,8 +1027,8 @@
                         ToolTip="Change direction, ports or addresses of the selected block (or turn an Allow into a block)."/>
                 <Button x:Name="RulesAllowButton" Content="Allow" Margin="0,0,8,0" Click="OnRulesAllow"
                         ToolTip="Switch the selected decision to Allow (removes the block)."/>
-                <Button x:Name="RulesRestoreQuarantineButton" Content="🔄 Restore Quarantine" Margin="0,0,8,0" Click="OnRestoreSelectedQuarantine" Foreground="{StaticResource Cyan}"
-                        ToolTip="Restores a quarantined program, re-enabling its auto-start items, service, and network access."/>
+                <Button x:Name="RulesViewQuarantineButton" Content="🛡️ View Quarantine Vault" Margin="0,0,8,0" Click="OnRulesViewQuarantine" Foreground="{StaticResource Cyan}"
+                        ToolTip="View and manage quarantined applications in the dedicated Quarantine Vault."/>
                 <Button x:Name="RulesForgetButton" Content="Forget decision" Margin="0,0,8,0" Click="OnRulesForget"
                         ToolTip="Remove the selected decision and its firewall rules."/>
                 <Button x:Name="RulesPanicButton" Content="PANIC: undo all SpectraNetworkManager changes" Click="OnPanic" Foreground="{StaticResource Magenta}"/>
@@ -1065,6 +1068,131 @@
                     <DataGridTextColumn Header="PUBLISHER" Binding="{Binding Name, Mode=OneWay}" Width="*"/>
                 </DataGrid.Columns>
             </DataGrid>
+        </Grid>
+
+        <!-- Active Defense Quarantine Vault view -->
+        <Grid x:Name="QuarantinePanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Description -->
+            <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
+                       Text="Active Defense Quarantine Vault. Neutralized programs are safely isolated across multiple layers: process &amp; network socket termination, kernel-level execution lockout (IFEO), Windows Service disabling, auto-start removal, and bidirectional Windows Firewall blocks. 100% reversible with 1-click restore."/>
+
+            <!-- Toolbar & Controls -->
+            <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <Button Content="🔄 Refresh Vault" Padding="12,3" Margin="0,0,8,0" Click="OnRefreshQuarantineVault"/>
+                    <Button Content="🔄 Restore Program (Un-Quarantine)" Padding="12,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverses all quarantine stages and completely restores the selected program"/>
+                    <Button Content="🛡️ Quarantine New File..." Padding="12,3" Margin="0,0,8,0" Click="OnQuarantineBrowseFile" ToolTip="Browse for an executable to quarantine immediately"/>
+                    <Button Content="🔍 Investigate with AI" Padding="12,3" Margin="0,0,8,0" Click="OnInvestigateQuarantineAi" ToolTip="Analyze the quarantined executable with Spectra AI"/>
+                    <Button Content="🗑️ Remove from Vault" Padding="12,3" Margin="0,0,8,0" Click="OnDeleteQuarantineSnapshot" ToolTip="Removes this record from the vault history"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                    <TextBlock x:Name="QuarantineCountText" Text="0 programs quarantined" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,10,0"/>
+                    <Button Content="PANIC: Restore All Quarantined" Padding="12,3" Foreground="{StaticResource Magenta}" Click="OnPanicRestoreAllQuarantine" ToolTip="Immediately un-quarantine all programs and restore original system state"/>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Splitter: Quarantined Items Grid (Left) vs Snapshot Details (Right) -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="2*" MinWidth="340"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Quarantined Items Grid -->
+                <DataGrid x:Name="QuarantineGrid" Grid.Column="0" ItemsSource="{Binding QuarantinedItems}" SelectionMode="Single"
+                          SelectionChanged="OnQuarantineGridSelectionChanged">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="🔄 Restore Program (Un-Quarantine)" Click="OnRestoreQuarantineFromVault"/>
+                            <MenuItem Header="🔍 Investigate with Spectra AI" Click="OnInvestigateQuarantineAi"/>
+                            <Separator/>
+                            <MenuItem Header="📋 Copy Executable Path" Click="OnCopyQuarantinePath"/>
+                            <MenuItem Header="📁 Open File Location" Click="OnOpenQuarantineFolder"/>
+                            <Separator/>
+                            <MenuItem Header="🗑️ Remove Record from Vault" Click="OnDeleteQuarantineSnapshot"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="150"/>
+                        <DataGridTextColumn Header="STATUS" Binding="{Binding StatusDisplay, Mode=OneWay}" Width="140"/>
+                        <DataGridTextColumn Header="EXECUTION LOCK" Binding="{Binding ExecutionLockDisplay, Mode=OneWay}" Width="130"/>
+                        <DataGridTextColumn Header="FIREWALL" Binding="{Binding FirewallDisplay, Mode=OneWay}" Width="140"/>
+                        <DataGridTextColumn Header="QUARANTINED AT" Binding="{Binding QuarantinedAtDisplay, Mode=OneWay}" Width="130"/>
+                        <DataGridTextColumn Header="SUMMARY" Binding="{Binding SummaryDisplay, Mode=OneWay}" Width="200"/>
+                        <DataGridTextColumn Header="PATH" Binding="{Binding ExecutablePath, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
+
+                <!-- Right: Snapshot Details Card -->
+                <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                    <DockPanel LastChildFill="True">
+                        <!-- Top Header -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                                <Border x:Name="QuarantineStatusBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#33FF2BD6">
+                                    <TextBlock x:Name="QuarantineStatusBadgeText" Text="QUARANTINED" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                                </Border>
+                                <TextBlock Text="QUARANTINE VAULT INSPECTOR" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                            </DockPanel>
+
+                            <TextBlock x:Name="QuarantineDetailNameText" Text="Select a quarantined program" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="QuarantineDetailReasonText" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                            <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="Executable Path:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="QuarantineDetailPathText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+
+                                    <TextBlock Text="Quarantined On:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="QuarantineDetailTimestampText" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,0,4"/>
+
+                                    <TextBlock Text="Vault Snapshot ID:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="QuarantineDetailIdText" FontSize="10" FontFamily="Consolas, monospace" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <WrapPanel Margin="0,0,0,6">
+                                <Button Content="🔄 Restore Program" Margin="0,0,6,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverse all quarantine actions for this program"/>
+                                <Button Content="🔍 Investigate (AI)" Margin="0,0,6,4" Click="OnInvestigateQuarantineAi" ToolTip="Run Spectra AI Threat Intelligence on this executable"/>
+                                <Button Content="📁 Open Folder" Margin="0,0,6,4" Click="OnOpenQuarantineFolder" ToolTip="Open the directory containing this executable"/>
+                            </WrapPanel>
+                        </StackPanel>
+
+                        <!-- Breakdown GroupBox -->
+                        <GroupBox Header="ISOLATION BREAKDOWN (5-STAGE ACTIVE DEFENSE)" Foreground="{StaticResource Cyan}" BorderBrush="{StaticResource Line}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="6">
+                                    <TextBlock Text="STAGE 1: PROCESS &amp; SOCKET TERMINATION" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="QuarantineStage1Text" Text="-- PIDs killed, -- sockets closed" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="STAGE 2: EXECUTION LOCKOUT (IFEO)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="QuarantineStage2Text" Text="-- Execution lockout status" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="STAGE 3: WINDOWS SERVICES" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="QuarantineStage3Text" Text="-- Windows services stopped &amp; disabled" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="STAGE 4: AUTO-START ENTRIES" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="QuarantineStage4Text" Text="-- Startup items disabled" FontSize="11" Foreground="{StaticResource Text}" Margin="0,0,0,6"/>
+
+                                    <TextBlock Text="STAGE 5: WINDOWS FIREWALL" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="QuarantineStage5Text" Text="-- Inbound &amp; Outbound Block rules" FontSize="11" Foreground="{StaticResource Text}"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </GroupBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Strict mode view -->

@@ -107,6 +107,7 @@ public partial class MainWindow : Window
     public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
+    public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
     private readonly BrowserGuardManager _browserGuardManager;
     private readonly AiInvestigationDatabase _aiDb = new();
     private readonly AiInvestigationCoordinator _aiCoordinator;
@@ -1419,15 +1420,27 @@ public partial class MainWindow : Window
         await PromptAndRestoreQuarantineAsync(row.Path, row.Name);
     }
 
-    private async void OnRestoreSelectedQuarantine(object sender, RoutedEventArgs e)
+    private void OnRulesViewQuarantine(object sender, RoutedEventArgs e)
     {
-        var row = SelectedRule();
-        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
-        await PromptAndRestoreQuarantineAsync(row.Rule.Path, row.Name);
+        QuarantineTab.IsChecked = true;
     }
 
     private async Task PromptAndQuarantineAsync(string path, string name)
     {
+        if (!_isAdmin)
+        {
+            var res = MessageBox.Show(this,
+                $"Administrator privileges are required to perform 5-Stage Active Defense Quarantine on \"{name}\".\n\n" +
+                "Quarantine enforces kernel-level execution lockout (IFEO), disables Windows services, and writes system firewall blocks.\n\n" +
+                "Would you like to switch to Administrator mode now to complete quarantine?",
+                "Administrator Rights Required", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (res == MessageBoxResult.Yes)
+            {
+                OnSwitchElevationClick(this, new RoutedEventArgs());
+            }
+            return;
+        }
+
         if (ProtectedPrograms.IsProtected(path))
         {
             MessageBox.Show(this,
@@ -1444,12 +1457,13 @@ public partial class MainWindow : Window
         }
 
         var answer = MessageBox.Show(this,
-            $"Perform 4-Stage Quarantine on \"{name}\"?\n\n" +
+            $"Perform 5-Stage Active Defense Quarantine on \"{name}\"?\n\n" +
             "This will safely neutralize the program while keeping it 100% reversible:\n" +
             "1. 🛑 Terminate all active process instances & drop active network sockets.\n" +
-            "2. ⚙️ Identify dedicated Windows services, stop them, and set Startup to Disabled.\n" +
-            "3. 🚀 Disable Registry, Startup folder, and Task Scheduler auto-start entries.\n" +
-            "4. 🧱 Enforce strict Inbound and Outbound Windows Firewall block rules.\n\n" +
+            "2. ⛔ Enforce kernel-level execution lockout (IFEO) to prevent the program from starting.\n" +
+            "3. ⚙️ Identify dedicated Windows services, stop them, and set Startup to Disabled.\n" +
+            "4. 🚀 Disable Registry, Startup folder, and Task Scheduler auto-start entries.\n" +
+            "5. 🧱 Enforce strict Inbound and Outbound Windows Firewall block rules.\n\n" +
             "A complete snapshot will be saved in the Quarantine Vault for 1-click restore at any time.\n\n" +
             "Proceed with quarantine?",
             $"🛡️ Quarantine: {name}", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
@@ -1463,15 +1477,21 @@ public partial class MainWindow : Window
             if (success && snapshot != null)
             {
                 StatusText.Text = $"Quarantined {name}: {snapshot.SummaryDisplay}";
-                MessageBox.Show(this,
+                RefreshQuarantineVault();
+                var viewChoice = MessageBox.Show(this,
                     $"\"{name}\" has been successfully quarantined!\n\n" +
+                    $"• Execution Lockout: {(snapshot.ExecutionLockoutApplied ? "Enforced (IFEO)" : "Not Set")}\n" +
                     $"• Processes terminated: {snapshot.TerminatedPids.Count}\n" +
                     $"• Sockets closed: {snapshot.ClosedSocketsCount}\n" +
                     $"• Services disabled: {snapshot.ModifiedServices.Count}\n" +
                     $"• Startup entries disabled: {snapshot.DisabledStartupEntries.Count}\n" +
                     $"• Firewall rules applied: {(snapshot.FirewallRulesApplied ? "Inbound + Outbound Block" : "None")}\n\n" +
-                    "You can restore this program anytime from the Rules or Programs tab.",
-                    "Program Quarantined", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "Would you like to view this item in the Quarantine Vault now?",
+                    "Program Quarantined", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                if (viewChoice == MessageBoxResult.Yes)
+                {
+                    QuarantineTab.IsChecked = true;
+                }
             }
             else
             {
@@ -1490,6 +1510,20 @@ public partial class MainWindow : Window
 
     private async Task PromptAndRestoreQuarantineAsync(string path, string name)
     {
+        if (!_isAdmin)
+        {
+            var res = MessageBox.Show(this,
+                $"Administrator privileges are required to restore \"{name}\" from quarantine.\n\n" +
+                "Restoring requires removing execution lockout (IFEO), modifying Windows services, and restoring firewall rules.\n\n" +
+                "Would you like to switch to Administrator mode now to restore this program?",
+                "Administrator Rights Required", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (res == MessageBoxResult.Yes)
+            {
+                OnSwitchElevationClick(this, new RoutedEventArgs());
+            }
+            return;
+        }
+
         var snapshot = _quarantineVault.FindByPath(path)
             ?? _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).FirstOrDefault(s => string.Equals(s.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
 
@@ -1502,9 +1536,10 @@ public partial class MainWindow : Window
         var answer = MessageBox.Show(this,
             $"Restore \"{name}\" from Quarantine?\n\n" +
             "This will reverse all quarantine actions:\n" +
-            "1. 🧱 Remove Inbound/Outbound quarantine firewall block rules.\n" +
-            "2. 🚀 Re-enable auto-start registry keys and startup items.\n" +
-            "3. ⚙️ Restore Windows Service start types and prompt to restart if needed.\n\n" +
+            "1. ⛔ Remove kernel-level execution lockout (IFEO).\n" +
+            "2. 🧱 Remove Inbound/Outbound quarantine firewall block rules.\n" +
+            "3. 🚀 Re-enable auto-start registry keys and startup items.\n" +
+            "4. ⚙️ Restore Windows Service start types and prompt to restart if needed.\n\n" +
             "Proceed with restore?",
             $"🔄 Restore: {name}", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
 
@@ -1517,9 +1552,10 @@ public partial class MainWindow : Window
             if (success)
             {
                 StatusText.Text = $"Restored {name} from quarantine.";
+                RefreshQuarantineVault();
                 MessageBox.Show(this,
                     $"\"{name}\" has been restored from quarantine.\n\n" +
-                    "Firewall blocks removed, services re-enabled, and startup entries restored.",
+                    "Execution lockout removed, firewall blocks cleared, services re-enabled, and startup entries restored.",
                     "Restore Complete", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
@@ -1535,6 +1571,228 @@ public partial class MainWindow : Window
         AfterDecision();
         await RefreshRulesAsync();
         await ForceMonitorRefreshAsync();
+    }
+
+    // ---- Quarantine Vault Management Handlers ----
+
+    private void RefreshQuarantineVault()
+    {
+        var snapshots = _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).ToList();
+        QuarantinedItems.Clear();
+        foreach (var s in snapshots)
+        {
+            QuarantinedItems.Add(s);
+        }
+
+        int activeCount = snapshots.Count(s => !s.IsRestored);
+        QuarantineCountText.Text = $"{activeCount} program{(activeCount != 1 ? "s" : "")} quarantined in vault";
+
+        if (QuarantineGrid.SelectedItem == null && QuarantinedItems.Count > 0)
+        {
+            QuarantineGrid.SelectedIndex = 0;
+        }
+        else if (QuarantinedItems.Count == 0)
+        {
+            ClearQuarantineDetails();
+        }
+    }
+
+    private void ClearQuarantineDetails()
+    {
+        QuarantineDetailNameText.Text = "No programs quarantined";
+        QuarantineDetailReasonText.Text = "The Quarantine Vault is currently empty. To quarantine a suspicious program, right-click any connection or program and select '4-Stage Quarantine', or click 'Quarantine New File...'.";
+        QuarantineDetailPathText.Text = "-";
+        QuarantineDetailTimestampText.Text = "-";
+        QuarantineDetailIdText.Text = "-";
+        QuarantineStatusBadgeText.Text = "VAULT EMPTY";
+        QuarantineStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x7F, 0x8B, 0xB0));
+        QuarantineStatusBadgeText.Foreground = (Brush)FindResource("Muted");
+        QuarantineStage1Text.Text = "No active quarantine locks";
+        QuarantineStage2Text.Text = "No execution lockouts active";
+        QuarantineStage3Text.Text = "No services disabled";
+        QuarantineStage4Text.Text = "No auto-start entries disabled";
+        QuarantineStage5Text.Text = "No quarantine firewall blocks active";
+    }
+
+    private void OnQuarantineGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap)
+        {
+            QuarantineDetailNameText.Text = snap.ProgramName;
+            QuarantineDetailReasonText.Text = string.IsNullOrWhiteSpace(snap.Reason) ? "Quarantined by user" : snap.Reason;
+            QuarantineDetailPathText.Text = snap.ExecutablePath;
+            QuarantineDetailTimestampText.Text = snap.QuarantinedAtUtc.ToLocalTime().ToString("f");
+            QuarantineDetailIdText.Text = snap.Id;
+
+            if (snap.IsRestored)
+            {
+                QuarantineStatusBadgeText.Text = "RESTORED";
+                QuarantineStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0x00, 0xE6, 0x76));
+                QuarantineStatusBadgeText.Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0xFF, 0x88));
+            }
+            else
+            {
+                QuarantineStatusBadgeText.Text = "QUARANTINED";
+                QuarantineStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
+                QuarantineStatusBadgeText.Foreground = (Brush)FindResource("Magenta");
+            }
+
+            QuarantineStage1Text.Text = $"{snap.TerminatedPids.Count} process instance(s) killed | {snap.ClosedSocketsCount} network socket(s) terminated";
+            QuarantineStage2Text.Text = snap.ExecutionLockoutApplied
+                ? "⛔ ACTIVE: Blocked by Windows Image File Execution Options (IFEO). Program cannot start."
+                : (snap.IsRestored ? "✔ Restored: Execution allowed." : "⚪ Not enforced");
+            QuarantineStage3Text.Text = snap.ModifiedServices.Count > 0
+                ? $"⚙️ {snap.ModifiedServices.Count} Windows service(s) stopped and disabled: {string.Join(", ", snap.ModifiedServices.Select(s => s.ServiceName))}"
+                : "⚪ No dedicated Windows services detected";
+            QuarantineStage4Text.Text = snap.DisabledStartupEntries.Count > 0
+                ? $"🚀 {snap.DisabledStartupEntries.Count} auto-start entry(s) disabled: {string.Join(", ", snap.DisabledStartupEntries.Select(s => s.Name))}"
+                : "⚪ No startup registry/folder entries found";
+            QuarantineStage5Text.Text = snap.FirewallRulesApplied
+                ? "🧱 ACTIVE: Inbound and Outbound Windows Firewall rules blocking all network traffic"
+                : (snap.IsRestored ? "✔ Restored: Firewall blocks removed." : "⚪ None");
+        }
+        else
+        {
+            ClearQuarantineDetails();
+        }
+    }
+
+    private void OnRefreshQuarantineVault(object sender, RoutedEventArgs e) => RefreshQuarantineVault();
+
+    private async void OnRestoreQuarantineFromVault(object sender, RoutedEventArgs e)
+    {
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap)
+        {
+            await PromptAndRestoreQuarantineAsync(snap.ExecutablePath, snap.ProgramName);
+            RefreshQuarantineVault();
+        }
+        else
+        {
+            Info("Please select a program in the Quarantine Vault to restore.");
+        }
+    }
+
+    private async void OnQuarantineBrowseFile(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Executables (*.exe)|*.exe|All Files (*.*)|*.*",
+            Title = "Select Executable to Quarantine"
+        };
+        if (dlg.ShowDialog(this) == true && !string.IsNullOrWhiteSpace(dlg.FileName))
+        {
+            await PromptAndQuarantineAsync(dlg.FileName, Path.GetFileName(dlg.FileName));
+            RefreshQuarantineVault();
+        }
+    }
+
+    private void OnInvestigateQuarantineAi(object sender, RoutedEventArgs e)
+    {
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap && !string.IsNullOrWhiteSpace(snap.ExecutablePath))
+        {
+            _aiSelectedPid = 0;
+            _aiSelectedPath = snap.ExecutablePath;
+            AiTab.IsChecked = true;
+            OnViewChanged(AiTab, new RoutedEventArgs());
+            AiTargetDisplay.Text = $"{snap.ProgramName} (Quarantined)";
+            AiTargetTitle.Text = snap.ProgramName;
+            OnRunAiInvestigationClick(sender, e);
+        }
+        else
+        {
+            Info("Please select an item in the Quarantine Vault first.");
+        }
+    }
+
+    private async void OnRestoreSelectedQuarantine(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndRestoreQuarantineAsync(row.Rule.Path, row.Name);
+    }
+
+    private void OnDeleteQuarantineSnapshot(object sender, RoutedEventArgs e)
+    {
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap)
+        {
+            if (Confirm($"Remove \"{snap.ProgramName}\" from the Quarantine Vault history?\n\nNote: If this program is currently quarantined, removing the record does not un-quarantine it. Use 'Restore Program' instead if you want to restore execution and network access.", "Remove Snapshot"))
+            {
+                _quarantineVault.DeleteSnapshot(snap.Id);
+                RefreshQuarantineVault();
+            }
+        }
+    }
+
+    private async void OnPanicRestoreAllQuarantine(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin)
+        {
+            var res = MessageBox.Show(this,
+                "Administrator privileges are required to restore quarantined programs.\n\n" +
+                "Would you like to switch to Administrator mode now?",
+                "Administrator Rights Required", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (res == MessageBoxResult.Yes)
+            {
+                OnSwitchElevationClick(this, new RoutedEventArgs());
+            }
+            return;
+        }
+
+        var active = _quarantineVault.GetActive();
+        if (active.Count == 0)
+        {
+            Info("There are no active quarantined programs in the vault.");
+            return;
+        }
+
+        if (Confirm($"Restore ALL {active.Count} quarantined program(s) and undo all execution locks, service changes, and firewall rules?", "PANIC: Restore All Quarantined"))
+        {
+            var (count, errors) = await _quarantineManager.RestoreAllActiveAsync();
+            RefreshQuarantineVault();
+            await RefreshRulesAsync();
+            await ForceMonitorRefreshAsync();
+            Info($"Successfully restored {count} quarantined program(s)." + (errors.Count > 0 ? $"\n\nWarnings:\n{string.Join("\n", errors)}" : ""));
+        }
+    }
+
+    private void OnCopyQuarantinePath(object sender, RoutedEventArgs e)
+    {
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap && !string.IsNullOrWhiteSpace(snap.ExecutablePath))
+        {
+            System.Windows.Clipboard.SetText(snap.ExecutablePath);
+            StatusText.Text = $"Copied path: {snap.ExecutablePath}";
+        }
+    }
+
+    private void OnOpenQuarantineFolder(object sender, RoutedEventArgs e)
+    {
+        if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap && !string.IsNullOrWhiteSpace(snap.ExecutablePath))
+        {
+            try
+            {
+                if (File.Exists(snap.ExecutablePath))
+                {
+                    Process.Start("explorer.exe", $"/select,\"{snap.ExecutablePath}\"");
+                }
+                else
+                {
+                    string? dir = Path.GetDirectoryName(snap.ExecutablePath);
+                    if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                    {
+                        Process.Start("explorer.exe", dir);
+                    }
+                    else
+                    {
+                        Info($"Directory does not exist: {snap.ExecutablePath}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Error("Failed to open file folder", ex);
+            }
+        }
     }
 
     // ---- Connection & Process Intelligence Inspector + SHA-256 / VirusTotal / AbuseIPDB / Shodan ----
@@ -3881,6 +4139,7 @@ public partial class MainWindow : Window
         BrowserGuardPanel.Visibility = BrowserGuardTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         AiPanel.Visibility = AiTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        QuarantinePanel.Visibility = QuarantineTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BlocksPanel.Visibility = BlocksTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -3893,6 +4152,7 @@ public partial class MainWindow : Window
         if (StrictTab.IsChecked == true) UpdateStrictUi();
         if (DnsTab.IsChecked == true) RefreshDnsUi();
         if (RulesTab.IsChecked == true) await RefreshRulesAsync();
+        if (QuarantineTab.IsChecked == true) RefreshQuarantineVault();
         if (TrafficTab.IsChecked == true) await RefreshTrafficAsync();
         if (BlocksTab.IsChecked == true) await LoadBlocksAsync();
     }
@@ -6357,6 +6617,7 @@ public partial class MainWindow : Window
         BrowserGuardTab.Content = LocalizationManager.T("TabBrowserGuard");
         AiTab.Content = LocalizationManager.T("TabAi");
         RulesTab.Content = LocalizationManager.T("TabRules");
+        QuarantineTab.Content = LocalizationManager.T("TabQuarantine");
         StrictTab.Content = LocalizationManager.T("TabStrictMode");
         DnsTab.Content = LocalizationManager.T("TabDns");
         BlocksTab.Content = LocalizationManager.T("TabBlocks");
@@ -6824,6 +7085,11 @@ public partial class MainWindow : Window
         {
             targetPath = ruleRow.Path;
             targetName = ruleRow.Name;
+        }
+        else if ((sourceGrid == QuarantineGrid || QuarantineTab.IsChecked == true) && QuarantineGrid.SelectedItem is QuarantineSnapshot qSnap)
+        {
+            targetPath = qSnap.ExecutablePath;
+            targetName = qSnap.ProgramName;
         }
         else if ((sourceGrid == PacketsGrid || PacketsTab.IsChecked == true) && PacketsGrid.SelectedItem is PacketRow pktRow)
         {

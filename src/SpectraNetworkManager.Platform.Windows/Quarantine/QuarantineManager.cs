@@ -77,6 +77,18 @@ public sealed class QuarantineManager
         // --- STAGE 1: Network Sockets & Running Processes ---
         try
         {
+            if (SetExecutionLockout(programName, true))
+            {
+                snapshot.ExecutionLockoutApplied = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Quarantine Stage 1 Execution Lockout error: {ex.Message}");
+        }
+
+        try
+        {
             snapshot.ClosedSocketsCount = _terminator.TerminateConnectionsForProgram(cleanPath);
         }
         catch (Exception ex)
@@ -203,6 +215,16 @@ public sealed class QuarantineManager
         if (snapshot.IsRestored)
             return (false, $"Program '{snapshot.ProgramName}' is already restored.");
 
+        // 0. Remove Execution Lockout (IFEO)
+        try
+        {
+            SetExecutionLockout(snapshot.ProgramName, false);
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Quarantine Restore Execution Lockout error: {ex.Message}");
+        }
+
         // 1. Restore Firewall & RuleStore
         try
         {
@@ -321,5 +343,59 @@ public sealed class QuarantineManager
         }
         catch { }
         return list;
+    }
+
+    private static readonly string[] IfeoPaths = new[]
+    {
+        @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+        @"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
+    };
+
+    /// <summary>
+    /// Enforces or removes kernel-level execution lockout via Image File Execution Options (IFEO).
+    /// When enabled, Windows intercepts attempts to launch programName and runs systray.exe (which exits immediately),
+    /// completely preventing the executable from starting. 100% reversible by deleting the Debugger value.
+    /// </summary>
+    public static bool SetExecutionLockout(string programName, bool enable)
+    {
+        if (string.IsNullOrWhiteSpace(programName)) return false;
+        bool anySuccess = false;
+
+        foreach (var ifeoRoot in IfeoPaths)
+        {
+            try
+            {
+                string subKeyPath = $@"{ifeoRoot}\{programName}";
+                if (enable)
+                {
+                    using var key = Registry.LocalMachine.CreateSubKey(subKeyPath);
+                    if (key != null)
+                    {
+                        key.SetValue("Debugger", "systray.exe", RegistryValueKind.String);
+                        anySuccess = true;
+                    }
+                }
+                else
+                {
+                    using var key = Registry.LocalMachine.OpenSubKey(subKeyPath, writable: true);
+                    if (key != null)
+                    {
+                        key.DeleteValue("Debugger", throwOnMissingValue: false);
+                        if (key.ValueCount == 0 && key.SubKeyCount == 0)
+                        {
+                            key.Dispose();
+                            Registry.LocalMachine.DeleteSubKey(subKeyPath, throwOnMissingSubKey: false);
+                        }
+                        anySuccess = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                RotatingFileLogger.LogWarn($"IFEO lockout error ({ifeoRoot}\\{programName}): {ex.Message}");
+            }
+        }
+
+        return anySuccess;
     }
 }

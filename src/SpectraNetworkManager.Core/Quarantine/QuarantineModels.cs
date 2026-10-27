@@ -33,6 +33,7 @@ public sealed class QuarantineSnapshot
     public List<QuarantineServiceRecord> ModifiedServices { get; set; } = new();
     public List<QuarantineStartupRecord> DisabledStartupEntries { get; set; } = new();
     public bool FirewallRulesApplied { get; set; }
+    public bool ExecutionLockoutApplied { get; set; }
     public string Reason { get; set; } = "";
     public bool IsRestored { get; set; }
     public DateTimeOffset? RestoredAtUtc { get; set; }
@@ -43,6 +44,7 @@ public sealed class QuarantineSnapshot
         {
             var parts = new List<string>();
             if (TerminatedPids.Count > 0) parts.Add($"Killed {TerminatedPids.Count} process{(TerminatedPids.Count > 1 ? "es" : "")}");
+            if (ExecutionLockoutApplied) parts.Add("Execution Blocked (IFEO)");
             if (ClosedSocketsCount > 0) parts.Add($"Closed {ClosedSocketsCount} socket{(ClosedSocketsCount > 1 ? "s" : "")}");
             if (ModifiedServices.Count > 0) parts.Add($"Stopped {ModifiedServices.Count} service{(ModifiedServices.Count > 1 ? "s" : "")}");
             if (DisabledStartupEntries.Count > 0) parts.Add($"Disabled {DisabledStartupEntries.Count} auto-start{(DisabledStartupEntries.Count > 1 ? "s" : "")}");
@@ -52,4 +54,7 @@ public sealed class QuarantineSnapshot
     }
 
     public string StatusDisplay => IsRestored ? "Restored" : "Quarantined (Active)";
+    public string ExecutionLockDisplay => ExecutionLockoutApplied ? "⛔ Locked (IFEO)" : (IsRestored ? "Allowed" : "Not Set");
+    public string FirewallDisplay => FirewallRulesApplied ? "🧱 In + Out Block" : (IsRestored ? "Restored" : "None");
+    public string QuarantinedAtDisplay => QuarantinedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }
