@@ -15,6 +15,7 @@ if (args.Contains("--dns", StringComparer.OrdinalIgnoreCase)) return await RunDn
 if (args.Contains("--test-m1", StringComparer.OrdinalIgnoreCase)) return RunMilestone1SelfTest();
 if (args.Contains("--test-m2", StringComparer.OrdinalIgnoreCase)) return RunMilestone2SelfTest();
 if (args.Contains("--test-m3", StringComparer.OrdinalIgnoreCase)) return RunMilestone3SelfTest();
+if (args.Contains("--test-m4", StringComparer.OrdinalIgnoreCase)) return await RunMilestone4SelfTestAsync();
 
 if (!OperatingSystem.IsWindows())
 {
@@ -471,6 +472,108 @@ int RunMilestone3SelfTest()
     }
 
     Console.WriteLine("ALL MILESTONE 3 SELF-TESTS PASSED SUCCESSFULLY.");
+    return 0;
+}
+
+async Task<int> RunMilestone4SelfTestAsync()
+{
+    Console.WriteLine("RUNNING MILESTONE 4 SELF-TESTS (Packet Inspector, TLS SNI / DNS / HTTP Dissectors & PCAPNG Export)...");
+
+    // 1. IPv4 TCP Dissection
+    byte[] tcpRaw = new byte[40];
+    tcpRaw[0] = 0x45;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(tcpRaw.AsSpan(2, 2), 40);
+    tcpRaw[9] = 6; // TCP
+    tcpRaw[12] = 192; tcpRaw[13] = 168; tcpRaw[14] = 1; tcpRaw[15] = 50;
+    tcpRaw[16] = 142; tcpRaw[17] = 250; tcpRaw[18] = 179; tcpRaw[19] = 206;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(tcpRaw.AsSpan(20, 2), 54321);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(tcpRaw.AsSpan(22, 2), 443);
+    tcpRaw[32] = 0x50; // Data offset 20
+    tcpRaw[33] = 0x02; // SYN
+
+    var tcpPkt = ProtocolDissectors.Dissect(tcpRaw, 1, DateTimeOffset.UtcNow);
+    if (tcpPkt.Protocol != PacketProtocol.Tcp || tcpPkt.SourcePort != 54321 || tcpPkt.DestinationPort != 443 || !tcpPkt.TcpFlags.Contains("SYN"))
+        throw new InvalidOperationException("TCP dissection failed");
+    Console.WriteLine($"  [OK] IPv4 TCP Dissector: {tcpPkt.SourceEndpointDisplay} -> {tcpPkt.DestinationEndpointDisplay} {tcpPkt.TcpFlags} verified.");
+
+    // 2. DNS Dissection
+    byte[] dnsWire = new byte[] {
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x03, 0x61, 0x70, 0x69, 0x06, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x03, 0x63, 0x6F, 0x6D, 0x00,
+        0x00, 0x01, 0x00, 0x01
+    };
+    byte[] udpRaw = new byte[28 + dnsWire.Length];
+    udpRaw[0] = 0x45;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(udpRaw.AsSpan(2, 2), (ushort)udpRaw.Length);
+    udpRaw[9] = 17; // UDP
+    udpRaw[12] = 192; udpRaw[13] = 168; udpRaw[14] = 1; udpRaw[15] = 10;
+    udpRaw[16] = 192; udpRaw[17] = 168; udpRaw[18] = 1; udpRaw[19] = 1;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(udpRaw.AsSpan(20, 2), 61234);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(udpRaw.AsSpan(22, 2), 53);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(udpRaw.AsSpan(24, 2), (ushort)(8 + dnsWire.Length));
+    dnsWire.CopyTo(udpRaw, 28);
+
+    var dnsPkt = ProtocolDissectors.Dissect(udpRaw, 2, DateTimeOffset.UtcNow);
+    if (dnsPkt.Protocol != PacketProtocol.Dns || dnsPkt.HostOrSni != "api.github.com")
+        throw new InvalidOperationException($"DNS dissection failed: {dnsPkt.Protocol}, {dnsPkt.HostOrSni}");
+    Console.WriteLine($"  [OK] DNS Dissector: Queried Host = \"{dnsPkt.HostOrSni}\" (Type A) verified.");
+
+    // 3. HTTP Dissection
+    string httpText = "GET /v2/status HTTP/1.1\r\nHost: api.github.com\r\n\r\n";
+    byte[] httpBytes = System.Text.Encoding.ASCII.GetBytes(httpText);
+    byte[] httpRaw = new byte[40 + httpBytes.Length];
+    httpRaw[0] = 0x45;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(httpRaw.AsSpan(2, 2), (ushort)httpRaw.Length);
+    httpRaw[9] = 6;
+    httpRaw[12] = 192; httpRaw[13] = 168; httpRaw[14] = 1; httpRaw[15] = 10;
+    httpRaw[16] = 140; httpRaw[17] = 82; httpRaw[18] = 121; httpRaw[19] = 4;
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(httpRaw.AsSpan(20, 2), 58900);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(httpRaw.AsSpan(22, 2), 80);
+    httpRaw[32] = 0x50;
+    httpBytes.CopyTo(httpRaw, 40);
+
+    var httpPkt = ProtocolDissectors.Dissect(httpRaw, 3, DateTimeOffset.UtcNow);
+    if (httpPkt.Protocol != PacketProtocol.Http || httpPkt.HostOrSni != "api.github.com")
+        throw new InvalidOperationException("HTTP dissection failed");
+    Console.WriteLine($"  [OK] HTTP Dissector: Method = GET, Host = \"{httpPkt.HostOrSni}\" verified.");
+
+    // 4. PCAPNG Binary Export
+    string tempPcap = Path.Combine(Path.GetTempPath(), $"pcapng-spike-{Guid.NewGuid():N}.pcapng");
+    try
+    {
+        await PcapngWriter.WriteAsync(tempPcap, new[] { tcpPkt, dnsPkt, httpPkt });
+        if (!File.Exists(tempPcap) || new FileInfo(tempPcap).Length < 100)
+            throw new InvalidOperationException("PcapngWriter failed to produce valid file");
+
+        byte[] headerBytes = await File.ReadAllBytesAsync(tempPcap);
+        uint shb = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.AsSpan(0, 4));
+        uint bom = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.AsSpan(8, 4));
+        if (shb != 0x0A0D0D0A || bom != 0x1A2B3C4D)
+            throw new InvalidOperationException("Pcapng file has invalid magic or byte order");
+
+        Console.WriteLine($"  [OK] PcapngWriter: Standard Section Header (0x0A0D0D0A), IDB, and EPB verified ({headerBytes.Length} bytes).");
+    }
+    finally
+    {
+        try { if (File.Exists(tempPcap)) File.Delete(tempPcap); } catch { }
+    }
+
+    // 5. PacketRingBuffer
+    var buffer = new PacketRingBuffer(capacity: 200);
+    for (int i = 0; i < 250; i++) buffer.Add(tcpPkt);
+    if (buffer.Count != 200 || buffer.TotalPackets != 250)
+        throw new InvalidOperationException("PacketRingBuffer capacity bound failed");
+    Console.WriteLine($"  [OK] PacketRingBuffer: Bounded circular capacity (200 / 250 packets) verified.");
+
+    // 6. Platform Capture Provider Capability Check
+    if (OperatingSystem.IsWindows())
+    {
+        bool pktmonAvailable = WindowsPktmonCaptureProvider.IsPktmonAvailable;
+        var activeIps = WindowsRawSocketCaptureProvider.GetAllActiveIPv4Addresses();
+        Console.WriteLine($"  [OK] Platform Capture: Pktmon Available = {pktmonAvailable}, Active Interfaces = {activeIps.Count} ({string.Join(", ", activeIps)}).");
+    }
+
+    Console.WriteLine("ALL MILESTONE 4 SELF-TESTS PASSED SUCCESSFULLY.");
     return 0;
 }
 

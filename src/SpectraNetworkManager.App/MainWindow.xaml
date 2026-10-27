@@ -61,6 +61,9 @@
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="ScannerTab" Content="Port Scanner" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+            <RadioButton x:Name="PacketsTab" Content="Packets" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                         ToolTip="Live native packet inspector, TLS SNI &amp; protocol dissector, hex stream viewer, and Wireshark PCAPNG export."/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
@@ -741,6 +744,125 @@
                             </DataGrid>
                         </GroupBox>
                     </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Packet Inspector & Protocol Dissector view -->
+        <Grid x:Name="PacketsPanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Description -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                <TextBlock Foreground="{StaticResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center" DockPanel.Dock="Left"
+                           Text="Native Windows Packet Inspector &amp; Protocol Dissector. Dissects TLS SNI hostnames, DNS queries, plaintext HTTP, and TCP/UDP streams in real time. Zero third-party drivers or external dependencies. 100% compatible with Wireshark PCAPNG export."/>
+            </DockPanel>
+
+            <!-- Toolbar & Controls -->
+            <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <Button x:Name="StartCaptureButton" Content="▶ Start Capture" Padding="14,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnStartCapture"/>
+                    <Button x:Name="StopCaptureButton" Content="⏹ Stop" Padding="12,3" Margin="0,0,12,0" IsEnabled="False" Click="OnStopCapture"/>
+
+                    <TextBlock Text="Interface:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="CaptureInterfaceCombo" Width="170" VerticalAlignment="Center" Margin="0,0,12,0" SelectionChanged="OnCaptureInterfaceChanged"/>
+
+                    <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="PacketProtocolFilterCombo" Width="110" VerticalAlignment="Center" Margin="0,0,10,0" SelectedIndex="0" SelectionChanged="OnPacketFilterChanged">
+                        <ComboBoxItem Content="All Traffic"/>
+                        <ComboBoxItem Content="TLS (HTTPS)"/>
+                        <ComboBoxItem Content="DNS"/>
+                        <ComboBoxItem Content="HTTP"/>
+                        <ComboBoxItem Content="TCP"/>
+                        <ComboBoxItem Content="UDP"/>
+                    </ComboBox>
+
+                    <TextBox x:Name="PacketSearchBox" Width="160" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="Search by host, IP, port, process, or keywords" TextChanged="OnPacketSearchChanged"/>
+                    <Button Content="Clear Buffer" Padding="10,3" Margin="0,0,12,0" Click="OnClearPackets" ToolTip="Clear packet ring buffer"/>
+
+                    <TextBlock x:Name="PacketStatsText" Text="Buffer: 0 / 10,000 | 0.0 pkt/s" VerticalAlignment="Center" Foreground="{StaticResource Amber}" FontSize="12" FontFamily="Consolas"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                    <Button Content="💾 Export .pcapng" Padding="12,3" Margin="0,0,8,0" Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Click="OnExportPcapng" ToolTip="Export captured packets to standard Wireshark PCAPNG file"/>
+                    <Button Content="Export CSV" Padding="12,3" Click="OnExportPacketsCsv" ToolTip="Export packet table to CSV"/>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Splitter: Packets List (Top) vs Packet Hex & Dissected Inspector (Bottom) -->
+            <Grid Grid.Row="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="3*"/>
+                    <RowDefinition Height="8"/>
+                    <RowDefinition Height="2*" MinHeight="180"/>
+                </Grid.RowDefinitions>
+
+                <!-- Top: Packets DataGrid -->
+                <DataGrid x:Name="PacketsGrid" Grid.Row="0" ItemsSource="{Binding CapturedPacketsView}" SelectionMode="Single"
+                          SelectionChanged="OnPacketsGridSelectionChanged">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="📋 Copy Host / SNI" Click="OnCopyPacketHost"/>
+                            <MenuItem Header="📋 Copy Source IP:Port" Click="OnCopyPacketSource"/>
+                            <MenuItem Header="📋 Copy Destination IP:Port" Click="OnCopyPacketDestination"/>
+                            <Separator/>
+                            <MenuItem Header="🛡️ Block Host in DNS" Click="OnBlockPacketHostInDns"/>
+                            <MenuItem Header="🧱 Block Remote IP in Firewall" Click="OnBlockPacketRemoteInFirewall"/>
+                            <Separator/>
+                            <MenuItem Header="💾 Export Selected Packets to .pcapng..." Click="OnExportPcapng"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding Id, Mode=OneWay}" Width="60"/>
+                        <DataGridTextColumn Header="TIME" Binding="{Binding TimestampDisplay, Mode=OneWay}" Width="85"/>
+                        <DataGridTextColumn Header="DIR" Binding="{Binding DirectionDisplay, Mode=OneWay}" Width="65"/>
+                        <DataGridTextColumn Header="PROTO" Binding="{Binding ProtocolDisplay, Mode=OneWay}" Width="75"/>
+                        <DataGridTextColumn Header="HOST / SNI" Binding="{Binding HostOrSni, Mode=OneWay}" Width="210"/>
+                        <DataGridTextColumn Header="PROCESS" Binding="{Binding ProcessDisplay, Mode=OneWay}" Width="150"/>
+                        <DataGridTextColumn Header="SOURCE" Binding="{Binding SourceEndpointDisplay, Mode=OneWay}" Width="180"/>
+                        <DataGridTextColumn Header="DESTINATION" Binding="{Binding DestinationEndpointDisplay, Mode=OneWay}" Width="180"/>
+                        <DataGridTextColumn Header="LEN" Binding="{Binding TotalLength, Mode=OneWay}" Width="60"/>
+                        <DataGridTextColumn Header="FLAGS" Binding="{Binding TcpFlags, Mode=OneWay}" Width="90"/>
+                        <DataGridTextColumn Header="INFO" Binding="{Binding Info, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Row="1" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                <!-- Bottom: Dissected Packet Details & Hex Stream Viewer -->
+                <Border Grid.Row="2" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4" Padding="12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="1*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left Column: Dissected Protocol Hierarchy -->
+                        <DockPanel Grid.Column="0">
+                            <TextBlock Text="PROTOCOLS &amp; HEADERS" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Cyan}" Margin="0,0,0,6" DockPanel.Dock="Top"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <TextBlock x:Name="PacketInspectorDetailsText" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Foreground}" TextWrapping="Wrap"
+                                           Text="Select a packet in the table above to view dissected protocol headers and decoded metadata."/>
+                            </ScrollViewer>
+                        </DockPanel>
+
+                        <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                        <!-- Right Column: Hex Stream Dump -->
+                        <DockPanel Grid.Column="2">
+                            <TextBlock Text="HEX STREAM / PAYLOAD DUMP" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Amber}" Margin="0,0,0,6" DockPanel.Dock="Top"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                <TextBox x:Name="PacketHexBox" IsReadOnly="True" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource Muted}"
+                                         Background="#141923" BorderThickness="0" TextWrapping="NoWrap"
+                                         Text="Hex stream preview will appear here."/>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Grid>
                 </Border>
             </Grid>
         </Grid>

@@ -79,6 +79,9 @@ public partial class MainWindow : Window
     private readonly QuarantineVault _quarantineVault = new();
     private readonly QuarantineManager _quarantineManager;
     private readonly HostsFileMonitor _hostsMonitor = new();
+    private readonly PacketCaptureManager _packetCaptureManager;
+    private string _packetProtocolFilter = "ALL";
+    private string _packetSearchTerm = "";
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
@@ -92,6 +95,8 @@ public partial class MainWindow : Window
     public ObservableCollection<ConnectionHistoryViewModel> ConnectionHistory { get; } = new();
     public ObservableCollection<DiscoveredDevice> DiscoveredDevices { get; } = new();
     public ObservableCollection<DiscoveredPort> SelectedDevicePorts { get; } = new();
+    public ObservableCollection<PacketRow> CapturedPackets { get; } = new();
+    public ICollectionView CapturedPacketsView { get; }
 
     public MainWindow()
     {
@@ -101,7 +106,13 @@ public partial class MainWindow : Window
         _quarantineManager = new QuarantineManager(_quarantineVault, _rules, _enforcer, new TcpConnectionTerminator(), _signatures);
         _hostsMonitor.StartMonitoring();
         _hostsMonitor.HostsFileChanged += OnHostsFileChanged;
+        _packetCaptureManager = new PacketCaptureManager(MatchConnectionToProcess);
+        _packetCaptureManager.BatchFlushed += OnPacketBatchFlushed;
+        _packetCaptureManager.StatusChanged += OnPacketStatusChanged;
+        CapturedPacketsView = CollectionViewSource.GetDefaultView(CapturedPackets);
+        CapturedPacketsView.Filter = PacketRowFilter;
         InitializeComponent();
+        InitPacketCaptureInterfaces();
         DataContext = this;
         DnsAdaptersList.ItemsSource = DnsAdapters;
         _dnsSwitch.StateChanged += _ => Dispatcher.BeginInvoke(new Action(UpdateDnsSwitchUi));
@@ -156,6 +167,7 @@ public partial class MainWindow : Window
             _sink.Dispose();
             _dnsSwitch.Dispose();
             _hostsMonitor.Dispose();
+            _packetCaptureManager.Dispose();
         };
 
         _timer.Tick += async (_, _) => await TickAsync();
@@ -3820,6 +3832,7 @@ public partial class MainWindow : Window
         StartupPanel.Visibility = StartupTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         TrafficPanel.Visibility = TrafficTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ScannerPanel.Visibility = ScannerTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PacketsPanel.Visibility = PacketsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -5253,6 +5266,354 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Warn($"Failed to export devices to JSON: {ex.Message}");
+        }
+    }
+
+    // ---- Packet Inspector & Protocol Dissector Engine ----
+
+    private void InitPacketCaptureInterfaces()
+    {
+        CaptureInterfaceCombo.Items.Clear();
+        CaptureInterfaceCombo.Items.Add("Default / Primary Interface");
+
+        try
+        {
+            var ips = WindowsRawSocketCaptureProvider.GetAllActiveIPv4Addresses();
+            foreach (var ip in ips)
+            {
+                CaptureInterfaceCombo.Items.Add(ip.ToString());
+            }
+        }
+        catch { }
+
+        CaptureInterfaceCombo.SelectedIndex = 0;
+    }
+
+    private (int? Pid, string? Name) MatchConnectionToProcess(IPAddress srcIp, int srcPort, IPAddress dstIp, int dstPort, Protocol proto)
+    {
+        var conns = _lastConnections;
+        for (int i = 0; i < conns.Count; i++)
+        {
+            var c = conns[i].Connection;
+            if (c.Protocol == proto)
+            {
+                if (c.Local?.Port == srcPort || c.Local?.Port == dstPort)
+                {
+                    return (c.ProcessId, conns[i].Process.Name);
+                }
+            }
+        }
+        return (null, null);
+    }
+
+    private void OnPacketBatchFlushed(IReadOnlyList<CapturedPacket> batch, PacketCaptureStats stats)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            PacketStatsText.Text = $"Buffer: {stats.BufferCount:N0} / {stats.BufferCapacity:N0} | {stats.PacketsPerSecond:F1} pkt/s | Total: {stats.TotalPackets:N0} pkts ({stats.TotalBytes / 1024.0 / 1024.0:F1} MB) | Provider: {stats.ActiveProvider}";
+
+            if (batch.Count > 0)
+            {
+                foreach (var p in batch)
+                {
+                    CapturedPackets.Add(new PacketRow(p));
+                }
+
+                while (CapturedPackets.Count > 1000)
+                {
+                    CapturedPackets.RemoveAt(0);
+                }
+            }
+        }));
+    }
+
+    private void OnPacketStatusChanged(string message)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            StatusText.Text = message;
+        }));
+    }
+
+    private bool PacketRowFilter(object item)
+    {
+        if (item is not PacketRow row) return false;
+        var p = row.Packet;
+
+        if (!string.IsNullOrEmpty(_packetProtocolFilter) && !string.Equals(_packetProtocolFilter, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_packetProtocolFilter.Equals("TLS", StringComparison.OrdinalIgnoreCase) && p.Protocol != PacketProtocol.Tls) return false;
+            if (_packetProtocolFilter.Equals("DNS", StringComparison.OrdinalIgnoreCase) && p.Protocol != PacketProtocol.Dns) return false;
+            if (_packetProtocolFilter.Equals("HTTP", StringComparison.OrdinalIgnoreCase) && p.Protocol != PacketProtocol.Http) return false;
+            if (_packetProtocolFilter.Equals("TCP", StringComparison.OrdinalIgnoreCase) && p.Protocol != PacketProtocol.Tcp && p.Protocol != PacketProtocol.Tls && p.Protocol != PacketProtocol.Http) return false;
+            if (_packetProtocolFilter.Equals("UDP", StringComparison.OrdinalIgnoreCase) && p.Protocol != PacketProtocol.Udp && p.Protocol != PacketProtocol.Dns) return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_packetSearchTerm))
+        {
+            bool matches = (p.HostOrSni?.Contains(_packetSearchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+                           || p.SourceAddress.ToString().Contains(_packetSearchTerm, StringComparison.OrdinalIgnoreCase)
+                           || p.DestinationAddress.ToString().Contains(_packetSearchTerm, StringComparison.OrdinalIgnoreCase)
+                           || p.SourcePort.ToString(CultureInfo.InvariantCulture).Contains(_packetSearchTerm)
+                           || p.DestinationPort.ToString(CultureInfo.InvariantCulture).Contains(_packetSearchTerm)
+                           || (p.ProcessName?.Contains(_packetSearchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+                           || p.Info.Contains(_packetSearchTerm, StringComparison.OrdinalIgnoreCase);
+
+            if (!matches) return false;
+        }
+
+        return true;
+    }
+
+    private async void OnStartCapture(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin)
+        {
+            Info("Packet inspection requires Administrator privileges to bind network sockets.\n\nPlease restart SpectraNetworkManager with 'Run as administrator'.");
+            return;
+        }
+
+        string? selectedIp = null;
+        if (CaptureInterfaceCombo.SelectedIndex > 0 && CaptureInterfaceCombo.SelectedItem is string ipStr)
+        {
+            selectedIp = ipStr;
+        }
+
+        StartCaptureButton.IsEnabled = false;
+        StopCaptureButton.IsEnabled = true;
+        StatusText.Text = "Starting native packet capture...";
+
+        bool ok = await _packetCaptureManager.StartAsync(selectedIp);
+        if (!ok)
+        {
+            StartCaptureButton.IsEnabled = true;
+            StopCaptureButton.IsEnabled = false;
+        }
+    }
+
+    private async void OnStopCapture(object sender, RoutedEventArgs e)
+    {
+        StartCaptureButton.IsEnabled = true;
+        StopCaptureButton.IsEnabled = false;
+        await _packetCaptureManager.StopAsync();
+    }
+
+    private async void OnCaptureInterfaceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_packetCaptureManager?.IsRunning == true)
+        {
+            await _packetCaptureManager.StopAsync();
+            string? ip = CaptureInterfaceCombo.SelectedIndex > 0 ? CaptureInterfaceCombo.SelectedItem as string : null;
+            await _packetCaptureManager.StartAsync(ip);
+        }
+    }
+
+    private void OnPacketFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PacketProtocolFilterCombo.SelectedItem is ComboBoxItem item)
+        {
+            string content = item.Content?.ToString() ?? "All Traffic";
+            _packetProtocolFilter = content switch
+            {
+                "TLS (HTTPS)" => "TLS",
+                "DNS" => "DNS",
+                "HTTP" => "HTTP",
+                "TCP" => "TCP",
+                "UDP" => "UDP",
+                _ => "ALL"
+            };
+            CapturedPacketsView?.Refresh();
+        }
+    }
+
+    private void OnPacketSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        _packetSearchTerm = PacketSearchBox.Text.Trim();
+        CapturedPacketsView?.Refresh();
+    }
+
+    private void OnClearPackets(object sender, RoutedEventArgs e)
+    {
+        _packetCaptureManager.Clear();
+        CapturedPackets.Clear();
+        PacketInspectorDetailsText.Text = "Select a packet in the table above to view dissected protocol headers and decoded metadata.";
+        PacketHexBox.Text = "Hex stream preview will appear here.";
+    }
+
+    private void OnPacketsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row)
+        {
+            ShowPacketInspector(row.Packet);
+        }
+    }
+
+    private void ShowPacketInspector(CapturedPacket p)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"FRAME #{p.Id} DETAILS:");
+        sb.AppendLine($"  Timestamp (UTC): {p.Timestamp:yyyy-MM-dd HH:mm:ss.fff}");
+        sb.AppendLine($"  Direction:       {p.DirectionDisplay}");
+        sb.AppendLine($"  Total Wire Size: {p.TotalLength} bytes");
+        sb.AppendLine();
+        sb.AppendLine("NETWORK LAYER (L3):");
+        sb.AppendLine($"  Source:          {p.SourceAddress}");
+        sb.AppendLine($"  Destination:     {p.DestinationAddress}");
+        sb.AppendLine();
+        sb.AppendLine("TRANSPORT LAYER (L4):");
+        sb.AppendLine($"  Protocol:        {p.ProtocolDisplay}");
+        sb.AppendLine($"  Source Port:     {p.SourcePort}");
+        sb.AppendLine($"  Dest Port:       {p.DestinationPort}");
+        if (!string.IsNullOrEmpty(p.TcpFlags))
+        {
+            sb.AppendLine($"  TCP Flags:       {p.TcpFlags}");
+        }
+        sb.AppendLine($"  Payload Length:  {p.PayloadLength} bytes");
+        sb.AppendLine();
+        sb.AppendLine("APPLICATION / PROTOCOL DISSECTION:");
+        if (!string.IsNullOrEmpty(p.HostOrSni))
+        {
+            string hostLabel = p.Protocol == PacketProtocol.Tls ? "TLS SNI Hostname" : (p.Protocol == PacketProtocol.Dns ? "DNS Queried Name" : "HTTP Host Header");
+            sb.AppendLine($"  {hostLabel}: {p.HostOrSni}");
+        }
+        sb.AppendLine($"  Protocol Summary: {p.Info}");
+        sb.AppendLine();
+        sb.AppendLine("PROCESS CORRELATION:");
+        sb.AppendLine($"  Owning Process:  {p.ProcessDisplay}");
+
+        PacketInspectorDetailsText.Text = sb.ToString();
+        PacketHexBox.Text = p.HexDumpPreview;
+    }
+
+    private async void OnExportPcapng(object sender, RoutedEventArgs e)
+    {
+        var stats = _packetCaptureManager.GetStats();
+        if (stats.BufferCount == 0)
+        {
+            Info("No packets in the buffer to export. Start packet capture first.");
+            return;
+        }
+
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"SpectraNetworkManager-Capture-{DateTime.Now:yyyyMMdd-HHmmss}.pcapng",
+                DefaultExt = ".pcapng",
+                Filter = "Wireshark PCAPNG files (*.pcapng)|*.pcapng|All files (*.*)|*.*"
+            };
+            if (sfd.ShowDialog(this) == true)
+            {
+                StatusText.Text = "Exporting PCAPNG capture...";
+                await _packetCaptureManager.ExportPcapngAsync(sfd.FileName);
+                StatusText.Text = $"Exported {stats.BufferCount} packets to {Path.GetFileName(sfd.FileName)}.";
+                Info($"Successfully exported {stats.BufferCount:N0} packets to:\n\n{sfd.FileName}\n\nThis file can be opened directly in Wireshark, TShark, or Network Monitor.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Warn($"Failed to export PCAPNG file: {ex.Message}");
+        }
+    }
+
+    private async void OnExportPacketsCsv(object sender, RoutedEventArgs e)
+    {
+        var stats = _packetCaptureManager.GetStats();
+        if (stats.BufferCount == 0)
+        {
+            Info("No packets in the buffer to export. Start packet capture first.");
+            return;
+        }
+
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"SpectraNetworkManager-Packets-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+                DefaultExt = ".csv",
+                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*"
+            };
+            if (sfd.ShowDialog(this) == true)
+            {
+                StatusText.Text = "Exporting packet table to CSV...";
+                await _packetCaptureManager.ExportCsvAsync(sfd.FileName);
+                StatusText.Text = $"Exported {stats.BufferCount} packets to {Path.GetFileName(sfd.FileName)}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Warn($"Failed to export CSV file: {ex.Message}");
+        }
+    }
+
+    private void OnCopyPacketHost(object sender, RoutedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row && !string.IsNullOrEmpty(row.HostOrSni))
+        {
+            System.Windows.Clipboard.SetText(row.HostOrSni);
+            StatusText.Text = $"Copied host to clipboard: {row.HostOrSni}";
+        }
+    }
+
+    private void OnCopyPacketSource(object sender, RoutedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row)
+        {
+            System.Windows.Clipboard.SetText(row.SourceEndpointDisplay);
+            StatusText.Text = $"Copied source address: {row.SourceEndpointDisplay}";
+        }
+    }
+
+    private void OnCopyPacketDestination(object sender, RoutedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row)
+        {
+            System.Windows.Clipboard.SetText(row.DestinationEndpointDisplay);
+            StatusText.Text = $"Copied destination address: {row.DestinationEndpointDisplay}";
+        }
+    }
+
+    private async void OnBlockPacketHostInDns(object sender, RoutedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row && !string.IsNullOrEmpty(row.HostOrSni))
+        {
+            try
+            {
+                await _sink.BlockDomainAsync(row.HostOrSni);
+                LoadDnsSettingsIntoUi();
+                StatusText.Text = $"{row.HostOrSni} is always blocked in DNS now.";
+            }
+            catch (Exception ex)
+            {
+                Error("Could not add DNS block rule", ex);
+            }
+        }
+    }
+
+    private void OnBlockPacketRemoteInFirewall(object sender, RoutedEventArgs e)
+    {
+        if (PacketsGrid.SelectedItem is PacketRow row)
+        {
+            var targetIp = row.Packet.IsInbound ? row.Packet.SourceAddress : row.Packet.DestinationAddress;
+            if (targetIp != null && !IPAddress.IsLoopback(targetIp))
+            {
+                var answer = MessageBox.Show(this,
+                    $"Block all incoming & outgoing network traffic to remote IP \"{targetIp}\" in Windows Firewall?",
+                    "Block Remote IP", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (answer == MessageBoxResult.Yes)
+                {
+                    try
+                    {
+                        var plan = RulePlanner.Plan(RuleDirection.Both, new TrafficScope(Addresses: targetIp.ToString()));
+                        _enforcer.Block($"IP-Block-{targetIp}", plan, $"Manual Packet Block {targetIp}");
+                        StatusText.Text = $"Blocked remote IP: {targetIp}";
+                    }
+                    catch (Exception ex)
+                    {
+                        Error($"Failed to block IP {targetIp}", ex);
+                    }
+                }
+            }
         }
     }
 

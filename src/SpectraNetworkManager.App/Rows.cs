@@ -396,3 +396,26 @@ public sealed record DnsRow(string Time, string Client, string Domain, string Ty
         _ => "(DNS Query)"
     };
 }
+
+/// <summary>One line in the "Packets" inspector table.</summary>
+public sealed class PacketRow
+{
+    public CapturedPacket Packet { get; }
+
+    public long Id => Packet.Id;
+    public string TimestampDisplay => Packet.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff");
+    public string DirectionDisplay => Packet.DirectionDisplay;
+    public string ProtocolDisplay => Packet.ProtocolDisplay;
+    public string? HostOrSni => Packet.HostOrSni;
+    public string ProcessDisplay => Packet.ProcessDisplay;
+    public string SourceEndpointDisplay => Packet.SourceEndpointDisplay;
+    public string DestinationEndpointDisplay => Packet.DestinationEndpointDisplay;
+    public int TotalLength => Packet.TotalLength;
+    public string TcpFlags => Packet.TcpFlags;
+    public string Info => Packet.Info;
+
+    public PacketRow(CapturedPacket packet)
+    {
+        Packet = packet;
+    }
+}
