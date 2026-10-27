@@ -572,6 +572,11 @@
                 <!-- Left: Top Talkers -->
                 <GroupBox Grid.Column="0" Header="TOP TALKERS" Foreground="{StaticResource Cyan}" BorderBrush="{StaticResource Line}">
                     <DataGrid x:Name="TopTalkersGrid" ItemsSource="{Binding TopTalkers}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="150"/>
                             <DataGridTextColumn Header="IN" Binding="{Binding DownloadFormatted, Mode=OneWay}" SortMemberPath="BytesIn" Width="90"/>
@@ -589,6 +594,11 @@
                 <!-- Right: Connection History -->
                 <GroupBox Grid.Column="2" Header="RECENT CONNECTION HISTORY" Foreground="{StaticResource Magenta}" BorderBrush="{StaticResource Line}">
                     <DataGrid x:Name="ConnectionHistoryGrid" ItemsSource="{Binding ConnectionHistory}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="PROGRAM" Binding="{Binding ProgramName, Mode=OneWay}" Width="140"/>
                             <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="140"/>
@@ -1776,7 +1786,12 @@
                 <TextBlock x:Name="BlocksHint" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
                            Text="Shows connections Windows Firewall blocked in the last hour."/>
             </StackPanel>
-            <DataGrid Grid.Row="1" ItemsSource="{Binding Blocks}">
+            <DataGrid x:Name="BlocksGrid" Grid.Row="1" ItemsSource="{Binding Blocks}" SelectionMode="Single">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="90"/>
                     <DataGridTextColumn Header="DIR" Binding="{Binding Direction, Mode=OneWay}" Width="60"/>

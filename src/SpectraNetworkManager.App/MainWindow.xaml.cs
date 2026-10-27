@@ -6319,7 +6319,9 @@ public partial class MainWindow : Window
         {
             _aiSelectedPid = tag.Item1;
             _aiSelectedPath = tag.Item2;
-            AiTargetDisplay.Text = $"PID {_aiSelectedPid}: {_aiSelectedPath ?? item.Content.ToString()}";
+            AiTargetDisplay.Text = _aiSelectedPid > 0
+                ? $"PID {_aiSelectedPid}: {_aiSelectedPath ?? item.Content.ToString()}"
+                : (_aiSelectedPath ?? item.Content.ToString());
             AiTargetTitle.Text = item.Content.ToString();
         }
     }
@@ -6665,33 +6667,79 @@ public partial class MainWindow : Window
         string? targetPath = null;
         string targetName = "";
 
-        if (ConnectionsGrid.SelectedItem is ConnectionRow connRow)
+        // Determine which grid triggered this context menu action
+        DataGrid? sourceGrid = null;
+        if (sender is MenuItem mi && mi.Parent is ContextMenu cm && cm.PlacementTarget is DataGrid dg)
+        {
+            sourceGrid = dg;
+        }
+
+        // Prioritize by active tab or triggering source grid so other tabs take precedence over ConnectionsGrid
+        if ((sourceGrid == ProgramsGrid || ProgramsTab.IsChecked == true) && ProgramsGrid.SelectedItem is ProgramRow progRow)
+        {
+            targetPath = progRow.Path;
+            targetName = progRow.Name;
+        }
+        else if ((sourceGrid == StartupGrid || StartupTab.IsChecked == true) && StartupGrid.SelectedItem is StartupRow startRow)
+        {
+            targetPath = startRow.ExecutablePath;
+            targetName = startRow.Name;
+        }
+        else if ((sourceGrid == RulesGrid || RulesTab.IsChecked == true) && RulesGrid.SelectedItem is RuleRow ruleRow)
+        {
+            targetPath = ruleRow.Path;
+            targetName = ruleRow.Name;
+        }
+        else if ((sourceGrid == PacketsGrid || PacketsTab.IsChecked == true) && PacketsGrid.SelectedItem is PacketRow pktRow)
+        {
+            targetPid = pktRow.Packet.ProcessId ?? 0;
+            targetName = pktRow.Packet.ProcessName ?? pktRow.ProcessDisplay;
+            if (string.IsNullOrWhiteSpace(targetName) || targetName == "-")
+                targetName = pktRow.HostOrSni ?? pktRow.Info;
+        }
+        else if ((sourceGrid == TopTalkersGrid || TrafficTab.IsChecked == true) && TopTalkersGrid.SelectedItem is TopTalkerViewModel talkerRow)
+        {
+            targetPath = talkerRow.Program;
+            targetName = talkerRow.ProgramName;
+        }
+        else if ((sourceGrid == ConnectionHistoryGrid || TrafficTab.IsChecked == true) && ConnectionHistoryGrid.SelectedItem is ConnectionHistoryViewModel histRow)
+        {
+            targetPath = histRow.Program;
+            targetName = histRow.ProgramName;
+        }
+        else if ((sourceGrid == BlocksGrid || BlocksTab.IsChecked == true) && BlocksGrid.SelectedItem is BlockRow blockRow)
+        {
+            targetPid = blockRow.Pid;
+            targetPath = blockRow.Application;
+            targetName = System.IO.Path.GetFileName(blockRow.Application);
+        }
+        else if (ConnectionsGrid.SelectedItem is ConnectionRow connRow)
         {
             targetPid = connRow.Pid;
             targetPath = connRow.Path;
             targetName = connRow.Program;
         }
-        else if (ProgramsGrid.SelectedItem is ProgramRow progRow)
+
+        // Correlate: if targetPath is known but targetPid == 0, check if it's currently running in connection rows
+        if (targetPid <= 0 && !string.IsNullOrWhiteSpace(targetPath))
         {
-            targetPath = progRow.Path;
-            targetName = progRow.Name;
+            var runningMatch = Rows.FirstOrDefault(r => r.Pid > 0 && string.Equals(r.Path, targetPath, StringComparison.OrdinalIgnoreCase));
+            if (runningMatch != null)
+            {
+                targetPid = runningMatch.Pid;
+                if (string.IsNullOrWhiteSpace(targetName)) targetName = runningMatch.Program;
+            }
         }
-        else if (StartupGrid.SelectedItem is StartupRow startRow)
+
+        // If targetPid > 0 but path is empty, correlate with active rows
+        if (targetPid > 0 && string.IsNullOrWhiteSpace(targetPath))
         {
-            targetPath = startRow.ExecutablePath;
-            targetName = startRow.Name;
-        }
-        else if (RulesGrid.SelectedItem is RuleRow ruleRow)
-        {
-            targetPath = ruleRow.Path;
-            targetName = ruleRow.Name;
-        }
-        else if (PacketsGrid.SelectedItem is PacketRow pktRow)
-        {
-            targetName = pktRow.ProcessDisplay;
-            targetPid = pktRow.Packet.ProcessId ?? 0;
-            if (string.IsNullOrWhiteSpace(targetName) || targetName == "-")
-                targetName = pktRow.HostOrSni ?? pktRow.Info;
+            var runningMatch = Rows.FirstOrDefault(r => r.Pid == targetPid);
+            if (runningMatch != null && !string.IsNullOrWhiteSpace(runningMatch.Path))
+            {
+                targetPath = runningMatch.Path;
+                if (string.IsNullOrWhiteSpace(targetName) || targetName == "-") targetName = runningMatch.Program;
+            }
         }
 
         _aiSelectedPid = targetPid;
@@ -6700,6 +6748,7 @@ public partial class MainWindow : Window
         AiTab.IsChecked = true;
         OnViewChanged(AiTab, new RoutedEventArgs());
 
+        // Explicitly ensure the combobox reflects the target
         if (targetPid > 0)
         {
             foreach (ComboBoxItem item in AiProcessCombo.Items)
@@ -6723,9 +6772,12 @@ public partial class MainWindow : Window
             }
         }
 
+        // If not found in combobox, insert it at the top and select it
         if (AiProcessCombo.SelectedItem == null && (targetPid > 0 || !string.IsNullOrWhiteSpace(targetPath)))
         {
-            string label = targetPid > 0 ? $"{targetName} (PID {targetPid})" : targetName;
+            string label = targetPid > 0
+                ? $"{targetName} (PID {targetPid})"
+                : $"{targetName} (Executable)";
             var customItem = new ComboBoxItem
             {
                 Content = label,
@@ -6738,7 +6790,7 @@ public partial class MainWindow : Window
         _aiSelectedPid = targetPid;
         _aiSelectedPath = targetPath;
         AiTargetDisplay.Text = targetPid > 0 ? $"PID {targetPid}: {targetName} ({targetPath})" : (targetPath ?? targetName);
-        AiTargetTitle.Text = !string.IsNullOrWhiteSpace(targetName) ? targetName : Path.GetFileName(targetPath ?? "");
+        AiTargetTitle.Text = !string.IsNullOrWhiteSpace(targetName) ? targetName : System.IO.Path.GetFileName(targetPath ?? "");
 
         OnRunAiInvestigationClick(this, new RoutedEventArgs());
     }
