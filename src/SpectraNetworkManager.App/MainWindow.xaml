@@ -178,7 +178,7 @@
                               PreviewMouseLeftButtonUp="OnConnectionsGridMouseUp">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
                                 <Separator/>
                                 <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
                                 <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
@@ -189,7 +189,7 @@
                                 <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
                                 <MenuItem Header="🛡️ 4-Stage Quarantine Program..." Click="OnQuarantineConnectionProgram" Foreground="{StaticResource Magenta}"/>
                                 <Separator/>
-                                <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Foreground="{StaticResource Cyan}"/>
+                                <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                                 <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyConnectionSha256"/>
                                 <MenuItem Header="🚨 Check Remote IP on AbuseIPDB" Click="OnCheckConnectionAbuseIpDb" Foreground="{StaticResource Amber}"/>
                                 <MenuItem Header="🔎 Check Remote IP on Shodan" Click="OnCheckConnectionShodan"/>
@@ -404,7 +404,7 @@
             <DataGrid x:Name="ProgramsGrid" Grid.Row="2" ItemsSource="{Binding Programs}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
                         <Separator/>
                         <MenuItem Header="Close Open Connections" Click="OnCloseProgramConnections"/>
                         <MenuItem Header="End Process (Kill)" Click="OnKillProgramProcess"/>
@@ -413,9 +413,9 @@
                         <MenuItem Header="Block..." Click="OnBlockProgram"/>
                         <MenuItem Header="Allow" Click="OnAllowProgram"/>
                         <MenuItem Header="🛡️ 4-Stage Quarantine Program..." Click="OnQuarantineProgram" Foreground="{StaticResource Magenta}"/>
-                        <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreProgramQuarantine" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreProgramQuarantine" Foreground="{StaticResource MenuBlue}"/>
                         <Separator/>
-                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckProgramVirusTotal" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckProgramVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                         <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyProgramSha256"/>
                         <Separator/>
                         <MenuItem Header="Open File Location" Click="OnOpenProgramLocation"/>
@@ -494,13 +494,13 @@
             <DataGrid x:Name="StartupGrid" Grid.Row="2" ItemsSource="{Binding StartupItems}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
                         <Separator/>
                         <MenuItem Header="⏸ Turn Off (Disable)" Click="OnDisableStartupItem"/>
                         <MenuItem Header="▶ Turn On (Enable)" Click="OnEnableStartupItem"/>
                         <Separator/>
                         <MenuItem Header="🚫 Block Executable in Firewall..." Click="OnBlockStartupItem" Foreground="{StaticResource Magenta}"/>
-                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckStartupVirusTotal" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckStartupVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                         <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyStartupSha256"/>
                         <MenuItem Header="📂 Open File Location" Click="OnOpenStartupLocation"/>
                         <MenuItem Header="📋 Copy Command / Path" Click="OnCopyStartupCommand"/>
@@ -827,7 +827,7 @@
                           SelectionChanged="OnPacketsGridSelectionChanged">
                     <DataGrid.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                            <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
                             <Separator/>
                             <MenuItem Header="📋 Copy Host / SNI" Click="OnCopyPacketHost"/>
                             <MenuItem Header="📋 Copy Source IP:Port" Click="OnCopyPacketSource"/>
@@ -935,13 +935,13 @@
             <DataGrid x:Name="RulesGrid" Grid.Row="2" ItemsSource="{Binding RuleRows}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
                         <Separator/>
                         <MenuItem Header="Edit block..." Click="OnRulesEdit"/>
                         <MenuItem Header="Allow" Click="OnRulesAllow"/>
                         <MenuItem Header="Forget decision" Click="OnRulesForget"/>
                         <Separator/>
-                        <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreSelectedQuarantine" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreSelectedQuarantine" Foreground="{StaticResource MenuBlue}"/>
                     </ContextMenu>
                 </DataGrid.ContextMenu>
                 <DataGrid.Columns>
@@ -1118,7 +1118,7 @@
                         <DataGrid.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="🚫 Always Block Domain" Click="OnDnsContextMenuBlock" Foreground="{StaticResource Magenta}"/>
-                                <MenuItem Header="🛡️ Always Allow Domain" Click="OnDnsContextMenuAllow" Foreground="{StaticResource Cyan}"/>
+                                <MenuItem Header="🛡️ Always Allow Domain" Click="OnDnsContextMenuAllow" Foreground="{StaticResource MenuBlue}"/>
                                 <Separator/>
                                 <MenuItem Header="🔎 WHOIS Lookup" Click="OnDnsContextMenuWhois"/>
                                 <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnDnsContextMenuLookup"/>
@@ -1497,7 +1497,7 @@
             <DataGrid x:Name="TvMobileGrid" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnTvMobileSelectionChanged">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="📺 Apply Smart TV ACR Shield" Click="OnContextShieldTv" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="📺 Apply Smart TV ACR Shield" Click="OnContextShieldTv" Foreground="{StaticResource MenuBlue}"/>
                         <MenuItem Header="📱 Apply Mobile Ad &amp; Tracker Shield" Click="OnContextShieldMobile" Foreground="{StaticResource Magenta}"/>
                         <Separator/>
                         <MenuItem Header="⏸ Pause Protection for this Device (15m)" Click="OnContextPauseDevice"/>

@@ -10,6 +10,8 @@
         <SolidColorBrush x:Key="Line" Color="#243055"/>
         <SolidColorBrush x:Key="Border" Color="#243055"/>
         <SolidColorBrush x:Key="Cyan" Color="#22E8FF"/>
+        <SolidColorBrush x:Key="MenuBlue" Color="#0066CC"/>
+        <SolidColorBrush x:Key="MenuCyan" Color="#0066CC"/>
         <SolidColorBrush x:Key="Magenta" Color="#FF2BD6"/>
         <SolidColorBrush x:Key="Text" Color="#D7E3FF"/>
         <SolidColorBrush x:Key="Foreground" Color="#D7E3FF"/>

@@ -6259,22 +6259,54 @@ public partial class MainWindow : Window
 
     private void RefreshAiUi()
     {
+        int targetPidToSelect = _aiSelectedPid;
+        string? targetPathToSelect = _aiSelectedPath;
+
         AiProcessCombo.Items.Clear();
 
         var seenPids = new HashSet<int>();
+        ComboBoxItem? matchedItem = null;
+
         foreach (var r in Rows)
         {
             if (r.Pid > 0 && seenPids.Add(r.Pid))
             {
-                AiProcessCombo.Items.Add(new ComboBoxItem
+                var item = new ComboBoxItem
                 {
                     Content = $"{r.Program} (PID {r.Pid})",
                     Tag = (r.Pid, r.Path)
-                });
+                };
+                AiProcessCombo.Items.Add(item);
+
+                if (targetPidToSelect > 0 && r.Pid == targetPidToSelect)
+                {
+                    matchedItem = item;
+                }
+                else if (matchedItem == null && !string.IsNullOrWhiteSpace(targetPathToSelect) &&
+                         string.Equals(r.Path, targetPathToSelect, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedItem = item;
+                }
             }
         }
 
-        if (AiProcessCombo.Items.Count > 0 && AiProcessCombo.SelectedItem == null)
+        if (matchedItem != null)
+        {
+            AiProcessCombo.SelectedItem = matchedItem;
+        }
+        else if (targetPidToSelect > 0 || !string.IsNullOrWhiteSpace(targetPathToSelect))
+        {
+            string name = !string.IsNullOrWhiteSpace(targetPathToSelect) ? Path.GetFileName(targetPathToSelect) : "Process";
+            string label = targetPidToSelect > 0 ? $"{name} (PID {targetPidToSelect})" : name;
+            var customItem = new ComboBoxItem
+            {
+                Content = label,
+                Tag = (targetPidToSelect, targetPathToSelect)
+            };
+            AiProcessCombo.Items.Insert(0, customItem);
+            AiProcessCombo.SelectedItem = customItem;
+        }
+        else if (AiProcessCombo.Items.Count > 0 && AiProcessCombo.SelectedItem == null)
         {
             AiProcessCombo.SelectedIndex = 0;
         }
@@ -6668,7 +6700,44 @@ public partial class MainWindow : Window
         AiTab.IsChecked = true;
         OnViewChanged(AiTab, new RoutedEventArgs());
 
-        AiTargetDisplay.Text = targetPid > 0 ? $"PID {targetPid}: {targetName}" : (targetPath ?? targetName);
+        if (targetPid > 0)
+        {
+            foreach (ComboBoxItem item in AiProcessCombo.Items)
+            {
+                if (item.Tag is ValueTuple<int, string?> tag && tag.Item1 == targetPid)
+                {
+                    AiProcessCombo.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(targetPath))
+        {
+            foreach (ComboBoxItem item in AiProcessCombo.Items)
+            {
+                if (item.Tag is ValueTuple<int, string?> tag && string.Equals(tag.Item2, targetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    AiProcessCombo.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+        if (AiProcessCombo.SelectedItem == null && (targetPid > 0 || !string.IsNullOrWhiteSpace(targetPath)))
+        {
+            string label = targetPid > 0 ? $"{targetName} (PID {targetPid})" : targetName;
+            var customItem = new ComboBoxItem
+            {
+                Content = label,
+                Tag = (targetPid, targetPath)
+            };
+            AiProcessCombo.Items.Insert(0, customItem);
+            AiProcessCombo.SelectedItem = customItem;
+        }
+
+        _aiSelectedPid = targetPid;
+        _aiSelectedPath = targetPath;
+        AiTargetDisplay.Text = targetPid > 0 ? $"PID {targetPid}: {targetName} ({targetPath})" : (targetPath ?? targetName);
         AiTargetTitle.Text = !string.IsNullOrWhiteSpace(targetName) ? targetName : Path.GetFileName(targetPath ?? "");
 
         OnRunAiInvestigationClick(this, new RoutedEventArgs());
