@@ -23,6 +23,9 @@ public class WindowsPlatformTests
         Assert.NotEmpty(info.Name);
         Assert.NotNull(info.Path);
         Assert.True(File.Exists(info.Path));
+        Assert.NotNull(info.StartTimeUtc);
+        Assert.NotNull(info.ParentPid);
+        Assert.True(info.ParentPid > 0);
     }
 
     [Fact]

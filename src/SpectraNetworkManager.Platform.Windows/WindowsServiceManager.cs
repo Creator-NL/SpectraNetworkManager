@@ -100,6 +100,101 @@ public static class WindowsServiceManager
         public SERVICE_STATUS_PROCESS ServiceStatusProcess;
     }
 
+    private static readonly object _snapshotLock = new();
+    private static Dictionary<int, List<DiscoveredService>> _cachedByPid = new();
+    private static long _lastSnapshotTicks;
+
+    /// <summary>
+    /// Fast cached lookup returning a formatted summary of Windows Services hosted by the given PID (e.g. "Dnscache (DNS Client)").
+    /// Refreshes the SCM snapshot at most once every 3 seconds.
+    /// </summary>
+    public static string? GetServiceSummaryForPid(int pid)
+    {
+        if (pid <= 4) return null;
+        var map = GetCachedServicesByPid();
+        if (!map.TryGetValue(pid, out var list) || list.Count == 0)
+            return null;
+
+        if (list.Count == 1)
+        {
+            var s = list[0];
+            return string.IsNullOrWhiteSpace(s.DisplayName) || s.DisplayName.Equals(s.ServiceName, StringComparison.OrdinalIgnoreCase)
+                ? s.ServiceName
+                : $"{s.ServiceName} ({s.DisplayName})";
+        }
+
+        return string.Join(", ", list.Take(4).Select(s => s.ServiceName))
+               + (list.Count > 4 ? $" (+{list.Count - 4} more)" : "");
+    }
+
+    private static Dictionary<int, List<DiscoveredService>> GetCachedServicesByPid()
+    {
+        long now = Environment.TickCount64;
+        lock (_snapshotLock)
+        {
+            if (now - _lastSnapshotTicks < 3000 && _cachedByPid.Count > 0)
+                return _cachedByPid;
+
+            var fresh = new Dictionary<int, List<DiscoveredService>>();
+            IntPtr hSC = OpenSCManager(null, null, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE);
+            if (hSC != IntPtr.Zero)
+            {
+                try
+                {
+                    uint bytesNeeded = 0;
+                    uint servicesReturned = 0;
+                    uint resumeHandle = 0;
+
+                    EnumServicesStatusEx(hSC, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
+                        IntPtr.Zero, 0, out bytesNeeded, out servicesReturned, ref resumeHandle, null);
+
+                    if (bytesNeeded > 0)
+                    {
+                        IntPtr buffer = Marshal.AllocHGlobal((int)bytesNeeded);
+                        try
+                        {
+                            if (EnumServicesStatusEx(hSC, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
+                                buffer, bytesNeeded, out bytesNeeded, out servicesReturned, ref resumeHandle, null))
+                            {
+                                int structSize = Marshal.SizeOf<ENUM_SERVICE_STATUS_PROCESS>();
+                                for (int i = 0; i < servicesReturned; i++)
+                                {
+                                    IntPtr currentPtr = IntPtr.Add(buffer, i * structSize);
+                                    var item = Marshal.PtrToStructure<ENUM_SERVICE_STATUS_PROCESS>(currentPtr);
+                                    int svcPid = (int)item.ServiceStatusProcess.dwProcessId;
+                                    if (svcPid > 4)
+                                    {
+                                        string sName = Marshal.PtrToStringUni(item.lpServiceName) ?? "";
+                                        string dName = Marshal.PtrToStringUni(item.lpDisplayName) ?? sName;
+                                        if (!fresh.TryGetValue(svcPid, out var bucket))
+                                        {
+                                            bucket = new List<DiscoveredService>();
+                                            fresh[svcPid] = bucket;
+                                        }
+                                        bucket.Add(new DiscoveredService(sName, dName, svcPid, item.ServiceStatusProcess.dwCurrentState));
+                                    }
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            Marshal.FreeHGlobal(buffer);
+                        }
+                    }
+                }
+                catch { }
+                finally
+                {
+                    CloseServiceHandle(hSC);
+                }
+            }
+
+            _cachedByPid = fresh;
+            _lastSnapshotTicks = now;
+            return _cachedByPid;
+        }
+    }
+
     /// <summary>
     /// Enumerates all Windows Services currently assigned to the given process ID.
     /// </summary>

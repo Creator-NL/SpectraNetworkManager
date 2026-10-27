@@ -59,6 +59,8 @@
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="TrafficTab" Content="Traffic" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+            <RadioButton x:Name="ScannerTab" Content="Port Scanner" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
@@ -146,35 +148,159 @@
                     <ColumnDefinition Width="*" MinWidth="300"/>
                 </Grid.ColumnDefinitions>
 
-                <DataGrid x:Name="ConnectionsGrid" Grid.Column="0" ItemsSource="{Binding Rows}">
-                    <DataGrid.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
-                            <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
-                            <MenuItem Header="End Process (Kill)" Click="OnKillConnectionProcess"/>
-                            <MenuItem Header="🛑 Stop Windows Service..." Click="OnStopConnectionService"/>
-                            <Separator/>
-                            <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
-                            <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
-                            <Separator/>
-                            <MenuItem Header="Copy Remote Address" Click="OnCopyConnectionRemote"/>
-                            <MenuItem Header="Open File Location" Click="OnOpenConnectionLocation"/>
-                        </ContextMenu>
-                    </DataGrid.ContextMenu>
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="70"/>
-                        <DataGridTextColumn Header="PROGRAM" Binding="{Binding Program, Mode=OneWay}" Width="190"/>
-                        <DataGridTextColumn Header="IN/s" Binding="{Binding SpeedIn, Mode=OneWay}" Width="75"/>
-                        <DataGridTextColumn Header="OUT/s" Binding="{Binding SpeedOut, Mode=OneWay}" Width="75"/>
-                        <DataGridTextColumn Header="PID" Binding="{Binding Pid, Mode=OneWay}" Width="64"/>
-                        <DataGridTextColumn Header="LOCAL" Binding="{Binding Local, Mode=OneWay}" Width="200"/>
-                        <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="220"/>
-                        <DataGridTextColumn Header="HOST" Binding="{Binding Host, Mode=OneWay}" Width="230"/>
-                        <DataGridTextColumn Header="STATE" Binding="{Binding State, Mode=OneWay}" Width="120"/>
-                        <DataGridTextColumn Header="SIGNER" Binding="{Binding Signer, Mode=OneWay}" Width="230"/>
-                        <DataGridTextColumn Header="PATH" Binding="{Binding Path, Mode=OneWay}" Width="*"/>
-                    </DataGrid.Columns>
-                </DataGrid>
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <DataGrid x:Name="ConnectionsGrid" Grid.Row="0" ItemsSource="{Binding Rows}"
+                              SelectionMode="Single"
+                              SelectionChanged="OnConnectionsGridSelectionChanged"
+                              PreviewMouseLeftButtonUp="OnConnectionsGridMouseUp">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
+                                <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
+                                <MenuItem Header="End Process (Kill)" Click="OnKillConnectionProcess"/>
+                                <MenuItem Header="🛑 Stop Windows Service..." Click="OnStopConnectionService"/>
+                                <Separator/>
+                                <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
+                                <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
+                                <Separator/>
+                                <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Foreground="{StaticResource Cyan}"/>
+                                <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyConnectionSha256"/>
+                                <MenuItem Header="🚨 Check Remote IP on AbuseIPDB" Click="OnCheckConnectionAbuseIpDb" Foreground="{StaticResource Amber}"/>
+                                <MenuItem Header="🔎 Check Remote IP on Shodan" Click="OnCheckConnectionShodan"/>
+                                <Separator/>
+                                <MenuItem Header="Copy Remote Address" Click="OnCopyConnectionRemote"/>
+                                <MenuItem Header="Open File Location" Click="OnOpenConnectionLocation"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="65"/>
+                            <DataGridTextColumn Header="PROGRAM" Binding="{Binding Program, Mode=OneWay}" Width="170"/>
+                            <DataGridTextColumn Header="SERVICE / PARENT" Binding="{Binding ServiceOrParent, Mode=OneWay}" Width="180"/>
+                            <DataGridTextColumn Header="IN/s" Binding="{Binding SpeedIn, Mode=OneWay}" Width="75"/>
+                            <DataGridTextColumn Header="OUT/s" Binding="{Binding SpeedOut, Mode=OneWay}" Width="75"/>
+                            <DataGridTextColumn Header="PID" Binding="{Binding Pid, Mode=OneWay}" Width="60"/>
+                            <DataGridTextColumn Header="LOCAL" Binding="{Binding Local, Mode=OneWay}" Width="180"/>
+                            <DataGridTextColumn Header="REMOTE" Binding="{Binding Remote, Mode=OneWay}" Width="190"/>
+                            <DataGridTextColumn Header="HOST" Binding="{Binding Host, Mode=OneWay}" Width="210"/>
+                            <DataGridTextColumn Header="NETWORK / ASN" Binding="{Binding RemoteIntel, Mode=OneWay}" Width="210"/>
+                            <DataGridTextColumn Header="STATE" Binding="{Binding State, Mode=OneWay}" Width="115"/>
+                            <DataGridTextColumn Header="SIGNER" Binding="{Binding Signer, Mode=OneWay}" Width="210"/>
+                            <DataGridTextColumn Header="PATH" Binding="{Binding Path, Mode=OneWay}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- PROCESS & CONNECTION INTELLIGENCE INSPECTOR PANEL -->
+                    <Border x:Name="ConnectionInspectorPanel" Grid.Row="1" Visibility="Collapsed"
+                            Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
+                            BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="14,10">
+                        <StackPanel>
+                            <DockPanel LastChildFill="True" Margin="0,0,0,8">
+                                <Button DockPanel.Dock="Right" Content="✕" Click="OnCloseConnectionInspector"
+                                        Padding="0" Width="28" Height="24"
+                                        Background="#1A2140" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        Foreground="{StaticResource Cyan}" FontWeight="Bold" FontSize="12"
+                                        Cursor="Hand" ToolTip="Close details panel"
+                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="PROCESS &amp; CONNECTION INTELLIGENCE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="  //  Process Attribution (Parent / Service / SHA-256) ➔ Remote Network &amp; ASN" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- LEFT CARD: PROCESS ATTRIBUTION & IDENTITY -->
+                                <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,4" LastChildFill="True">
+                                            <Border x:Name="ConnInspectorIdentityBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#2222E8FF">
+                                                <TextBlock x:Name="ConnInspectorIdentityText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                            </Border>
+                                            <TextBlock Text="PROCESS ATTRIBUTION &amp; IDENTITY" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Program / PID:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorProgramText" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="Bold" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Service / Parent:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorServiceParentText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Command Line:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorCommandLineText" FontSize="10.5" FontFamily="Consolas" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="SHA-256 Hash:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorSha256Text" FontSize="10.5" FontFamily="Consolas" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- MIDDLE DIRECTIONAL ARROW -->
+                                <TextBlock Grid.Column="1" Text="➔" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Cyan}"
+                                           VerticalAlignment="Center" Margin="10,0"/>
+
+                                <!-- RIGHT CARD: REMOTE PEER & NETWORK INTELLIGENCE -->
+                                <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,4" LastChildFill="True">
+                                            <Border x:Name="ConnInspectorScopeBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#22FF2BD6">
+                                                <TextBlock x:Name="ConnInspectorScopeText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                                            </Border>
+                                            <TextBlock Text="REMOTE PEER &amp; NETWORK INTELLIGENCE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Flow / State:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorEndpointText" FontSize="11" Foreground="{StaticResource Cyan}" FontWeight="Bold" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Hostname:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorHostText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Network / ASN:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorAsnText" FontSize="11" Foreground="{StaticResource Text}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Executable Path:" FontSize="11" Foreground="{StaticResource Muted}" Width="98"/>
+                                            <TextBlock x:Name="ConnInspectorPathText" FontSize="10.5" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <WrapPanel>
+                                <Button Content="🛡️ Check Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Margin="0,0,8,0" Foreground="{StaticResource Cyan}"
+                                        ToolTip="Opens VirusTotal file analysis for this executable's SHA-256 hash."/>
+                                <Button Content="📋 Copy SHA-256" Click="OnCopyConnectionSha256" Margin="0,0,8,0"
+                                        ToolTip="Copies the executable's cryptographic SHA-256 hash to the clipboard."/>
+                                <Button x:Name="ConnInspectorAbuseIpBtn" Content="🚨 Check IP on AbuseIPDB" Click="OnCheckConnectionAbuseIpDb" Margin="0,0,8,0" Foreground="{StaticResource Amber}"
+                                        ToolTip="Checks remote IP reputation and abuse reports on AbuseIPDB."/>
+                                <Button x:Name="ConnInspectorShodanBtn" Content="🔎 Check IP on Shodan" Click="OnCheckConnectionShodan" Margin="0,0,8,0"
+                                        ToolTip="Inspects open ports and ASN metadata for this remote IP on Shodan."/>
+                                <Button Content="🛑 Stop Service..." Click="OnStopConnectionService" Margin="0,0,8,0"
+                                        ToolTip="Stops the Windows Service hosted by this process (if any)."/>
+                                <Button Content="🚫 Block Program..." Click="OnBlockConnectionProgram" Margin="0,0,8,0" Foreground="{StaticResource Magenta}"
+                                        ToolTip="Blocks this program in Windows Firewall."/>
+                                <Button Content="📂 Open File Location" Click="OnOpenConnectionLocation" Margin="0,0,8,0"
+                                        ToolTip="Selects the executable in Windows Explorer."/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
                 <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
                               ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
@@ -264,6 +390,9 @@
                         <MenuItem Header="Block..." Click="OnBlockProgram"/>
                         <MenuItem Header="Allow" Click="OnAllowProgram"/>
                         <Separator/>
+                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckProgramVirusTotal" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyProgramSha256"/>
+                        <Separator/>
                         <MenuItem Header="Open File Location" Click="OnOpenProgramLocation"/>
                         <MenuItem Header="Copy Program Path" Click="OnCopyProgramPath"/>
                     </ContextMenu>
@@ -344,6 +473,8 @@
                         <MenuItem Header="▶ Turn On (Enable)" Click="OnEnableStartupItem"/>
                         <Separator/>
                         <MenuItem Header="🚫 Block Executable in Firewall..." Click="OnBlockStartupItem" Foreground="{StaticResource Magenta}"/>
+                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckStartupVirusTotal" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyStartupSha256"/>
                         <MenuItem Header="📂 Open File Location" Click="OnOpenStartupLocation"/>
                         <MenuItem Header="📋 Copy Command / Path" Click="OnCopyStartupCommand"/>
                         <Separator/>
@@ -478,6 +609,137 @@
                                FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </DockPanel>
             </Border>
+        </Grid>
+
+        <!-- Port Scanner & Network Discovery view -->
+        <Grid x:Name="ScannerPanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Description -->
+            <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
+                       Text="Native Port Scanner &amp; LAN Device Discovery. Automatically fingerprints Smart TVs, Mobile/GSM devices, Routers, and Workstations using hardware MAC OUI, hostnames, and service banners. Bounded and rate-limited. Click 'Passive Discovery' for an instant snapshot without sending network probes, or select a port profile for an active LAN scan."/>
+
+            <!-- Toolbar & Controls -->
+            <DockPanel Grid.Row="1" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <TextBlock Text="Target:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
+                    <TextBox x:Name="ScannerTargetBox" Width="170" VerticalAlignment="Center" Margin="0,0,14,0" ToolTip="Subnet CIDR (e.g. 192.168.1.0/24), single IP, or 'local'"/>
+
+                    <TextBlock Text="Profile:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
+                    <ComboBox x:Name="ScannerProfileCombo" Width="195" VerticalAlignment="Center" Margin="0,0,14,0" SelectedIndex="0">
+                        <ComboBoxItem Content="Top 20 Ports (Fastest)"/>
+                        <ComboBoxItem Content="Top 100 Ports (Recommended)"/>
+                        <ComboBoxItem Content="Passive Discovery (Instant)"/>
+                        <ComboBoxItem Content="Local Machine (All Sockets)"/>
+                    </ComboBox>
+
+                    <Button x:Name="StartScanButton" Content="▶ Start Scan" Padding="14,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnStartScan"/>
+                    <Button x:Name="StopScanButton" Content="⏹ Stop" Padding="12,3" Margin="0,0,8,0" IsEnabled="False" Click="OnStopScan"/>
+                    <Button x:Name="PassiveDiscoverButton" Content="⚡ Passive (Instant)" Padding="12,3" Margin="0,0,14,0" Click="OnPassiveDiscovery" ToolTip="Instant neighbor &amp; ARP discovery without sending network packets"/>
+
+                    <ProgressBar x:Name="ScannerProgressBar" Width="120" Height="14" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="Collapsed" Minimum="0" Maximum="100"/>
+                    <TextBlock x:Name="ScannerStatusText" Text="Ready to scan." VerticalAlignment="Center" Foreground="{StaticResource Muted}" FontSize="11"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                    <Button Content="Export CSV" Padding="12,3" Margin="0,0,8,0" Click="OnExportScannerCsv" ToolTip="Export scan results to CSV"/>
+                    <Button Content="Export JSON" Padding="12,3" Click="OnExportScannerJson" ToolTip="Export scan results to JSON"/>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Splitter: Discovered Devices Grid (Left) vs Device & Port Inspector (Right) -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="2*" MinWidth="360"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Discovered Devices Grid -->
+                <DataGrid x:Name="DevicesGrid" Grid.Column="0" ItemsSource="{Binding DiscoveredDevices}" SelectionMode="Single"
+                          SelectionChanged="OnDevicesGridSelectionChanged">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="🔍 Scan This Host" Click="OnRescanSelectedHost"/>
+                            <MenuItem Header="🛡️ Protect Host (DNS Filter)" Click="OnProtectDeviceWithDns"/>
+                            <Separator/>
+                            <MenuItem Header="📋 Copy IP Address" Click="OnCopyDeviceIp"/>
+                            <MenuItem Header="📋 Copy MAC Address" Click="OnCopyDeviceMac"/>
+                            <Separator/>
+                            <MenuItem Header="🌐 Open in Web Browser" Click="OnOpenDeviceInBrowser"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="DEVICE TYPE" Binding="{Binding KindDisplay, Mode=OneWay}" Width="170"/>
+                        <DataGridTextColumn Header="IP ADDRESS" Binding="{Binding IpString, Mode=OneWay}" Width="130"/>
+                        <DataGridTextColumn Header="HOSTNAME" Binding="{Binding Hostname, Mode=OneWay}" Width="170"/>
+                        <DataGridTextColumn Header="MAC ADDRESS" Binding="{Binding MacString, Mode=OneWay}" Width="140"/>
+                        <DataGridTextColumn Header="VENDOR" Binding="{Binding Vendor, Mode=OneWay}" Width="170"/>
+                        <DataGridTextColumn Header="OPEN PORTS" Binding="{Binding OpenPortsSummary, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
+
+                <!-- Right: Device & Port Inspector Card -->
+                <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                    <DockPanel LastChildFill="True">
+                        <!-- Top: Device Header & Identity -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                                <Border x:Name="DeviceTypeBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#2222E8FF">
+                                    <TextBlock x:Name="DeviceTypeBadgeText" Text="NETWORK DEVICE" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                </Border>
+                                <TextBlock Text="HOST &amp; PORT INSPECTOR" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                            </DockPanel>
+
+                            <TextBlock x:Name="InspectorDeviceNameText" Text="Select a device to inspect" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="InspectorDeviceDescText" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                            <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="IP Address:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorDeviceIpText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="MAC / OUI:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorDeviceMacText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <WrapPanel Margin="0,0,0,6">
+                                <Button Content="🛡️ Protect (DNS)" Margin="0,0,6,4" Click="OnProtectDeviceWithDns" Foreground="{StaticResource Cyan}" ToolTip="Add this device to DNS Protection"/>
+                                <Button Content="🔍 Rescan Host" Margin="0,0,6,4" Click="OnRescanSelectedHost" ToolTip="Run detailed port scan on this specific device"/>
+                                <Button Content="🌐 Open Browser" Margin="0,0,6,4" Click="OnOpenDeviceInBrowser" ToolTip="Open http://[IP] in default web browser"/>
+                                <Button Content="📋 Copy Details" Margin="0,0,6,4" Click="OnCopyDeviceIp" ToolTip="Copy IP and device details"/>
+                            </WrapPanel>
+                        </StackPanel>
+
+                        <!-- Open Ports Sub-Grid -->
+                        <GroupBox Header="OPEN PORTS &amp; SERVICES" Foreground="{StaticResource Magenta}" BorderBrush="{StaticResource Line}">
+                            <DataGrid x:Name="DevicePortsGrid" ItemsSource="{Binding SelectedDevicePorts}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="PORT" Binding="{Binding Port, Mode=OneWay}" Width="55"/>
+                                    <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="55"/>
+                                    <DataGridTextColumn Header="SERVICE" Binding="{Binding ServiceName, Mode=OneWay}" Width="120"/>
+                                    <DataGridTextColumn Header="DETAILS / BANNER" Binding="{Binding Banner, Mode=OneWay}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Rules view: every stored decision, whether or not the program is running -->

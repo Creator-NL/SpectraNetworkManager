@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -32,6 +33,8 @@ public partial class MainWindow : Window
     private readonly WindowsFirewallEnforcer _enforcer = new();
     private readonly LearningTracker _learning = new();
     private readonly AuthenticodeVerifier _signatures = new(new SignatureCache(SignatureCache.DefaultPath));
+    private readonly ExecutableHashCache _hashCache = new(ExecutableHashCache.DefaultPath);
+    private readonly IpIntelligenceService _ipIntel = new();
     private readonly Dictionary<string, (ProgramSummary Summary, DateTimeOffset Since)> _awaiting = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _alarmed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<ConnectionKey, ConnectionRow> _rows = new();
@@ -43,6 +46,7 @@ public partial class MainWindow : Window
     private readonly ICollectionView _dnsView;
     private readonly bool _isAdmin = IsAdministrator();
     private DnsRow? _inspectedDnsRow;
+    private ConnectionRow? _inspectedConnectionRow;
     private bool _isUpdatingDnsRows;
 
     // Ask mode: programs waiting for an Allow / Block answer
@@ -68,6 +72,10 @@ public partial class MainWindow : Window
     private System.Windows.Forms.ToolStripMenuItem? _trayAlwaysOnTopItem;
     private System.Windows.Forms.ToolStripMenuItem? _traySoundItem;
     private DateTimeOffset _lastSoundTime = DateTimeOffset.MinValue;
+    private readonly WindowsNeighborScanner _neighborScanner = new();
+    private readonly NetworkScanner _scanner;
+    private readonly LocalSocketInventory _localInventory;
+    private CancellationTokenSource? _scanCts;
 
     public ObservableCollection<ConnectionRow> Rows { get; } = new();
     public ObservableCollection<ProgramRow> Programs { get; } = new();
@@ -79,9 +87,13 @@ public partial class MainWindow : Window
     public ObservableCollection<BlockRow> Blocks { get; } = new();
     public ObservableCollection<TopTalkerViewModel> TopTalkers { get; } = new();
     public ObservableCollection<ConnectionHistoryViewModel> ConnectionHistory { get; } = new();
+    public ObservableCollection<DiscoveredDevice> DiscoveredDevices { get; } = new();
+    public ObservableCollection<DiscoveredPort> SelectedDevicePorts { get; } = new();
 
     public MainWindow()
     {
+        _scanner = new NetworkScanner(_neighborScanner);
+        _localInventory = new LocalSocketInventory(new IpHelperConnectionSource(), _processResolver);
         _dnsSwitch = new SystemDnsSwitchManager(null, null, () => _sink.LocalEndPoint);
         InitializeComponent();
         DataContext = this;
@@ -132,6 +144,9 @@ public partial class MainWindow : Window
             _historyDb.Dispose();
             _engineClient?.Dispose();
             _signatures.Dispose();
+            _hashCache.SaveIfDirty();
+            _scanCts?.Cancel();
+            _scanCts?.Dispose();
             _sink.Dispose();
             _dnsSwitch.Dispose();
         };
@@ -351,10 +366,18 @@ public partial class MainWindow : Window
             if (_rows.TryGetValue(key, out var existing))
             {
                 existing.StateValue = view.Connection.State;
+                existing.UpdateProcessInfo(view.Process);
+                if (ReferenceEquals(existing, _inspectedConnectionRow) && ConnectionInspectorPanel.Visibility == Visibility.Visible)
+                {
+                    ShowConnectionInspector(existing);
+                }
                 continue;
             }
 
-            var row = new ConnectionRow(view);
+            IpIntelligenceInfo? remoteIntel = view.Connection.Protocol != Protocol.Udp && view.Connection.Remote?.Address is { } rAddr
+                ? _ipIntel.Analyze(rAddr)
+                : null;
+            var row = new ConnectionRow(view, remoteIntel);
             if (row.Path.Length > 0) row.SetSignature(_signatures.TryGet(row.Path));
             if (resolve && row.RemoteAddress is not null)
                 row.Host = _dns.Request(row.RemoteAddress) ?? "";
@@ -484,7 +507,11 @@ public partial class MainWindow : Window
         {
             foreach (var row in Rows)
                 if (row.Path.Equals(path, StringComparison.OrdinalIgnoreCase))
+                {
                     row.SetSignature(info);
+                    if (ReferenceEquals(row, _inspectedConnectionRow) && ConnectionInspectorPanel.Visibility == Visibility.Visible)
+                        ShowConnectionInspector(row);
+                }
 
             foreach (var sRow in StartupItems)
                 if (sRow.ExecutablePath.Equals(path, StringComparison.OrdinalIgnoreCase))
@@ -1305,6 +1332,235 @@ public partial class MainWindow : Window
         {
             Error("Could not open file location", ex);
         }
+    }
+
+    // ---- Connection & Process Intelligence Inspector + SHA-256 / VirusTotal / AbuseIPDB / Shodan ----
+
+    private void OnConnectionsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ConnectionsGrid.SelectedItem is ConnectionRow row)
+        {
+            ShowConnectionInspector(row);
+        }
+    }
+
+    private void OnConnectionsGridMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ConnectionsGrid.SelectedItem is ConnectionRow row)
+        {
+            ShowConnectionInspector(row);
+        }
+    }
+
+    private void OnCloseConnectionInspector(object sender, RoutedEventArgs e)
+    {
+        ConnectionInspectorPanel.Visibility = Visibility.Collapsed;
+        _inspectedConnectionRow = null;
+    }
+
+    private void ShowConnectionInspector(ConnectionRow row)
+    {
+        if (row == null) return;
+        _inspectedConnectionRow = row;
+
+        try
+        {
+            var identityLevel = ProcessInfo.ClassifyIdentity(row.Path, row.Signature);
+            ConnInspectorIdentityText.Text = ProcessInfo.DescribeIdentityLevel(identityLevel, row.Signature).ToUpperInvariant();
+
+            switch (identityLevel)
+            {
+                case IdentityVerificationLevel.VerifiedSystemBinary:
+                case IdentityVerificationLevel.VerifiedPublisherBinary:
+                    ConnInspectorIdentityBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+                    ConnInspectorIdentityText.Foreground = (Brush)FindResource("Cyan");
+                    break;
+                case IdentityVerificationLevel.UnsignedOrUnverified:
+                case IdentityVerificationLevel.Unknown:
+                    ConnInspectorIdentityBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20));
+                    ConnInspectorIdentityText.Foreground = (Brush)FindResource("Amber");
+                    break;
+                default:
+                    ConnInspectorIdentityBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
+                    ConnInspectorIdentityText.Foreground = (Brush)FindResource("Magenta");
+                    break;
+            }
+
+            string startStr = row.StartTimeUtc.HasValue
+                ? $"  ·  Started {row.StartTimeUtc.Value.ToLocalTime():HH:mm:ss}"
+                : "";
+            ConnInspectorProgramText.Text = $"{row.Program} (PID {row.Pid}){startStr}  ·  {row.Signer}";
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(row.ServiceNames))
+                parts.Add($"Windows Service: {row.ServiceNames}");
+            if (!string.IsNullOrEmpty(row.ParentName))
+                parts.Add($"Parent Process: {row.ParentName} (PID {row.ParentPid})");
+            ConnInspectorServiceParentText.Text = parts.Count > 0 ? string.Join("   |   ", parts) : "(Standalone process / no hosted service)";
+
+            ConnInspectorCommandLineText.Text = !string.IsNullOrWhiteSpace(row.CommandLine)
+                ? row.CommandLine
+                : (!string.IsNullOrWhiteSpace(row.Path) ? row.Path : "(Command line unavailable — protected process)");
+
+            string? sha256 = !string.IsNullOrWhiteSpace(row.Path) ? _hashCache.GetSha256(row.Path) : null;
+            ConnInspectorSha256Text.Text = !string.IsNullOrEmpty(sha256)
+                ? sha256
+                : "(Unavailable — system/protected process or no disk path)";
+
+            var intel = row.RemoteIntelInfo;
+            ConnInspectorScopeText.Text = (intel?.Category ?? "LOCAL SOCKET").ToUpperInvariant();
+            bool isPublic = intel is { IsPublicRoutable: true };
+            ConnInspectorScopeBadge.Background = isPublic
+                ? new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF))
+                : new SolidColorBrush(Color.FromArgb(0x33, 0x8A, 0x9B, 0xB8));
+            ConnInspectorScopeText.Foreground = isPublic
+                ? (Brush)FindResource("Cyan")
+                : (Brush)FindResource("Text");
+
+            ConnInspectorEndpointText.Text = $"{row.Protocol}  {row.Local} ➔ {row.Remote}  [{row.State}]";
+            ConnInspectorHostText.Text = !string.IsNullOrWhiteSpace(row.Host) ? row.Host : "(No reverse DNS hostname)";
+            ConnInspectorAsnText.Text = intel is not null
+                ? $"{intel.CountryName} ({intel.CountryCode})  ·  {intel.Organization}{(string.IsNullOrEmpty(intel.Asn) ? "" : $" ({intel.Asn})")}"
+                : "Local Endpoint / Unconnected Socket";
+            ConnInspectorPathText.Text = !string.IsNullOrWhiteSpace(row.Path) ? row.Path : "(Kernel or protected process)";
+
+            ConnInspectorAbuseIpBtn.IsEnabled = isPublic;
+            ConnInspectorShodanBtn.IsEnabled = isPublic;
+
+            ConnectionInspectorPanel.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"ShowConnectionInspector failed: {ex.Message}");
+        }
+    }
+
+    private void CheckPathOnVirusTotal(string? path, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            Info($"No executable file path is available on disk for \"{displayName}\".\n\nRun SpectraNetworkManager as Administrator if this is an elevated process.");
+            return;
+        }
+
+        string? sha256 = _hashCache.GetSha256(path);
+        if (string.IsNullOrEmpty(sha256))
+        {
+            Info($"Could not compute SHA-256 hash for:\n{path}");
+            return;
+        }
+
+        try
+        {
+            string url = ExecutableHashCache.GetVirusTotalUrl(sha256);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            StatusText.Text = $"Opened VirusTotal for {displayName} (SHA-256: {sha256[..16]}…).";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open browser for VirusTotal lookup", ex);
+        }
+    }
+
+    private void CopyPathSha256ToClipboard(string? path, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            Info($"No executable file path is available on disk for \"{displayName}\".");
+            return;
+        }
+
+        string? sha256 = _hashCache.GetSha256(path);
+        if (string.IsNullOrEmpty(sha256))
+        {
+            Info($"Could not compute SHA-256 hash for:\n{path}");
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(sha256);
+            StatusText.Text = $"Copied SHA-256 hash for {displayName} to clipboard: {sha256}";
+        }
+        catch { }
+    }
+
+    private void OnCheckConnectionVirusTotal(object sender, RoutedEventArgs e)
+    {
+        var row = _inspectedConnectionRow ?? SelectedConnection();
+        if (row is not null) CheckPathOnVirusTotal(row.Path, row.Program);
+    }
+
+    private void OnCopyConnectionSha256(object sender, RoutedEventArgs e)
+    {
+        var row = _inspectedConnectionRow ?? SelectedConnection();
+        if (row is not null) CopyPathSha256ToClipboard(row.Path, row.Program);
+    }
+
+    private void OnCheckConnectionAbuseIpDb(object sender, RoutedEventArgs e)
+    {
+        var row = _inspectedConnectionRow ?? SelectedConnection();
+        if (row?.RemoteAddress is null)
+        {
+            Info("This entry does not have a remote IP address.");
+            return;
+        }
+
+        try
+        {
+            string url = IpIntelligenceService.GetAbuseIpDbUrl(row.RemoteAddress);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            StatusText.Text = $"Opened AbuseIPDB report for {row.RemoteAddress}.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open AbuseIPDB in browser", ex);
+        }
+    }
+
+    private void OnCheckConnectionShodan(object sender, RoutedEventArgs e)
+    {
+        var row = _inspectedConnectionRow ?? SelectedConnection();
+        if (row?.RemoteAddress is null)
+        {
+            Info("This entry does not have a remote IP address.");
+            return;
+        }
+
+        try
+        {
+            string url = IpIntelligenceService.GetShodanUrl(row.RemoteAddress);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            StatusText.Text = $"Opened Shodan host intelligence for {row.RemoteAddress}.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open Shodan in browser", ex);
+        }
+    }
+
+    private void OnCheckProgramVirusTotal(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is not null) CheckPathOnVirusTotal(row.Path, row.Name);
+    }
+
+    private void OnCopyProgramSha256(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProgram();
+        if (row is not null) CopyPathSha256ToClipboard(row.Path, row.Name);
+    }
+
+    private void OnCheckStartupVirusTotal(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is not null) CheckPathOnVirusTotal(row.ExecutablePath, row.Name);
+    }
+
+    private void OnCopyStartupSha256(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is not null) CopyPathSha256ToClipboard(row.ExecutablePath, row.Name);
     }
 
     // -- Rules view buttons --
@@ -3227,6 +3483,8 @@ public partial class MainWindow : Window
                 {
                     row.Host = name;
                     RecordProcessSocket(name, row.Program, row.Pid);
+                    if (ReferenceEquals(row, _inspectedConnectionRow) && ConnectionInspectorPanel.Visibility == Visibility.Visible)
+                        ShowConnectionInspector(row);
                 }
         }));
     }
@@ -3252,10 +3510,13 @@ public partial class MainWindow : Window
         if (q.Length == 0) return true;
 
         return r.Program.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || r.ServiceOrParent.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Local.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Remote.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Host.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || r.RemoteIntel.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Path.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || r.CommandLine.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Signer.Contains(q, StringComparison.OrdinalIgnoreCase)
             || r.Pid.ToString().Contains(q, StringComparison.Ordinal);
     }
@@ -3341,11 +3602,13 @@ public partial class MainWindow : Window
         ProgramsPanel.Visibility = ProgramsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StartupPanel.Visibility = StartupTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         TrafficPanel.Visibility = TrafficTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        ScannerPanel.Visibility = ScannerTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BlocksPanel.Visibility = BlocksTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
+        if (ScannerTab.IsChecked == true) InitScannerTargetSubnet();
         if (StartupTab.IsChecked == true) RefreshStartupItems();
         if (StrictTab.IsChecked == true) UpdateStrictUi();
         if (DnsTab.IsChecked == true) RefreshDnsUi();
@@ -4279,6 +4542,508 @@ public partial class MainWindow : Window
         if (bytesPerSec < 1024 * 1024 * 1024) return $"{bytesPerSec / (1024.0 * 1024.0):F2} MB/s";
         return $"{bytesPerSec / (1024.0 * 1024.0 * 1024.0):F2} GB/s";
     }
+
+    // ---- Port Scanner & Passive LAN Discovery -----------------------------------------------
+
+    private void InitScannerTargetSubnet()
+    {
+        if (ScannerTargetBox != null && !string.IsNullOrWhiteSpace(ScannerTargetBox.Text)) return;
+
+        try
+        {
+            var localIp = GetLocalActiveIp();
+            if (localIp != null)
+            {
+                byte[] b = localIp.GetAddressBytes();
+                if (ScannerTargetBox != null)
+                {
+                    ScannerTargetBox.Text = $"{b[0]}.{b[1]}.{b[2]}.0/24";
+                }
+                return;
+            }
+        }
+        catch
+        {
+        }
+
+        if (ScannerTargetBox != null)
+        {
+            ScannerTargetBox.Text = "192.168.1.0/24";
+        }
+    }
+
+    private static IPAddress? GetLocalActiveIp()
+    {
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+
+                var ipProps = ni.GetIPProperties();
+                if (ipProps.GatewayAddresses.Count == 0) continue;
+
+                foreach (var unicast in ipProps.UnicastAddresses)
+                {
+                    if (unicast.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(unicast.Address))
+                    {
+                        return unicast.Address;
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static IPAddress? GetDefaultGatewayIp()
+    {
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+
+                var ipProps = ni.GetIPProperties();
+                foreach (var gw in ipProps.GatewayAddresses)
+                {
+                    if (gw.Address.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return gw.Address;
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private async void OnStartScan(object sender, RoutedEventArgs e)
+    {
+        if (_scanCts != null) return;
+
+        string targetText = ScannerTargetBox.Text?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(targetText))
+        {
+            InitScannerTargetSubnet();
+            targetText = ScannerTargetBox.Text?.Trim() ?? "";
+        }
+
+        int profileIndex = ScannerProfileCombo.SelectedIndex;
+
+        // Profile 3: Local Machine (All Sockets)
+        if (profileIndex == 3)
+        {
+            try
+            {
+                ScannerStatusText.Text = "Gathering local listening sockets...";
+                var localDev = _localInventory.GetLocalInventory();
+                DiscoveredDevices.Clear();
+                SelectedDevicePorts.Clear();
+                DiscoveredDevices.Add(localDev);
+                DevicesGrid.SelectedIndex = 0;
+                ScannerStatusText.Text = $"Local machine inventory: {localDev.OpenPorts.Count} listening sockets found.";
+            }
+            catch (Exception ex)
+            {
+                ScannerStatusText.Text = $"Error reading local sockets: {ex.Message}";
+            }
+            return;
+        }
+
+        // Profile 2: Passive Discovery (Instant)
+        if (profileIndex == 2)
+        {
+            OnPassiveDiscovery(sender, e);
+            return;
+        }
+
+        // Profiles 0 (Top 20) & 1 (Top 100): Active Port Scan
+        List<IPAddress> targets = new();
+        try
+        {
+            if (targetText.Equals("local", StringComparison.OrdinalIgnoreCase) ||
+                targetText.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                targetText == "127.0.0.1")
+            {
+                targets.Add(IPAddress.Loopback);
+            }
+            else if (targetText.Contains('/'))
+            {
+                var parts = targetText.Split('/');
+                if (IPAddress.TryParse(parts[0], out var baseIp))
+                {
+                    targets = NetworkScanner.GenerateSubnetIps(baseIp);
+                }
+                else
+                {
+                    Warn($"Invalid subnet address format: '{targetText}'. Expected format: 192.168.1.0/24");
+                    return;
+                }
+            }
+            else if (IPAddress.TryParse(targetText, out var singleIp))
+            {
+                targets.Add(singleIp);
+            }
+            else
+            {
+                try
+                {
+                    var addrs = await Dns.GetHostAddressesAsync(targetText);
+                    targets.AddRange(addrs.Where(a => a.AddressFamily == AddressFamily.InterNetwork));
+                }
+                catch
+                {
+                    Warn($"Could not resolve host '{targetText}'. Please check the hostname or IP address.");
+                    return;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Warn($"Failed to parse target: {ex.Message}");
+            return;
+        }
+
+        if (targets.Count == 0)
+        {
+            Warn("No valid target IP addresses found to scan.");
+            return;
+        }
+
+        bool hasExternal = targets.Any(ip => !NetworkScanner.IsPrivateOrLocal(ip));
+        if (hasExternal)
+        {
+            if (!Confirm($"Target '{targetText}' contains public / external Internet IP addresses.\n\nActive scanning external hosts without authorization may trigger network security alerts.\n\nDo you want to proceed with this scan?", "External Network Scan Confirmation"))
+            {
+                return;
+            }
+        }
+
+        var portsToScan = profileIndex == 0 ? WellKnownPorts.Top20 : WellKnownPorts.Top100;
+
+        StartScanButton.IsEnabled = false;
+        StopScanButton.IsEnabled = true;
+        PassiveDiscoverButton.IsEnabled = false;
+        ScannerProgressBar.Visibility = Visibility.Visible;
+        ScannerProgressBar.Value = 0;
+        ScannerStatusText.Text = $"Starting scan of {targets.Count} hosts ({portsToScan.Length} ports each)...";
+
+        DiscoveredDevices.Clear();
+        SelectedDevicePorts.Clear();
+
+        _scanCts = new CancellationTokenSource();
+        var progress = new Progress<ScanProgressReport>(report =>
+        {
+            if (report.TotalTargets > 0)
+            {
+                ScannerProgressBar.Value = Math.Min(100, (report.ScannedTargets * 100.0) / report.TotalTargets);
+            }
+            ScannerStatusText.Text = report.CurrentStatus;
+        });
+
+        try
+        {
+            var gateway = GetDefaultGatewayIp();
+            var discovered = await _scanner.ScanActiveAsync(
+                targets,
+                portsToScan,
+                timeoutMs: 350,
+                maxConcurrency: 35,
+                grabBanners: true,
+                gatewayIp: gateway,
+                progress: progress,
+                cancellationToken: _scanCts.Token);
+
+            DiscoveredDevices.Clear();
+            foreach (var dev in discovered)
+            {
+                DiscoveredDevices.Add(dev);
+            }
+
+            if (DiscoveredDevices.Count > 0)
+            {
+                DevicesGrid.SelectedIndex = 0;
+            }
+
+            ScannerStatusText.Text = $"Scan finished. Found {discovered.Count} active devices.";
+        }
+        catch (OperationCanceledException)
+        {
+            ScannerStatusText.Text = "Scan stopped by user.";
+        }
+        catch (Exception ex)
+        {
+            ScannerStatusText.Text = $"Scan error: {ex.Message}";
+        }
+        finally
+        {
+            StartScanButton.IsEnabled = true;
+            StopScanButton.IsEnabled = false;
+            PassiveDiscoverButton.IsEnabled = true;
+            ScannerProgressBar.Visibility = Visibility.Collapsed;
+            _scanCts?.Dispose();
+            _scanCts = null;
+        }
+    }
+
+    private void OnStopScan(object sender, RoutedEventArgs e)
+    {
+        if (_scanCts != null)
+        {
+            _scanCts.Cancel();
+            StopScanButton.IsEnabled = false;
+            ScannerStatusText.Text = "Stopping scan...";
+        }
+    }
+
+    private void OnPassiveDiscovery(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ScannerStatusText.Text = "Reading local ARP neighbor cache & DNS client activity...";
+            var localIp = GetLocalActiveIp();
+            var gatewayIp = GetDefaultGatewayIp();
+
+            var dnsStats = _sink.Activity.Snapshot();
+            var knownClients = dnsStats.TopClients.Select(c => c.Key).ToList();
+
+            var discovered = _scanner.DiscoverPassive(knownClients, localIp, gatewayIp);
+
+            DiscoveredDevices.Clear();
+            SelectedDevicePorts.Clear();
+
+            foreach (var dev in discovered)
+            {
+                DiscoveredDevices.Add(dev);
+            }
+
+            if (DiscoveredDevices.Count > 0)
+            {
+                DevicesGrid.SelectedIndex = 0;
+            }
+
+            ScannerStatusText.Text = $"Passive discovery found {discovered.Count} devices in ARP table (0 probe packets sent).";
+        }
+        catch (Exception ex)
+        {
+            ScannerStatusText.Text = $"Passive discovery error: {ex.Message}";
+        }
+    }
+
+    private void OnDevicesGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DevicesGrid.SelectedItem is DiscoveredDevice dev)
+        {
+            DeviceTypeBadgeText.Text = dev.KindDisplay.ToUpperInvariant();
+            DeviceTypeBadge.Background = dev.Kind switch
+            {
+                DeviceKind.SmartTv => new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6)),
+                DeviceKind.MobileOrTablet => new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xAA, 0x00)),
+                DeviceKind.RouterOrGateway => new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+                DeviceKind.Workstation => new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+                _ => new SolidColorBrush(Color.FromArgb(0x33, 0x8A, 0x9B, 0xB8))
+            };
+            DeviceTypeBadgeText.Foreground = dev.Kind switch
+            {
+                DeviceKind.SmartTv => (Brush)FindResource("Magenta"),
+                DeviceKind.MobileOrTablet => (Brush)FindResource("Amber"),
+                DeviceKind.RouterOrGateway => (Brush)FindResource("Cyan"),
+                _ => (Brush)FindResource("Text")
+            };
+
+            InspectorDeviceNameText.Text = !string.IsNullOrEmpty(dev.Hostname)
+                ? dev.Hostname
+                : (!string.IsNullOrEmpty(dev.Vendor) ? $"{dev.Vendor} ({dev.IpString})" : dev.IpString);
+            InspectorDeviceDescText.Text = $"{dev.DeviceDescription}  ·  Vendor: {dev.Vendor}";
+            InspectorDeviceIpText.Text = dev.IpString;
+            InspectorDeviceMacText.Text = !string.IsNullOrEmpty(dev.MacAddress) ? dev.MacAddress : "(No MAC / Virtual)";
+
+            SelectedDevicePorts.Clear();
+            foreach (var port in dev.OpenPorts)
+            {
+                SelectedDevicePorts.Add(port);
+            }
+        }
+        else
+        {
+            DeviceTypeBadgeText.Text = "DEVICE";
+            DeviceTypeBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+            DeviceTypeBadgeText.Foreground = (Brush)FindResource("Cyan");
+            InspectorDeviceNameText.Text = "Select a device to inspect";
+            InspectorDeviceDescText.Text = "";
+            InspectorDeviceIpText.Text = "-";
+            InspectorDeviceMacText.Text = "-";
+            SelectedDevicePorts.Clear();
+        }
+    }
+
+    private async void OnProtectDeviceWithDns(object sender, RoutedEventArgs e)
+    {
+        var dev = DevicesGrid.SelectedItem as DiscoveredDevice;
+        if (dev == null)
+        {
+            Info("Please select a device in the list to protect with DNS Sinkhole.");
+            return;
+        }
+
+        var localIp = GetLocalActiveIp();
+        string localIpStr = localIp?.ToString() ?? "your PC's LAN IP";
+
+        if (_sink.Settings.ListenAddress == "127.0.0.1")
+        {
+            if (Confirm(
+                $"To protect LAN devices (such as Smart TVs, Mobile phones, or Game Consoles), Spectra's DNS Sinkhole needs to listen on all interfaces (0.0.0.0) instead of 127.0.0.1.\n\nWould you like Spectra to enable LAN listening on 0.0.0.0 and start protecting device '{dev.Hostname ?? dev.IpString}'?",
+                "Enable LAN DNS Protection"))
+            {
+                _sink.Settings.ListenAddress = "0.0.0.0";
+                _sink.SaveSettingsOnly(_sink.Settings);
+                if (_sink.IsRunning)
+                {
+                    _sink.Stop();
+                    await StartDnsAsync();
+                }
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        dev.ProtectionStatus = "Protected (DNS Active)";
+        DevicesGrid.Items.Refresh();
+
+        Info(
+            $"Device '{dev.Hostname ?? dev.IpString}' ({dev.IpString}) is configured for Spectra DNS Protection!\n\n" +
+            $"To activate ad-blocking and privacy filtering on this {dev.KindDisplay}:\n" +
+            $"1. Open Wi-Fi / Network Settings on your {dev.KindDisplay}.\n" +
+            $"2. Set DNS Server to: {localIpStr}\n\n" +
+            "All telemetry, smart TV ads, and trackers will be blocked automatically!");
+    }
+
+    private void OnRescanSelectedHost(object sender, RoutedEventArgs e)
+    {
+        if (DevicesGrid.SelectedItem is DiscoveredDevice dev)
+        {
+            ScannerTargetBox.Text = dev.IpString;
+            ScannerProfileCombo.SelectedIndex = 1; // Top 100
+            OnStartScan(sender, e);
+        }
+    }
+
+    private void OnOpenDeviceInBrowser(object sender, RoutedEventArgs e)
+    {
+        if (DevicesGrid.SelectedItem is DiscoveredDevice dev)
+        {
+            bool hasHttps = dev.OpenPorts.Any(p => p.Port == 443 || p.Port == 8443);
+            string scheme = hasHttps ? "https" : "http";
+            string url = $"{scheme}://{dev.IpString}";
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                Warn($"Failed to open web browser for {url}: {ex.Message}");
+            }
+        }
+    }
+
+    private void OnCopyDeviceIp(object sender, RoutedEventArgs e)
+    {
+        if (DevicesGrid.SelectedItem is DiscoveredDevice dev)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(dev.IpString);
+                StatusText.Text = $"Copied IP address: {dev.IpString}";
+            }
+            catch { }
+        }
+    }
+
+    private void OnCopyDeviceMac(object sender, RoutedEventArgs e)
+    {
+        if (DevicesGrid.SelectedItem is DiscoveredDevice dev && !string.IsNullOrEmpty(dev.MacAddress))
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(dev.MacAddress);
+                StatusText.Text = $"Copied MAC address: {dev.MacAddress}";
+            }
+            catch { }
+        }
+    }
+
+    private void OnExportScannerCsv(object sender, RoutedEventArgs e)
+    {
+        if (DiscoveredDevices.Count == 0)
+        {
+            Info("No discovered devices to export. Run a scan or passive discovery first.");
+            return;
+        }
+
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"spectranetworkmanager-devices-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+                DefaultExt = ".csv",
+                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*"
+            };
+            if (sfd.ShowDialog(this) == true)
+            {
+                using var writer = new StreamWriter(sfd.FileName, append: false, Encoding.UTF8);
+                NetworkScanner.ExportToCsv(DiscoveredDevices, writer);
+                StatusText.Text = $"Exported {DiscoveredDevices.Count} devices to CSV.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Warn($"Failed to export devices to CSV: {ex.Message}");
+        }
+    }
+
+    private void OnExportScannerJson(object sender, RoutedEventArgs e)
+    {
+        if (DiscoveredDevices.Count == 0)
+        {
+            Info("No discovered devices to export. Run a scan or passive discovery first.");
+            return;
+        }
+
+        try
+        {
+            var sfd = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"spectranetworkmanager-devices-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+                DefaultExt = ".json",
+                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
+            };
+            if (sfd.ShowDialog(this) == true)
+            {
+                using var writer = new StreamWriter(sfd.FileName, append: false, Encoding.UTF8);
+                NetworkScanner.ExportToJson(DiscoveredDevices, writer);
+                StatusText.Text = $"Exported {DiscoveredDevices.Count} devices to JSON.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Warn($"Failed to export devices to JSON: {ex.Message}");
+        }
+    }
+
+    private bool Confirm(string message, string title = "SpectraNetworkManager") =>
+        MessageBox.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+
+    private void Warn(string message, string title = "SpectraNetworkManager") =>
+        MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
     private static bool IsAdministrator() => ElevationHelper.IsAdministrator();
 }

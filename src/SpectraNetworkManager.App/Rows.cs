@@ -13,8 +13,15 @@ public sealed class ConnectionRow : INotifyPropertyChanged
     private ConnectionState _state;
     private string _host = "";
     private string _signer;
+    private SignatureInfo? _signature;
+    private int? _parentPid;
+    private string _parentName = "";
+    private string _commandLine = "";
+    private string _serviceNames = "";
+    private DateTimeOffset? _startTimeUtc;
+    private string _remoteIntel = "";
 
-    public ConnectionRow(ConnectionView view)
+    public ConnectionRow(ConnectionView view, IpIntelligenceInfo? remoteIntel = null)
     {
         var c = view.Connection;
         Protocol = c.Protocol.ToString().ToUpperInvariant();
@@ -25,6 +32,13 @@ public sealed class ConnectionRow : INotifyPropertyChanged
         Pid = c.ProcessId;
         Program = view.Process.Name;
         Path = view.Process.Path ?? "";
+        _parentPid = view.Process.ParentPid;
+        _parentName = view.Process.ParentName ?? "";
+        _commandLine = view.Process.CommandLine ?? "";
+        _serviceNames = view.Process.ServiceNames ?? "";
+        _startTimeUtc = view.Process.StartTimeUtc;
+        _remoteIntel = remoteIntel?.ShortDisplay ?? "";
+        RemoteIntelInfo = remoteIntel;
         _signer = Path.Length > 0 ? "checking..." : "";
         _state = c.State;
     }
@@ -38,6 +52,58 @@ public sealed class ConnectionRow : INotifyPropertyChanged
     public string Program { get; }
     public string Path { get; }
 
+    public int? ParentPid => _parentPid;
+    public string ParentName => _parentName;
+    public string CommandLine => _commandLine;
+    public string ServiceNames => _serviceNames;
+    public DateTimeOffset? StartTimeUtc => _startTimeUtc;
+    public SignatureInfo? Signature => _signature;
+    public IpIntelligenceInfo? RemoteIntelInfo { get; private set; }
+
+    public string ServiceOrParent =>
+        !string.IsNullOrEmpty(_serviceNames)
+            ? $"⚙ {_serviceNames}"
+            : (!string.IsNullOrEmpty(_parentName)
+                ? $"↖ {_parentName}{(_parentPid.HasValue ? $" ({_parentPid.Value})" : "")}"
+                : "");
+
+    public string RemoteIntel
+    {
+        get => _remoteIntel;
+        set
+        {
+            value ??= "";
+            if (_remoteIntel == value) return;
+            _remoteIntel = value;
+            Raise(nameof(RemoteIntel));
+        }
+    }
+
+    public void SetRemoteIntel(IpIntelligenceInfo? info)
+    {
+        RemoteIntelInfo = info;
+        RemoteIntel = info?.ShortDisplay ?? "";
+    }
+
+    public void UpdateProcessInfo(ProcessInfo proc)
+    {
+        bool changed = false;
+        if (_parentPid != proc.ParentPid) { _parentPid = proc.ParentPid; changed = true; }
+        if (_parentName != (proc.ParentName ?? "")) { _parentName = proc.ParentName ?? ""; changed = true; }
+        if (_commandLine != (proc.CommandLine ?? "")) { _commandLine = proc.CommandLine ?? ""; changed = true; }
+        if (_serviceNames != (proc.ServiceNames ?? "")) { _serviceNames = proc.ServiceNames ?? ""; changed = true; }
+        if (_startTimeUtc != proc.StartTimeUtc) { _startTimeUtc = proc.StartTimeUtc; changed = true; }
+        if (changed)
+        {
+            Raise(nameof(ParentPid));
+            Raise(nameof(ParentName));
+            Raise(nameof(CommandLine));
+            Raise(nameof(ServiceNames));
+            Raise(nameof(StartTimeUtc));
+            Raise(nameof(ServiceOrParent));
+        }
+    }
+
     public string Signer
     {
         get => _signer;
@@ -49,8 +115,12 @@ public sealed class ConnectionRow : INotifyPropertyChanged
         }
     }
 
-    public void SetSignature(SignatureInfo? signature) =>
+    public void SetSignature(SignatureInfo? signature)
+    {
+        _signature = signature;
         Signer = signature?.Describe() ?? (Path.Length > 0 ? "checking..." : "");
+        Raise(nameof(Signature));
+    }
 
     public string Host
     {

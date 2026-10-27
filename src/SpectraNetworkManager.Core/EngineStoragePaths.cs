@@ -31,6 +31,8 @@ public static class EngineStoragePaths
     public static string RulesPath => GetMigratedPath("rules.json");
     public static string StrictModePath => GetMigratedPath("strict-mode.json");
     public static string SignatureCachePath => GetMigratedPath("signature-cache.json");
+    public static string HashCachePath => GetMigratedPath("hash-cache.json");
+    public static string IpIntelCachePath => GetMigratedPath("ip-intel-cache.json");
     public static string DnsSettingsPath => GetMigratedPath("dns-settings.json");
     public static string DnsHistoryPath => GetMigratedPath("dns-history.db");
     public static string NetworkHistoryPath => GetMigratedPath("network-history.db");
