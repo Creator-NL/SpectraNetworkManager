@@ -4840,6 +4840,10 @@ public partial class MainWindow : Window
                 {
                     ScannerTargetBox.Text = $"{b[0]}.{b[1]}.{b[2]}.0/24";
                 }
+                if (HudTargetText != null)
+                {
+                    HudTargetText.Text = $"Target: {b[0]}.{b[1]}.{b[2]}.0/24";
+                }
                 return;
             }
         }
@@ -4850,6 +4854,38 @@ public partial class MainWindow : Window
         if (ScannerTargetBox != null)
         {
             ScannerTargetBox.Text = "192.168.1.0/24";
+        }
+        if (HudTargetText != null)
+        {
+            HudTargetText.Text = "Target: 192.168.1.0/24";
+        }
+    }
+
+    private void UpdateScannerHud(
+        string radarStatus,
+        Brush radarBadgeBrush,
+        Brush radarTextBrush,
+        string targetText,
+        string hostsRatio,
+        string velocity,
+        string eta,
+        int devicesCount,
+        int portsCount,
+        string? activityEvent = null)
+    {
+        if (HudRadarBadgeText != null) HudRadarBadgeText.Text = radarStatus;
+        if (HudRadarBadge != null) HudRadarBadge.Background = radarBadgeBrush;
+        if (HudRadarBadgeText != null) HudRadarBadgeText.Foreground = radarTextBrush;
+        if (HudTargetText != null) HudTargetText.Text = targetText;
+        if (HudHostsRatioText != null) HudHostsRatioText.Text = hostsRatio;
+        if (HudVelocityText != null) HudVelocityText.Text = velocity;
+        if (HudEtaText != null) HudEtaText.Text = eta;
+        if (HudDevicesCountText != null) HudDevicesCountText.Text = devicesCount.ToString();
+        if (HudPortsCountText != null) HudPortsCountText.Text = portsCount.ToString();
+
+        if (!string.IsNullOrEmpty(activityEvent) && HudActivityTickerText != null)
+        {
+            HudActivityTickerText.Text = activityEvent;
         }
     }
 
@@ -4926,6 +4962,17 @@ public partial class MainWindow : Window
                 DiscoveredDevices.Add(localDev);
                 DevicesGrid.SelectedIndex = 0;
                 ScannerStatusText.Text = $"Local machine inventory: {localDev.OpenPorts.Count} listening sockets found.";
+                UpdateScannerHud(
+                    "💻 LOCAL SOCKETS",
+                    new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+                    (Brush)FindResource("Cyan"),
+                    "Target: localhost (TCP/UDP)",
+                    "1 / 1 Host (100%)",
+                    "Instant",
+                    "ETA: 0s",
+                    1,
+                    localDev.OpenPorts.Count,
+                    $"[{DateTime.Now:HH:mm:ss}] 💻 Local machine inventory: {localDev.OpenPorts.Count} listening sockets mapped to active processes.");
             }
             catch (Exception ex)
             {
@@ -5015,6 +5062,19 @@ public partial class MainWindow : Window
         DiscoveredDevices.Clear();
         SelectedDevicePorts.Clear();
 
+        UpdateScannerHud(
+            "📡 SWEEPING LAN",
+            new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+            (Brush)FindResource("Cyan"),
+            $"Target: {targetText} ({targets.Count} hosts)",
+            $"0 / {targets.Count} Hosts (0%)",
+            "0.0 h/s",
+            "ETA: calculating...",
+            0,
+            0,
+            $"[{DateTime.Now:HH:mm:ss}] 🚀 Scanner initialized. Probing {targets.Count} hosts across {portsToScan.Length} well-known ports...");
+
+        int totalFoundPorts = 0;
         _scanCts = new CancellationTokenSource();
         var progress = new Progress<ScanProgressReport>(report =>
         {
@@ -5023,6 +5083,44 @@ public partial class MainWindow : Window
                 ScannerProgressBar.Value = Math.Min(100, (report.ScannedTargets * 100.0) / report.TotalTargets);
             }
             ScannerStatusText.Text = report.CurrentStatus;
+
+            // Live Stream Newly Discovered Device into the Grid Immediately!
+            if (report.NewlyDiscoveredDevice != null)
+            {
+                var dev = report.NewlyDiscoveredDevice;
+                DiscoveredDevices.Add(dev);
+                totalFoundPorts += dev.OpenPorts.Count;
+
+                // Select first found device immediately so the inspector card populates live
+                if (DevicesGrid.SelectedItem == null)
+                {
+                    DevicesGrid.SelectedItem = dev;
+                }
+
+                try { DevicesGrid.ScrollIntoView(dev); } catch { }
+
+                string portSummary = dev.OpenPorts.Count > 0
+                    ? string.Join(", ", dev.OpenPorts.Take(4).Select(p => $"{p.Port}/{p.ServiceName}"))
+                    : "Responsive Host";
+
+                HudActivityTickerText.Text = $"[{DateTime.Now:HH:mm:ss}] 🎯 Discovered {dev.IpString} ({dev.KindDisplay}) - {dev.Vendor} - [{portSummary}]";
+            }
+
+            string velStr = report.HostsPerSecond > 0 ? $"{report.HostsPerSecond:F1} h/s" : "--";
+            string etaStr = report.EstimatedTimeRemaining.HasValue
+                ? $"ETA: ~{(int)report.EstimatedTimeRemaining.Value.TotalSeconds}s"
+                : "ETA: --";
+
+            HudHostsRatioText.Text = $"{report.ScannedTargets} / {report.TotalTargets} Hosts ({report.ProgressPercentage:F0}%)";
+            HudVelocityText.Text = velStr;
+            HudEtaText.Text = etaStr;
+            HudDevicesCountText.Text = DiscoveredDevices.Count.ToString();
+            HudPortsCountText.Text = (report.FoundPorts > 0 ? report.FoundPorts : totalFoundPorts).ToString();
+
+            if (!string.IsNullOrEmpty(report.CurrentProbingIp))
+            {
+                HudTargetText.Text = $"Probing: {report.CurrentProbingIp}";
+            }
         });
 
         try
@@ -5038,22 +5136,46 @@ public partial class MainWindow : Window
                 progress: progress,
                 cancellationToken: _scanCts.Token);
 
-            DiscoveredDevices.Clear();
-            foreach (var dev in discovered)
+            // In case any were not caught during streaming:
+            if (DiscoveredDevices.Count == 0 && discovered.Count > 0)
             {
-                DiscoveredDevices.Add(dev);
+                foreach (var dev in discovered) DiscoveredDevices.Add(dev);
             }
 
-            if (DiscoveredDevices.Count > 0)
+            if (DevicesGrid.SelectedItem == null && DiscoveredDevices.Count > 0)
             {
                 DevicesGrid.SelectedIndex = 0;
             }
 
-            ScannerStatusText.Text = $"Scan finished. Found {discovered.Count} active devices.";
+            int finalPorts = DiscoveredDevices.Sum(d => d.OpenPorts.Count);
+            ScannerStatusText.Text = $"Scan finished. Found {DiscoveredDevices.Count} active devices.";
+            UpdateScannerHud(
+                "✅ COMPLETE",
+                new SolidColorBrush(Color.FromArgb(0x33, 0x00, 0xE6, 0x76)),
+                new SolidColorBrush(Color.FromRgb(0x00, 0xFF, 0x88)),
+                $"Target: {targetText} (Done)",
+                $"{targets.Count} / {targets.Count} Hosts (100%)",
+                HudVelocityText.Text,
+                "ETA: 0s",
+                DiscoveredDevices.Count,
+                finalPorts,
+                $"[{DateTime.Now:HH:mm:ss}] ✅ Active scan complete: {DiscoveredDevices.Count} devices identified with {finalPorts} open ports.");
         }
         catch (OperationCanceledException)
         {
-            ScannerStatusText.Text = "Scan stopped by user.";
+            int finalPorts = DiscoveredDevices.Sum(d => d.OpenPorts.Count);
+            ScannerStatusText.Text = $"Scan stopped by user. Found {DiscoveredDevices.Count} devices.";
+            UpdateScannerHud(
+                "⏹ STOPPED",
+                new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xB0, 0x20)),
+                (Brush)FindResource("Amber"),
+                $"Target: {targetText} (Halted)",
+                HudHostsRatioText.Text,
+                "--",
+                "ETA: --",
+                DiscoveredDevices.Count,
+                finalPorts,
+                $"[{DateTime.Now:HH:mm:ss}] ⏹ User halted scan. Preserved {DiscoveredDevices.Count} discovered devices in grid.");
         }
         catch (Exception ex)
         {
@@ -5077,6 +5199,7 @@ public partial class MainWindow : Window
             _scanCts.Cancel();
             StopScanButton.IsEnabled = false;
             ScannerStatusText.Text = "Stopping scan...";
+            if (HudRadarBadgeText != null) HudRadarBadgeText.Text = "STOPPING...";
         }
     }
 
@@ -5106,7 +5229,19 @@ public partial class MainWindow : Window
                 DevicesGrid.SelectedIndex = 0;
             }
 
+            int finalPorts = discovered.Sum(d => d.OpenPorts.Count);
             ScannerStatusText.Text = $"Passive discovery found {discovered.Count} devices in ARP table (0 probe packets sent).";
+            UpdateScannerHud(
+                "⚡ PASSIVE SNAPSHOT",
+                new SolidColorBrush(Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+                (Brush)FindResource("Cyan"),
+                "Source: ARP & Neighbor Cache",
+                $"{discovered.Count} Cached Hosts",
+                "Instant",
+                "ETA: 0s",
+                discovered.Count,
+                finalPorts,
+                $"[{DateTime.Now:HH:mm:ss}] ⚡ Passive discovery snapshot loaded {discovered.Count} LAN neighbors instantly with zero network packets emitted.");
         }
         catch (Exception ex)
         {

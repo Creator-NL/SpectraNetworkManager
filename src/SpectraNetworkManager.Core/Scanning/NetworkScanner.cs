@@ -182,6 +182,7 @@ public sealed class NetworkScanner
         int totalHosts = targets.Count;
         int scannedHosts = 0;
         int foundPorts = 0;
+        var sw = Stopwatch.StartNew();
 
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
@@ -190,13 +191,22 @@ public sealed class NetworkScanner
             cancellationToken.ThrowIfCancellationRequested();
             var targetIp = targets[i];
 
+            double elapsedSec = sw.Elapsed.TotalSeconds;
+            double velocity = elapsedSec > 0.2 ? Math.Round(scannedHosts / elapsedSec, 1) : 0.0;
+            TimeSpan? eta = (velocity > 0 && totalHosts > scannedHosts)
+                ? TimeSpan.FromSeconds((totalHosts - scannedHosts) / velocity)
+                : null;
+
             progress?.Report(new ScanProgressReport(
                 totalHosts,
                 scannedHosts,
                 results.Count,
                 foundPorts,
-                $"Scanning host {targetIp} ({i + 1}/{totalHosts})...",
-                false));
+                $"Probing host {targetIp} ({i + 1}/{totalHosts})...",
+                false,
+                CurrentProbingIp: targetIp.ToString(),
+                HostsPerSecond: velocity,
+                EstimatedTimeRemaining: eta));
 
             // Check host responsiveness with quick port check or ARP probe
             string? mac = null;
@@ -232,6 +242,13 @@ public sealed class NetworkScanner
             await Task.WhenAll(portTasks);
 
             scannedHosts++;
+            elapsedSec = sw.Elapsed.TotalSeconds;
+            velocity = elapsedSec > 0.2 ? Math.Round(scannedHosts / elapsedSec, 1) : 0.0;
+            eta = (velocity > 0 && totalHosts > scannedHosts)
+                ? TimeSpan.FromSeconds((totalHosts - scannedHosts) / velocity)
+                : null;
+
+            DiscoveredDevice? newlyFound = null;
 
             // If any ports are open OR an active MAC address responded
             if (openPortsOnHost.Count > 0 || !string.IsNullOrEmpty(mac))
@@ -247,7 +264,7 @@ public sealed class NetworkScanner
                 bool isGw = gatewayIp is not null && gatewayIp.Equals(targetIp);
                 var (kind, vendor, desc) = DeviceClassifier.Classify(mac ?? "", hostname, openPortsOnHost, isGw);
 
-                var device = new DiscoveredDevice
+                newlyFound = new DiscoveredDevice
                 {
                     Ip = targetIp,
                     MacAddress = mac ?? "",
@@ -263,7 +280,7 @@ public sealed class NetworkScanner
                     LastSeen = DateTimeOffset.UtcNow,
                 };
 
-                results.Add(device);
+                results.Add(newlyFound);
             }
 
             progress?.Report(new ScanProgressReport(
@@ -271,8 +288,14 @@ public sealed class NetworkScanner
                 scannedHosts,
                 results.Count,
                 foundPorts,
-                $"Scanned {scannedHosts}/{totalHosts} hosts. Found {results.Count} active devices.",
-                false));
+                newlyFound != null
+                    ? $"Discovered {newlyFound.IpString} ({newlyFound.KindDisplay})"
+                    : $"Scanned {scannedHosts}/{totalHosts} hosts. Found {results.Count} active devices.",
+                false,
+                NewlyDiscoveredDevice: newlyFound,
+                CurrentProbingIp: targetIp.ToString(),
+                HostsPerSecond: velocity,
+                EstimatedTimeRemaining: eta));
         }
 
         progress?.Report(new ScanProgressReport(
@@ -281,7 +304,8 @@ public sealed class NetworkScanner
             results.Count,
             foundPorts,
             $"Scan complete. Found {results.Count} active devices and {foundPorts} open ports.",
-            true));
+            true,
+            HostsPerSecond: sw.Elapsed.TotalSeconds > 0 ? Math.Round(totalHosts / sw.Elapsed.TotalSeconds, 1) : 0.0));
 
         return results;
     }

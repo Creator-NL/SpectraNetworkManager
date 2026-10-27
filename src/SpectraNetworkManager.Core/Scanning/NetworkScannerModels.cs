@@ -109,7 +109,11 @@ public sealed record ScanProgressReport(
     int FoundDevices,
     int FoundPorts,
     string CurrentStatus,
-    bool IsComplete)
+    bool IsComplete,
+    DiscoveredDevice? NewlyDiscoveredDevice = null,
+    string? CurrentProbingIp = null,
+    double HostsPerSecond = 0.0,
+    TimeSpan? EstimatedTimeRemaining = null)
 {
     public double ProgressPercentage => TotalTargets > 0 ? Math.Min(100.0, (ScannedTargets * 100.0) / TotalTargets) : 0.0;
 }

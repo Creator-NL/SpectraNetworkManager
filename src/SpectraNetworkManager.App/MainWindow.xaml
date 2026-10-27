@@ -653,6 +653,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -661,7 +662,7 @@
                        Text="Native Port Scanner &amp; LAN Device Discovery. Automatically fingerprints Smart TVs, Mobile/GSM devices, Routers, and Workstations using hardware MAC OUI, hostnames, and service banners. Bounded and rate-limited. Click 'Passive Discovery' for an instant snapshot without sending network probes, or select a port profile for an active LAN scan."/>
 
             <!-- Toolbar & Controls -->
-            <DockPanel Grid.Row="1" Margin="0,0,0,10">
+            <DockPanel Grid.Row="1" Margin="0,0,0,8">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
                     <TextBlock Text="Target:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
                     <TextBox x:Name="ScannerTargetBox" Width="170" VerticalAlignment="Center" Margin="0,0,14,0" ToolTip="Subnet CIDR (e.g. 192.168.1.0/24), single IP, or 'local'"/>
@@ -688,8 +689,96 @@
                 </StackPanel>
             </DockPanel>
 
+            <!-- Row 2: Cyber Telemetry HUD & Real-Time Discovery Feed -->
+            <Border Grid.Row="2" Margin="0,0,0,8" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="5" Padding="10,8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Telemetry Cards Deck -->
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.4*"/>
+                            <ColumnDefinition Width="1.2*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Card 1: Radar & Target Scope -->
+                        <Border Grid.Column="0" Margin="0,0,6,0" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            <DockPanel LastChildFill="True">
+                                <Border x:Name="HudRadarBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#2222E8FF" VerticalAlignment="Center">
+                                    <TextBlock x:Name="HudRadarBadgeText" Text="STANDBY" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="SCANNER RADAR" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                    <TextBlock x:Name="HudTargetText" Text="Target: Ready" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Card 2: Progress & Velocity -->
+                        <Border Grid.Column="1" Margin="0,0,6,0" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock Text="PROGRESS &amp; SPEED" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                        <TextBlock x:Name="HudEtaText" DockPanel.Dock="Right" Text="ETA: --" FontSize="10" Foreground="{StaticResource Amber}" FontWeight="SemiBold"/>
+                                    </DockPanel>
+                                    <TextBlock x:Name="HudHostsRatioText" Text="0 / 0 Hosts" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                                    <TextBlock x:Name="HudVelocityText" Text="0.0 h/s" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Cyan}" HorizontalAlignment="Right"/>
+                                    <TextBlock Text="VELOCITY" FontSize="9" Foreground="{StaticResource Muted}" HorizontalAlignment="Right"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Card 3: Discovered Devices -->
+                        <Border Grid.Column="2" Margin="0,0,6,0" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock x:Name="HudDevicesCountText" DockPanel.Dock="Right" Text="0" FontSize="16" FontWeight="Bold" Foreground="#00FF88" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="DISCOVERED" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="Active Devices" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Card 4: Open Ports Identified -->
+                        <Border Grid.Column="3" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock x:Name="HudPortsCountText" DockPanel.Dock="Right" Text="0" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Magenta}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="OPEN PORTS" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="Services Found" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Real-Time Activity Ticker (Mini Terminal) -->
+                    <Border Grid.Row="1" Background="#0C101C" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="LIVE DISCOVERY FEED ▶ " FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Consolas, monospace" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock x:Name="HudActivityTickerText" Grid.Column="1" Text="Scanner ready. Click 'Start Scan' to begin real-time host exploration." FontSize="10" Foreground="{StaticResource Text}" FontFamily="Consolas, monospace" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
             <!-- Splitter: Discovered Devices Grid (Left) vs Device & Port Inspector (Right) -->
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="3">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="3*"/>
                     <ColumnDefinition Width="8"/>
