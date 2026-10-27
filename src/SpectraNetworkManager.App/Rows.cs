@@ -419,3 +419,75 @@ public sealed class PacketRow
         Packet = packet;
     }
 }
+
+/// <summary>One row in the TV & Mobile Protection Hub.</summary>
+public sealed class TvMobileDeviceRow : INotifyPropertyChanged
+{
+    private DiscoveredDevice _device;
+    private SpectraNetworkManager.Core.Devices.DeviceProtectionInfo _protection;
+    private string _groupName = "Default";
+
+    public DiscoveredDevice Device => _device;
+    public string IpString => _device.IpString;
+    public string Hostname => !string.IsNullOrEmpty(_device.Hostname) ? _device.Hostname : _device.IpString;
+    public string MacAddress => _device.MacAddress;
+    public string Vendor => !string.IsNullOrEmpty(_device.Vendor) ? _device.Vendor : "Unknown Vendor";
+    public string DeviceTypeDisplay => _device.KindDisplay;
+    public string ProtectionBadge => _protection.BadgeText;
+    public string ProtectionColor => _protection.StatusColor;
+    public string ProtectionDesc => _protection.Description;
+    public string AssignedGroup { get => _groupName; set { _groupName = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AssignedGroup))); } }
+    public int TotalQueries => _protection.TotalQueries;
+    public int BlockedQueries => _protection.BlockedQueries;
+    public string LastQueryDisplay => _protection.LastQueryTimeUtc.HasValue ? _protection.LastQueryTimeUtc.Value.ToLocalTime().ToString("HH:mm:ss") : "(never)";
+
+    public TvMobileDeviceRow(DiscoveredDevice device, SpectraNetworkManager.Core.Devices.DeviceProtectionInfo protection, string groupName = "Default")
+    {
+        _device = device;
+        _protection = protection;
+        _groupName = groupName;
+    }
+
+    public void Update(SpectraNetworkManager.Core.Devices.DeviceProtectionInfo protection, string groupName)
+    {
+        _protection = protection;
+        _groupName = groupName;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+/// <summary>One row in the Browser Guard rules table.</summary>
+public sealed class BrowserGuardRuleRow : INotifyPropertyChanged
+{
+    public SpectraNetworkManager.Core.BrowserGuard.BrowserGuardRule Rule { get; }
+
+    public string Id => Rule.Id;
+    public string Title => Rule.Title;
+    public string Pattern => Rule.Pattern;
+    public string Description => Rule.Description;
+    public string ResourceType => Rule.ResourceType;
+    public string ActionDisplay => Rule.Action == SpectraNetworkManager.Core.BrowserGuard.GuardAction.Block ? "🚫 BLOCK" : "🛡️ ALLOW";
+    public bool IsBuiltIn => Rule.IsBuiltIn;
+
+    public bool IsEnabled
+    {
+        get => Rule.Enabled;
+        set
+        {
+            if (Rule.Enabled != value)
+            {
+                Rule.Enabled = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEnabled)));
+            }
+        }
+    }
+
+    public BrowserGuardRuleRow(SpectraNetworkManager.Core.BrowserGuard.BrowserGuardRule rule)
+    {
+        Rule = rule;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}

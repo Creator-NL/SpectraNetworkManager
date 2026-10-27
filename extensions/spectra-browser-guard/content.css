@@ -1,0 +1,83 @@
+/* Spectra Browser Guard In-Page Dark Cybernetic Overlay */
+.spectra-media-blocked-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(11, 14, 20, 0.95);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 99999;
+  border-radius: 8px;
+}
+
+.spectra-full-blocked-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #0B0E14;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2147483647;
+}
+
+.spectra-card {
+  background: #151B26;
+  border: 1px solid #00E5FF;
+  box-shadow: 0 4px 24px rgba(0, 229, 255, 0.2);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  max-width: 420px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #DCE3F0;
+}
+
+.spectra-card-large {
+  max-width: 500px;
+  padding: 32px;
+}
+
+.spectra-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #00E5FF;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.spectra-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #FF2BD6;
+  margin-bottom: 8px;
+}
+
+.spectra-desc {
+  font-size: 13px;
+  color: #7E8BA3;
+  line-height: 1.5;
+}
+
+.spectra-btn {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: #00E5FF;
+  color: #0B0E14;
+  font-weight: 700;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  margin: 0 4px;
+  transition: opacity 0.2s;
+}
+
+.spectra-btn:hover {
+  opacity: 0.9;
+}
+
+.spectra-btn-sec {
+  background: #222C3D;
+  color: #DCE3F0;
+}

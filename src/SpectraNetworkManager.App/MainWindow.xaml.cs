@@ -15,8 +15,12 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SpectraNetworkManager.Core;
+using SpectraNetworkManager.Core.BrowserGuard;
+using SpectraNetworkManager.Core.Devices;
 using SpectraNetworkManager.Core.Ipc;
 using SpectraNetworkManager.Platform.Windows;
+using SpectraNetworkManager.Platform.Windows.BrowserGuard;
+using SpectraNetworkManager.Platform.Windows.Mobile;
 using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Ui;
@@ -97,9 +101,14 @@ public partial class MainWindow : Window
     public ObservableCollection<DiscoveredPort> SelectedDevicePorts { get; } = new();
     public ObservableCollection<PacketRow> CapturedPackets { get; } = new();
     public ICollectionView CapturedPacketsView { get; }
+    public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
+    public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
+    private readonly BrowserGuardManager _browserGuardManager;
+    private MobileCompanionServer? _mobileServer;
 
     public MainWindow()
     {
+        _browserGuardManager = new BrowserGuardManager();
         _scanner = new NetworkScanner(_neighborScanner);
         _localInventory = new LocalSocketInventory(new IpHelperConnectionSource(), _processResolver);
         _dnsSwitch = new SystemDnsSwitchManager(null, null, () => _sink.LocalEndPoint);
@@ -112,7 +121,10 @@ public partial class MainWindow : Window
         CapturedPacketsView = CollectionViewSource.GetDefaultView(CapturedPackets);
         CapturedPacketsView.Filter = PacketRowFilter;
         InitializeComponent();
+        TvMobileGrid.ItemsSource = TvMobileDevices;
+        BrowserGuardGrid.ItemsSource = BrowserGuardRules;
         InitPacketCaptureInterfaces();
+        InitTvMobileAndBrowserGuardUi();
         DataContext = this;
         DnsAdaptersList.ItemsSource = DnsAdapters;
         _dnsSwitch.StateChanged += _ => Dispatcher.BeginInvoke(new Action(UpdateDnsSwitchUi));
@@ -168,6 +180,7 @@ public partial class MainWindow : Window
             _dnsSwitch.Dispose();
             _hostsMonitor.Dispose();
             _packetCaptureManager.Dispose();
+            _mobileServer?.Dispose();
         };
 
         _timer.Tick += async (_, _) => await TickAsync();
@@ -3833,11 +3846,15 @@ public partial class MainWindow : Window
         TrafficPanel.Visibility = TrafficTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ScannerPanel.Visibility = ScannerTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PacketsPanel.Visibility = PacketsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        TvMobilePanel.Visibility = TvMobileTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        BrowserGuardPanel.Visibility = BrowserGuardTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BlocksPanel.Visibility = BlocksTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
+        if (TvMobileTab.IsChecked == true) RefreshTvMobileUi();
+        if (BrowserGuardTab.IsChecked == true) RefreshBrowserGuardUi();
         if (ScannerTab.IsChecked == true) InitScannerTargetSubnet();
         if (StartupTab.IsChecked == true) RefreshStartupItems();
         if (StrictTab.IsChecked == true) UpdateStrictUi();
@@ -5613,6 +5630,495 @@ public partial class MainWindow : Window
                         Error($"Failed to block IP {targetIp}", ex);
                     }
                 }
+            }
+        }
+    }
+
+    // ---- TV & Mobile Protection Hub & Browser Guard --------------------------
+
+    private void InitTvMobileAndBrowserGuardUi()
+    {
+        GuardResourceTypeCombo.ItemsSource = new[] { "All Types", "Media / Video", "Sub-frame (iFrame)", "Script", "XHR / Fetch" };
+        GuardResourceTypeCombo.SelectedIndex = 0;
+
+        TvGroupAssignCombo.ItemsSource = new[] { TvMobileManager.SmartTvsGroupName, TvMobileManager.MobileDevicesGroupName, "Default" };
+        TvGroupAssignCombo.SelectedIndex = 0;
+
+        _mobileServer = new MobileCompanionServer(8765)
+        {
+            GetMetrics = () =>
+            {
+                var stats = _sink.Activity.Snapshot();
+                int activeClients = TvMobileDevices.Count(r => r.Device != null);
+                return (_sink.IsRunning, stats.Total, stats.Blocked, stats.BlockedPercent, activeClients);
+            },
+            GetRecentQueries = () =>
+            {
+                return Dispatcher.Invoke(() => DnsRows.Take(25).Select(r => new { domain = r.Domain, isBlocked = r.IsBlocked }).ToList());
+            },
+            GetDevices = () =>
+            {
+                return Dispatcher.Invoke(() => TvMobileDevices.Select(r => new
+                {
+                    name = r.Hostname,
+                    ip = r.IpString,
+                    type = r.DeviceTypeDisplay,
+                    status = r.ProtectionBadge
+                }).ToList());
+            },
+            PauseDnsAction = (mins) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    _sink.Settings.ClientGroups.ForEach(g => g.BlockingEnabled = false);
+                    _sink.SaveSettingsOnly(_sink.Settings);
+                    StatusText.Text = $"DNS Sinkhole paused for {mins} minutes from mobile companion.";
+                });
+            },
+            ResumeDnsAction = () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    _sink.Settings.ClientGroups.ForEach(g => g.BlockingEnabled = true);
+                    _sink.SaveSettingsOnly(_sink.Settings);
+                    StatusText.Text = "DNS Sinkhole protection resumed from mobile companion.";
+                });
+            }
+        };
+
+        RefreshBrowserGuardUi();
+    }
+
+    private void RefreshTvMobileUi()
+    {
+        TvMobileManager.EnsureDefaultGroups(_sink.Settings);
+
+        // Detect Gateway IP
+        IPAddress? gatewayIp = null;
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus == OperationalStatus.Up)
+                {
+                    foreach (var g in ni.GetIPProperties().GatewayAddresses)
+                    {
+                        if (g.Address.AddressFamily == AddressFamily.InterNetwork)
+                        {
+                            gatewayIp = g.Address;
+                            break;
+                        }
+                    }
+                    if (gatewayIp != null) break;
+                }
+            }
+        }
+        catch { }
+
+        // Populate LAN devices from neighbor scanner if empty
+        var neighbors = _neighborScanner.GetNeighborTable();
+        var knownDevices = new Dictionary<string, DiscoveredDevice>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dev in DiscoveredDevices)
+        {
+            if (dev.Ip != null && !IPAddress.IsLoopback(dev.Ip) && !dev.Ip.Equals(IPAddress.None))
+                knownDevices[dev.Ip.ToString()] = dev;
+        }
+
+        foreach (var n in neighbors)
+        {
+            if (n.Ip != null && !knownDevices.ContainsKey(n.Ip.ToString()))
+            {
+                var classification = DeviceClassifier.Classify(n.Mac, "", null, n.IsGateway);
+                var dev = new DiscoveredDevice
+                {
+                    Ip = n.Ip,
+                    MacAddress = n.Mac,
+                    Vendor = classification.Vendor,
+                    Kind = classification.Kind,
+                    DeviceDescription = classification.Description,
+                    IsGateway = n.IsGateway,
+                    FirstSeen = DateTimeOffset.UtcNow,
+                    LastSeen = DateTimeOffset.UtcNow
+                };
+                knownDevices[n.Ip.ToString()] = dev;
+            }
+        }
+
+        // Check if queries from gateway IP are seen
+        bool gatewayForwardingDetected = false;
+        if (gatewayIp != null)
+        {
+            int gwQueryCount = DnsRows.Count(r => r.Client.Contains(gatewayIp.ToString()));
+            if (gwQueryCount > 5)
+            {
+                gatewayForwardingDetected = true;
+                TvGatewayNoticeBanner.Visibility = Visibility.Visible;
+                TvGatewayNoticeText.Text = $" (Gateway: {gatewayIp})";
+            }
+            else
+            {
+                TvGatewayNoticeBanner.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        TvMobileDevices.Clear();
+        int directCount = 0;
+        int gwCount = 0;
+        int bypassCount = 0;
+
+        foreach (var kvp in knownDevices)
+        {
+            var dev = kvp.Value;
+            string ipStr = dev.IpString;
+
+            // Query stats for this device IP
+            var matchingQueries = DnsRows.Where(r => r.Client.Contains(ipStr)).ToList();
+            int totalQ = matchingQueries.Count;
+            int blockedQ = matchingQueries.Count(q => q.IsBlocked);
+            DateTime? lastSeen = matchingQueries.Count > 0 ? matchingQueries.Max(q => q.Entry.Time).UtcDateTime : null;
+            bool dohAttempt = matchingQueries.Any(q => q.Domain.Contains("cloudflare-dns") || q.Domain.Contains("dns.google") || q.Domain.Contains("quad9"));
+
+            var info = DeviceProtectionEvaluator.Evaluate(dev.Ip, gatewayForwardingDetected ? gatewayIp : null, lastSeen, totalQ, blockedQ, dohAttempt);
+
+            switch (info.Level)
+            {
+                case ProtectionLevel.DirectProtected: directCount++; break;
+                case ProtectionLevel.GatewayRouted: gwCount++; break;
+                default: bypassCount++; break;
+            }
+
+            // Find assigned group in DNS settings
+            string assignedGroup = "Default";
+            var grp = _sink.Settings.ClientGroups.FirstOrDefault(g => g.ClientRanges.Any(r => r.Trim().Equals(ipStr, StringComparison.OrdinalIgnoreCase)));
+            if (grp != null) assignedGroup = grp.Name;
+            else if (dev.Kind == DeviceKind.SmartTv) assignedGroup = TvMobileManager.SmartTvsGroupName;
+            else if (dev.Kind == DeviceKind.MobileOrTablet) assignedGroup = TvMobileManager.MobileDevicesGroupName;
+
+            TvMobileDevices.Add(new TvMobileDeviceRow(dev, info, assignedGroup));
+        }
+
+        TvTotalDevicesCount.Text = TvMobileDevices.Count.ToString();
+        TvDirectProtectedCount.Text = directCount.ToString();
+        TvGatewayRoutedCount.Text = gwCount.ToString();
+        TvBypassingCount.Text = bypassCount.ToString();
+    }
+
+    private void RefreshBrowserGuardUi()
+    {
+        bool isRegistered = BrowserExtensionHost.IsHostRegistered();
+        if (isRegistered)
+        {
+            BrowserHostStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x00, 0xE5, 0xFF));
+            BrowserHostStatusText.Text = "🟢 Host Registered in Chrome, Edge & Firefox";
+            BrowserHostStatusText.Foreground = (Brush)FindResource("Cyan");
+        }
+        else
+        {
+            BrowserHostStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xB0, 0x00));
+            BrowserHostStatusText.Text = "⚪ Not Registered (Click button on right to register)";
+            BrowserHostStatusText.Foreground = (Brush)FindResource("Amber");
+        }
+
+        BrowserGuardRules.Clear();
+        foreach (var rule in _browserGuardManager.Config.CustomRules)
+        {
+            BrowserGuardRules.Add(new BrowserGuardRuleRow(rule));
+        }
+
+        GuardBlockShortsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeShorts;
+        GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams;
+        GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds;
+        GuardPlaceholderCheck.IsChecked = _browserGuardManager.Config.ShowInPagePlaceholder;
+        GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
+    }
+
+    private void OnShieldAllSmartTvs(object sender, RoutedEventArgs e)
+    {
+        TvMobileManager.EnsureDefaultGroups(_sink.Settings);
+        int added = 0;
+        foreach (var row in TvMobileDevices.Where(d => d.Device.Kind == DeviceKind.SmartTv))
+        {
+            TvMobileManager.AssignDeviceToGroup(_sink.Settings, row.IpString, TvMobileManager.SmartTvsGroupName, row.Vendor, applyAcrPreset: true);
+            added++;
+        }
+
+        _sink.SaveSettingsOnly(_sink.Settings);
+        RefreshTvMobileUi();
+        Info($"Smart TV Shield Active!\n\nAll {added} Smart TVs have been assigned to the '{TvMobileManager.SmartTvsGroupName}' group with Automatic Content Recognition (ACR) and banner ads blocked.\n\nEnsure each TV's DNS is pointed to this PC ({GetLocalActiveIp()}).");
+    }
+
+    private void OnShieldAllMobileDevices(object sender, RoutedEventArgs e)
+    {
+        TvMobileManager.EnsureDefaultGroups(_sink.Settings);
+        int added = 0;
+        foreach (var row in TvMobileDevices.Where(d => d.Device.Kind == DeviceKind.MobileOrTablet))
+        {
+            TvMobileManager.AssignDeviceToGroup(_sink.Settings, row.IpString, TvMobileManager.MobileDevicesGroupName, row.Vendor, applyAcrPreset: true);
+            added++;
+        }
+
+        _sink.SaveSettingsOnly(_sink.Settings);
+        RefreshTvMobileUi();
+        Info($"Mobile Defense Shield Active!\n\nAll {added} mobile devices have been assigned to the '{TvMobileManager.MobileDevicesGroupName}' group with mobile ad networks and tracking SDKs blocked.\n\nEnsure Wi-Fi DNS is pointed to this PC ({GetLocalActiveIp()}).");
+    }
+
+    private void OnLaunchMobileCompanion(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_mobileServer != null && !_mobileServer.IsRunning)
+            {
+                _mobileServer.Start();
+            }
+
+            var localIp = GetLocalActiveIp();
+            string ipStr = localIp?.ToString() ?? "127.0.0.1";
+
+            var pairingWin = new MobilePairingWindow(_mobileServer!, ipStr)
+            {
+                Owner = this
+            };
+            pairingWin.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to launch mobile companion server", ex);
+        }
+    }
+
+    private void OnShowDnsSetupGuide(object sender, RoutedEventArgs e)
+    {
+        var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        string guide = TvMobileManager.GetDnsSetupGuide(null, localIp);
+        MessageBox.Show(this, guide, "DNS Setup Instructions for Smart TVs & Phones", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void OnRefreshTvMobileDevices(object sender, RoutedEventArgs e)
+    {
+        RefreshTvMobileUi();
+        StatusText.Text = $"Refreshed {TvMobileDevices.Count} LAN devices.";
+    }
+
+    private void OnTvMobileSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            TvDeviceInspector.Visibility = Visibility.Visible;
+            TvInspectorNameText.Text = $"{row.Hostname} ({row.DeviceTypeDisplay})";
+            TvInspectorIpText.Text = $"{row.IpString} • {row.Vendor} • {row.ProtectionBadge}";
+            TvInspectorGuidanceText.Text = row.ProtectionDesc;
+            TvGroupAssignCombo.SelectedItem = row.AssignedGroup;
+        }
+    }
+
+    private void OnCloseTvInspector(object sender, RoutedEventArgs e)
+    {
+        TvDeviceInspector.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnAssignGroupClick(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row && TvGroupAssignCombo.SelectedItem is string selectedGroup)
+        {
+            TvMobileManager.AssignDeviceToGroup(_sink.Settings, row.IpString, selectedGroup, row.Vendor);
+            _sink.SaveSettingsOnly(_sink.Settings);
+            RefreshTvMobileUi();
+            StatusText.Text = $"Assigned {row.Hostname} ({row.IpString}) to group '{selectedGroup}'.";
+        }
+    }
+
+    private void OnContextShieldTv(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            TvMobileManager.AssignDeviceToGroup(_sink.Settings, row.IpString, TvMobileManager.SmartTvsGroupName, row.Vendor, applyAcrPreset: true);
+            _sink.SaveSettingsOnly(_sink.Settings);
+            RefreshTvMobileUi();
+            Info($"Device '{row.Hostname}' assigned to Smart TVs group with vendor ACR blocklist applied.");
+        }
+    }
+
+    private void OnContextShieldMobile(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            TvMobileManager.AssignDeviceToGroup(_sink.Settings, row.IpString, TvMobileManager.MobileDevicesGroupName, row.Vendor, applyAcrPreset: true);
+            _sink.SaveSettingsOnly(_sink.Settings);
+            RefreshTvMobileUi();
+            Info($"Device '{row.Hostname}' assigned to Mobile group with tracking SDK blocklist applied.");
+        }
+    }
+
+    private void OnContextPauseDevice(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            TvMobileManager.SetGroupBlocking(_sink.Settings, row.AssignedGroup, false);
+            _sink.SaveSettingsOnly(_sink.Settings);
+            RefreshTvMobileUi();
+            Info($"Protection paused for group '{row.AssignedGroup}'.");
+        }
+    }
+
+    private void OnContextResumeDevice(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            TvMobileManager.SetGroupBlocking(_sink.Settings, row.AssignedGroup, true);
+            _sink.SaveSettingsOnly(_sink.Settings);
+            RefreshTvMobileUi();
+            Info($"Protection resumed for group '{row.AssignedGroup}'.");
+        }
+    }
+
+    private void OnContextShowGuide(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+            string guide = TvMobileManager.GetDnsSetupGuide(row.Vendor, localIp);
+            MessageBox.Show(this, guide, $"DNS Setup Guide: {row.Hostname}", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    private void OnContextScanPorts(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            ScannerTab.IsChecked = true;
+            OnViewChanged(this, new RoutedEventArgs());
+            ScannerTargetBox.Text = row.IpString;
+            ScannerProfileCombo.SelectedIndex = 1;
+            OnStartScan(sender, e);
+        }
+    }
+
+    private void OnContextCopyIp(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            System.Windows.Clipboard.SetText(row.IpString);
+            StatusText.Text = $"Copied IP: {row.IpString}";
+        }
+    }
+
+    // ---- Browser Guard Event Handlers ----------------------------------------
+
+    private void OnRegisterBrowserHost(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string hostExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SpectraNetworkManager.BrowserHost.exe");
+            if (!File.Exists(hostExe))
+            {
+                string altPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "SpectraNetworkManager.BrowserHost", "bin", "Debug", "net8.0-windows", "SpectraNetworkManager.BrowserHost.exe");
+                if (File.Exists(altPath)) hostExe = Path.GetFullPath(altPath);
+                else hostExe = Environment.ProcessPath ?? "";
+            }
+
+            if (BrowserExtensionHost.RegisterHost(hostExe, out string err))
+            {
+                RefreshBrowserGuardUi();
+                Info("Spectra Browser Guard Host registered successfully for Chrome, Edge, and Mozilla Firefox!\n\nTo activate the extension in your browser:\n1. Click '📁 Open Extension Folder'\n2. In Chrome / Edge: Navigate to chrome://extensions, enable 'Developer Mode', and click 'Load Unpacked'.\n3. In Firefox: Navigate to about:debugging#/runtime/this-firefox, and click 'Load Temporary Add-on' selecting manifest.json.");
+            }
+            else
+            {
+                Error("Failed to register Native Messaging Host", new InvalidOperationException(err));
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Registry registration error", ex);
+        }
+    }
+
+    private void OnOpenExtensionFolder(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string extDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "extensions", "spectra-browser-guard");
+            if (!Directory.Exists(extDir))
+            {
+                string srcExtDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "extensions", "spectra-browser-guard");
+                if (Directory.Exists(srcExtDir)) extDir = Path.GetFullPath(srcExtDir);
+                else Directory.CreateDirectory(extDir);
+            }
+
+            Process.Start(new ProcessStartInfo("explorer.exe", extDir) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to open extension directory", ex);
+        }
+    }
+
+    private void OnReloadBrowserRules(object sender, RoutedEventArgs e)
+    {
+        _browserGuardManager.Load();
+        RefreshBrowserGuardUi();
+        StatusText.Text = $"Reloaded {BrowserGuardRules.Count} Browser Guard rules.";
+    }
+
+    private void OnGuardToggleChanged(object sender, RoutedEventArgs e)
+    {
+        if (_browserGuardManager == null) return;
+        _browserGuardManager.Config.BlockYouTubeShorts = GuardBlockShortsCheck.IsChecked == true;
+        _browserGuardManager.Config.BlockYouTubeVideoStreams = GuardBlockStreamsCheck.IsChecked == true;
+        _browserGuardManager.Config.BlockSocialVideoFeeds = GuardBlockTikTokCheck.IsChecked == true || GuardBlockReelsCheck.IsChecked == true;
+        _browserGuardManager.Config.ShowInPagePlaceholder = GuardPlaceholderCheck.IsChecked == true;
+
+        _browserGuardManager.ToggleRule("yt-shorts", GuardBlockShortsCheck.IsChecked == true);
+        _browserGuardManager.ToggleRule("yt-video-stream", GuardBlockStreamsCheck.IsChecked == true);
+        _browserGuardManager.ToggleRule("yt-ads", GuardBlockAdsCheck.IsChecked == true);
+        _browserGuardManager.ToggleRule("tiktok-feed", GuardBlockTikTokCheck.IsChecked == true);
+        _browserGuardManager.ToggleRule("ig-reels", GuardBlockReelsCheck.IsChecked == true);
+
+        _browserGuardManager.Save();
+        RefreshBrowserGuardUi();
+    }
+
+    private void OnAddBrowserGuardRule(object sender, RoutedEventArgs e)
+    {
+        string pattern = GuardPatternBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            Info("Please enter a URL match pattern (e.g. *://*.youtube.com/shorts/* or *://*.site.com/*).");
+            return;
+        }
+
+        string title = GuardTitleBox.Text.Trim();
+        string resType = GuardResourceTypeCombo.SelectedItem switch
+        {
+            "Media / Video" => "media",
+            "Sub-frame (iFrame)" => "sub_frame",
+            "Script" => "script",
+            "XHR / Fetch" => "xmlhttprequest",
+            _ => "all"
+        };
+
+        _browserGuardManager.AddRule(title, pattern, $"Custom rule for {pattern}", GuardAction.Block, resType);
+        GuardPatternBox.Text = "";
+        GuardTitleBox.Text = "";
+        RefreshBrowserGuardUi();
+        StatusText.Text = $"Added browser block rule: {pattern}";
+    }
+
+    private void OnRemoveBrowserRuleClick(object sender, RoutedEventArgs e)
+    {
+        if (BrowserGuardGrid.SelectedItem is BrowserGuardRuleRow row)
+        {
+            if (row.IsBuiltIn)
+            {
+                Info("Built-in protection rules cannot be removed, but you can uncheck their 'ACTIVE' box to disable them.");
+                return;
+            }
+
+            if (Confirm($"Remove rule '{row.Title}' ({row.Pattern})?", "Remove Rule"))
+            {
+                _browserGuardManager.RemoveRule(row.Id);
+                RefreshBrowserGuardUi();
+                StatusText.Text = $"Removed rule: {row.Title}";
             }
         }
     }

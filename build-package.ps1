@@ -44,6 +44,13 @@ dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish App failed!"; exit $LASTEXITCODE }
 dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/engine
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish Engine failed!"; exit $LASTEXITCODE }
+dotnet publish src/SpectraNetworkManager.BrowserHost/SpectraNetworkManager.BrowserHost.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/app
+if ($LASTEXITCODE -ne 0) { Write-Error "Publish BrowserHost failed!"; exit $LASTEXITCODE }
+
+# Copy Browser Guard extension to publish folder
+if (Test-Path "extensions/spectra-browser-guard") {
+    Copy-Item -Recurse -Force "extensions/spectra-browser-guard" "publish/app/extensions/spectra-browser-guard"
+}
 Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green
 
 # 3. Compile Inno Setup installer

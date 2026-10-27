@@ -64,6 +64,12 @@
             <RadioButton x:Name="PacketsTab" Content="Packets" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
                          ToolTip="Live native packet inspector, TLS SNI &amp; protocol dissector, hex stream viewer, and Wireshark PCAPNG export."/>
+            <RadioButton x:Name="TvMobileTab" Content="TV &amp; Mobile" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                         ToolTip="Smart TV ACR viewing telemetry blocker, GSM mobile defense hub, and remote companion pairing."/>
+            <RadioButton x:Name="BrowserGuardTab" Content="Browser Guard" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                         ToolTip="Native URL &amp; video blocker, YouTube Shorts blocker, and Manifest V3 browser extension controls."/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
@@ -1399,6 +1405,206 @@
                     </ScrollViewer>
                 </Border>
             </Grid>
+        </Grid>
+
+        <!-- TV & Mobile Protection Hub View -->
+        <Grid x:Name="TvMobilePanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Metrics & Action Toolbar -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="📺 Shield All Smart TVs" Click="OnShieldAllSmartTvs" Margin="0,0,8,0" Padding="10,4"
+                            Foreground="{StaticResource Cyan}" ToolTip="Apply vendor ACR viewing telemetry blocklists to all Smart TVs"/>
+                    <Button Content="📱 Shield All Mobile Devices" Click="OnShieldAllMobileDevices" Margin="0,0,8,0" Padding="10,4"
+                            Foreground="{StaticResource Magenta}" ToolTip="Apply mobile ad and tracking SDK blocklists to all phones"/>
+                    <Button Content="📱 Launch Mobile Companion &amp; QR" Click="OnLaunchMobileCompanion" Margin="0,0,8,0" Padding="12,4"
+                            Foreground="{StaticResource Amber}" ToolTip="Start the mobile HTTP companion server and show one-time QR code"/>
+                    <Button Content="⚙️ DNS Setup Guide" Click="OnShowDnsSetupGuide" Margin="0,0,8,0" Padding="10,4"
+                            ToolTip="Step-by-step DNS onboarding instructions for Samsung, LG, Roku, Apple TV, and Android"/>
+                    <Button Content="🔄 Refresh Devices" Click="OnRefreshTvMobileDevices" Padding="10,4"/>
+                </StackPanel>
+
+                <WrapPanel VerticalAlignment="Center">
+                    <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Total Devices: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                            <TextBlock x:Name="TvTotalDevicesCount" Text="0" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Text}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Direct Protected: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                            <TextBlock x:Name="TvDirectProtectedCount" Text="0" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Gateway Routed: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                            <TextBlock x:Name="TvGatewayRoutedCount" Text="0" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Bypassing / Inactive: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                            <TextBlock x:Name="TvBypassingCount" Text="0" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Magenta}"/>
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+            </DockPanel>
+
+            <!-- Router Forwarding Notice Banner -->
+            <Border x:Name="TvGatewayNoticeBanner" Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
+                    CornerRadius="4" Padding="12,8" Margin="0,0,0,10" Visibility="Collapsed">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" Content="How to Fix..." Click="OnShowDnsSetupGuide" Padding="8,3" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🟡 ROUTER DNS FORWARDING DETECTED" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
+                            <TextBlock x:Name="TvGatewayNoticeText" Text=" (Gateway: 192.168.1.1)" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        </StackPanel>
+                        <TextBlock Text="Your router forwards DNS queries on behalf of LAN devices. Global blocklists work, but per-device Smart TV &amp; GSM rules require setting Spectra's LAN IP as the DNS server in your device Wi-Fi settings."
+                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- TV & Mobile Devices DataGrid -->
+            <DataGrid x:Name="TvMobileGrid" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnTvMobileSelectionChanged">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="📺 Apply Smart TV ACR Shield" Click="OnContextShieldTv" Foreground="{StaticResource Cyan}"/>
+                        <MenuItem Header="📱 Apply Mobile Ad &amp; Tracker Shield" Click="OnContextShieldMobile" Foreground="{StaticResource Magenta}"/>
+                        <Separator/>
+                        <MenuItem Header="⏸ Pause Protection for this Device (15m)" Click="OnContextPauseDevice"/>
+                        <MenuItem Header="▶ Resume Protection" Click="OnContextResumeDevice"/>
+                        <Separator/>
+                        <MenuItem Header="⚙️ Show DNS Setup Steps for this Device" Click="OnContextShowGuide"/>
+                        <MenuItem Header="🔎 Scan Device Ports..." Click="OnContextScanPorts"/>
+                        <MenuItem Header="📋 Copy IP Address" Click="OnContextCopyIp"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="STATUS" Binding="{Binding ProtectionBadge}" Width="150"/>
+                    <DataGridTextColumn Header="DEVICE TYPE" Binding="{Binding DeviceTypeDisplay}" Width="130"/>
+                    <DataGridTextColumn Header="HOSTNAME / NAME" Binding="{Binding Hostname}" Width="200" Foreground="{StaticResource Cyan}"/>
+                    <DataGridTextColumn Header="IP ADDRESS" Binding="{Binding IpString}" Width="130"/>
+                    <DataGridTextColumn Header="MAC / VENDOR" Binding="{Binding Vendor}" Width="190"/>
+                    <DataGridTextColumn Header="ASSIGNED GROUP" Binding="{Binding AssignedGroup}" Width="140"/>
+                    <DataGridTextColumn Header="TOTAL QUERIES" Binding="{Binding TotalQueries}" Width="110"/>
+                    <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastQueryDisplay}" Width="100"/>
+                    <DataGridTextColumn Header="DETAILS &amp; GUIDANCE" Binding="{Binding ProtectionDesc}" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Device Quick Inspector -->
+            <Border x:Name="TvDeviceInspector" Grid.Row="3" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
+                    BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,8" Visibility="Collapsed">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <ComboBox x:Name="TvGroupAssignCombo" Width="140" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
+                        <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="TvInspectorNameText" Text="Selected Device" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}" Margin="0,0,10,0"/>
+                            <TextBlock x:Name="TvInspectorIpText" Text="192.168.1.X" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock x:Name="TvInspectorGuidanceText" Text="Guidance information" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- Browser Guard View -->
+        <Grid x:Name="BrowserGuardPanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Top Status & Registration Banner -->
+            <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="14,10" Margin="0,0,0,10">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BrowserRegisterHostButton" Content="🛡️ Register Native Host for Browsers" Click="OnRegisterBrowserHost" Margin="0,0,8,0" Padding="12,5"
+                                Foreground="{StaticResource Cyan}" ToolTip="Registers Native Messaging Host in Windows Registry for Chrome, Edge &amp; Firefox"/>
+                        <Button Content="📁 Open Extension Folder" Click="OnOpenExtensionFolder" Margin="0,0,8,0" Padding="12,5"
+                                ToolTip="Opens the extension directory so you can load unpacked in chrome://extensions or about:debugging"/>
+                        <Button Content="🔄 Reload Dynamic Rules" Click="OnReloadBrowserRules" Padding="10,5"/>
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="SPECTRA BROWSER GUARD (MANIFEST V3)" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}"/>
+                            <Border x:Name="BrowserHostStatusBadge" CornerRadius="3" Padding="6,2" Margin="10,0,0,0" Background="#2200E5FF">
+                                <TextBlock x:Name="BrowserHostStatusText" Text="🟢 Host Registered in Chrome, Edge &amp; Firefox" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="Enforces browser-level declarative URL patterns, YouTube Shorts suppression, and video stream blocking with zero network latency."
+                                   FontSize="11" Foreground="{StaticResource Muted}" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Quick Shields Toggles -->
+            <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,10">
+                <WrapPanel VerticalAlignment="Center">
+                    <CheckBox x:Name="GuardBlockShortsCheck" Content="🚫 Block YouTube Shorts" IsChecked="True"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Blocks all YouTube Shorts pages and short-form video feeds"/>
+                    <CheckBox x:Name="GuardBlockStreamsCheck" Content="🚫 Block Video Streams (googlevideo)" IsChecked="False"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Blocks raw video playback delivery segments (stops videos from loading)"/>
+                    <CheckBox x:Name="GuardBlockAdsCheck" Content="🚫 Block In-Player Ad Beacons" IsChecked="True"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Blocks in-player YouTube ad statistics and telemetry"/>
+                    <CheckBox x:Name="GuardBlockTikTokCheck" Content="🚫 Block TikTok Video Feeds" IsChecked="False"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Blocks TikTok short-form web video playback"/>
+                    <CheckBox x:Name="GuardBlockReelsCheck" Content="🚫 Block Instagram Reels" IsChecked="False"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Blocks Instagram Reels video page navigation"/>
+                    <CheckBox x:Name="GuardPlaceholderCheck" Content="🛡️ Show In-Page Dark Overlay on Blocked Videos" IsChecked="True"
+                              VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Replaces blocked video players with sleek cybernetic overlay and 'Allow Once' button"/>
+                </WrapPanel>
+            </Border>
+
+            <!-- Custom Rule Adder Form -->
+            <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" Content="+ Add Block Rule" Click="OnAddBrowserGuardRule" Padding="14,4" Foreground="{StaticResource Magenta}" Margin="8,0,0,0"/>
+                    <ComboBox x:Name="GuardResourceTypeCombo" DockPanel.Dock="Right" Width="130" Margin="8,0,0,0" VerticalContentAlignment="Center" ToolTip="Resource type to intercept"/>
+                    <TextBox x:Name="GuardTitleBox" DockPanel.Dock="Right" Width="180" Margin="8,0,0,0" VerticalContentAlignment="Center" ToolTip="Friendly name / title"/>
+                    <TextBox x:Name="GuardPatternBox" VerticalContentAlignment="Center" ToolTip="URL match pattern (e.g. *://*.youtube.com/shorts/* or *://*.example.com/*)"/>
+                </DockPanel>
+            </Border>
+
+            <!-- Browser Guard Rules DataGrid -->
+            <DataGrid x:Name="BrowserGuardGrid" Grid.Row="3" SelectionMode="Single">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="ACTIVE" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                    <DataGridTextColumn Header="RULE TITLE / DESCRIPTION" Binding="{Binding Title}" Width="240" Foreground="{StaticResource Cyan}"/>
+                    <DataGridTextColumn Header="URL PATTERN" Binding="{Binding Pattern}" Width="320" FontFamily="Consolas"/>
+                    <DataGridTextColumn Header="RESOURCE TYPE" Binding="{Binding ResourceType}" Width="130"/>
+                    <DataGridTextColumn Header="ACTION" Binding="{Binding ActionDisplay}" Width="100"/>
+                    <DataGridTemplateColumn Header="ACTIONS" Width="*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="✕ Remove" Click="OnRemoveBrowserRuleClick" Padding="6,1" Foreground="{StaticResource Amber}"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
         </Grid>
 
         <!-- Firewall blocks view -->

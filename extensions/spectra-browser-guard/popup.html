@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    :root {
+      --bg: #0B0E14;
+      --card: #151B26;
+      --cyan: #00E5FF;
+      --magenta: #FF2BD6;
+      --text: #DCE3F0;
+      --muted: #7E8BA3;
+      --line: #222C3D;
+    }
+    body {
+      width: 320px;
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: 0.5px;
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .badge-on { background: rgba(0, 229, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan); }
+    .badge-off { background: rgba(255, 43, 214, 0.15); color: var(--magenta); border: 1px solid var(--magenta); }
+    .rule-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+    }
+    .rule-title { font-weight: 600; }
+    .rule-desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #222C3D; transition: .2s; border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background-color: white; transition: .2s; border-radius: 50%;
+    }
+    input:checked + .slider { background-color: var(--cyan); }
+    input:checked + .slider:before { transform: translateX(16px); }
+    .footer {
+      margin-top: 14px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">SPECTRA GUARD</div>
+      <div style="font-size: 10px; color: var(--muted);">Native URL & Video Shield</div>
+    </div>
+    <div id="statusBadge" class="badge badge-on">CONNECTED</div>
+  </div>
+
+  <div class="rule-item">
+    <div>
+      <div class="rule-title">Block YouTube Shorts</div>
+      <div class="rule-desc">Hides short-form video feeds</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="toggleShorts" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="rule-item">
+    <div>
+      <div class="rule-title">Block Video Streams</div>
+      <div class="rule-desc">googlevideo.com raw delivery</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="toggleStreams">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="rule-item">
+    <div>
+      <div class="rule-title">In-Player Ad Beacons</div>
+      <div class="rule-desc">YouTube stats/ads telemetry</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="toggleAds" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="footer">
+    Managed by SpectraNetworkManager Desktop
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

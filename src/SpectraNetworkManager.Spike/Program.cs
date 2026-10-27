@@ -16,6 +16,7 @@ if (args.Contains("--test-m1", StringComparer.OrdinalIgnoreCase)) return RunMile
 if (args.Contains("--test-m2", StringComparer.OrdinalIgnoreCase)) return RunMilestone2SelfTest();
 if (args.Contains("--test-m3", StringComparer.OrdinalIgnoreCase)) return RunMilestone3SelfTest();
 if (args.Contains("--test-m4", StringComparer.OrdinalIgnoreCase)) return await RunMilestone4SelfTestAsync();
+if (args.Contains("--test-m5", StringComparer.OrdinalIgnoreCase)) return RunMilestone5SelfTest();
 
 if (!OperatingSystem.IsWindows())
 {
@@ -574,6 +575,92 @@ async Task<int> RunMilestone4SelfTestAsync()
     }
 
     Console.WriteLine("ALL MILESTONE 4 SELF-TESTS PASSED SUCCESSFULLY.");
+    return 0;
+}
+
+int RunMilestone5SelfTest()
+{
+    Console.WriteLine("RUNNING MILESTONE 5 SELF-TEST SUITE...");
+
+    // 1. TvTelemetryCatalog & MobileTelemetryCatalog
+    var samsung = SpectraNetworkManager.Core.Devices.TvTelemetryCatalog.GetDomainsForVendor("Samsung");
+    var lg = SpectraNetworkManager.Core.Devices.TvTelemetryCatalog.GetDomainsForVendor("LG webOS");
+    var allTv = SpectraNetworkManager.Core.Devices.TvTelemetryCatalog.GetAllSmartTvAcrDomains();
+    var mobile = SpectraNetworkManager.Core.Devices.MobileTelemetryCatalog.GetAllMobileTrackingDomains();
+
+    if (samsung.Count == 0 || lg.Count == 0 || allTv.Count < 20 || mobile.Count < 10)
+        throw new InvalidOperationException("Telemetry catalog count assertion failed");
+    Console.WriteLine($"  [OK] Telemetry Catalogs: Smart TV ACR ({allTv.Count} domains), Mobile Tracking SDKs ({mobile.Count} domains).");
+
+    // 2. TvMobileManager & ClientGroup Integration
+    var dnsSettings = new SpectraNetworkManager.Sinkhole.DnsSettings();
+    SpectraNetworkManager.Core.Devices.TvMobileManager.EnsureDefaultGroups(dnsSettings);
+    if (!dnsSettings.ClientGroups.Any(g => g.Name == "Smart TVs") || !dnsSettings.ClientGroups.Any(g => g.Name == "Mobile / GSM"))
+        throw new InvalidOperationException("Default ClientGroups missing");
+
+    bool assigned = SpectraNetworkManager.Core.Devices.TvMobileManager.AssignDeviceToGroup(
+        dnsSettings, "192.168.1.55", "Smart TVs", "Samsung", applyAcrPreset: true);
+    if (!assigned) throw new InvalidOperationException("Failed to assign device to group");
+
+    var tvGroup = dnsSettings.ClientGroups.First(g => g.Name == "Smart TVs");
+    if (!tvGroup.ClientRanges.Contains("192.168.1.55") || !tvGroup.CustomBlock.Any(d => d.Contains("samsungacr.com")))
+        throw new InvalidOperationException("Device IP or ACR preset not applied to group");
+    Console.WriteLine("  [OK] TvMobileManager: ClientGroup assignment & ACR blocklist propagation verified.");
+
+    // 3. DeviceProtectionEvaluator
+    var direct = SpectraNetworkManager.Core.Devices.DeviceProtectionEvaluator.Evaluate(
+        IPAddress.Parse("192.168.1.55"), IPAddress.Parse("192.168.1.1"), DateTime.UtcNow.AddSeconds(-15), 10, 3, false);
+    if (direct.Level != SpectraNetworkManager.Core.Devices.ProtectionLevel.DirectProtected)
+        throw new InvalidOperationException("Direct protection evaluation failed");
+
+    var gw = SpectraNetworkManager.Core.Devices.DeviceProtectionEvaluator.Evaluate(
+        IPAddress.Parse("192.168.1.55"), IPAddress.Parse("192.168.1.1"), null, 0, 0, false);
+    if (gw.Level != SpectraNetworkManager.Core.Devices.ProtectionLevel.GatewayRouted)
+        throw new InvalidOperationException("Gateway routed evaluation failed");
+
+    var doh = SpectraNetworkManager.Core.Devices.DeviceProtectionEvaluator.Evaluate(
+        IPAddress.Parse("192.168.1.55"), IPAddress.Parse("192.168.1.1"), DateTime.UtcNow, 5, 0, true);
+    if (doh.Level != SpectraNetworkManager.Core.Devices.ProtectionLevel.DohBypassRisk)
+        throw new InvalidOperationException("DoH bypass risk evaluation failed");
+    Console.WriteLine("  [OK] DeviceProtectionEvaluator: Direct Protected, Gateway Routed, and DoH Risk states verified.");
+
+    // 4. QrCodeSvgRenderer
+    string testUrl = "http://192.168.1.100:8765/?token=998877";
+    string svg = SpectraNetworkManager.Core.Devices.QrCodeSvgRenderer.GenerateSvg(testUrl);
+    var (matrix, size, margin) = SpectraNetworkManager.Core.Devices.QrCodeSvgRenderer.GenerateMatrix(testUrl);
+    if (string.IsNullOrEmpty(svg) || !svg.Contains("<svg") || size < 21 || !matrix[0, 0])
+        throw new InvalidOperationException("QR code SVG / Matrix generation failed");
+    Console.WriteLine($"  [OK] QrCodeSvgRenderer: Scalable SVG & {size}x{size} bit matrix generated cleanly.");
+
+    // 5. BrowserGuardManager & MV3 declarativeNetRequest Compilation
+    string tempRulesFile = Path.Combine(Path.GetTempPath(), $"spike-bg-{Guid.NewGuid():N}.json");
+    try
+    {
+        var bg = new SpectraNetworkManager.Core.BrowserGuard.BrowserGuardManager(tempRulesFile);
+        if (!bg.Config.CustomRules.Any(r => r.Id == "yt-shorts"))
+            throw new InvalidOperationException("Built-in YouTube Shorts rule missing");
+
+        bg.AddRule("Block Custom Stream", "*://*.customstream.com/*", "Test", SpectraNetworkManager.Core.BrowserGuard.GuardAction.Block, "media");
+        string mv3Json = bg.ExportMv3DynamicRulesJson();
+
+        using var doc = System.Text.Json.JsonDocument.Parse(mv3Json);
+        if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array || doc.RootElement.GetArrayLength() < 2)
+            throw new InvalidOperationException("MV3 rules JSON compilation failed");
+        Console.WriteLine($"  [OK] BrowserGuardManager: {bg.Config.CustomRules.Count} rules loaded, MV3 declarativeNetRequest schema validated ({mv3Json.Length} bytes).");
+    }
+    finally
+    {
+        try { if (File.Exists(tempRulesFile)) File.Delete(tempRulesFile); } catch { }
+    }
+
+    // 6. Native Messaging Host Manifest & Registry Helper Check
+    if (OperatingSystem.IsWindows())
+    {
+        bool isReg = SpectraNetworkManager.Platform.Windows.BrowserGuard.BrowserExtensionHost.IsHostRegistered();
+        Console.WriteLine($"  [OK] BrowserExtensionHost: Registered status = {isReg}.");
+    }
+
+    Console.WriteLine("ALL MILESTONE 5 SELF-TESTS PASSED SUCCESSFULLY.");
     return 0;
 }
 

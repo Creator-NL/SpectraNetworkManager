@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>SpectraNetworkManager.BrowserHost</RootNamespace>
+    <AssemblyName>SpectraNetworkManager.BrowserHost</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpectraNetworkManager.Core\SpectraNetworkManager.Core.csproj" />
+    <ProjectReference Include="..\SpectraNetworkManager.Platform.Windows\SpectraNetworkManager.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

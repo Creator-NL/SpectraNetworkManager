@@ -1,0 +1,62 @@
+<Window x:Class="SpectraNetworkManager.Ui.MobilePairingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spectra Mobile Defense Companion" Width="480" Height="580" MinWidth="420" MinHeight="520"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Icon="app.ico"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="📱 MOBILE DEFENSE COMPANION" FontSize="16" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}"/>
+                <TextBlock Text="  //  live LAN pairing" FontSize="11" Foreground="{StaticResource Magenta}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+            </StackPanel>
+            <TextBlock Text="Connect your smartphone to monitor live DNS ad-blocking and Smart TV defense from anywhere on your Wi-Fi."
+                       FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <!-- QR Code & Pairing Area -->
+        <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="6" Padding="16">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <!-- QR Image container -->
+                <Border Background="#0A0E17" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10" HorizontalAlignment="Center">
+                    <Image x:Name="QrImage" Width="200" Height="200" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                </Border>
+
+                <!-- One-time PIN -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,12,0,4">
+                    <TextBlock Text="One-Time Pairing PIN: " FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="PairingCodeText" Text="123456" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Expiration countdown -->
+                <TextBlock x:Name="CountdownText" Text="Token expires in 60s" FontSize="11" Foreground="{StaticResource Amber}" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+
+                <!-- Direct URL -->
+                <TextBlock Text="Direct URL (if camera scan is unavailable):" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,3"/>
+                <DockPanel LastChildFill="True" Width="360" Margin="0,0,0,12">
+                    <Button DockPanel.Dock="Right" Content="📋 Copy" Click="OnCopyUrlClick" Margin="6,0,0,0" Padding="8,2"/>
+                    <TextBox x:Name="DirectUrlBox" IsReadOnly="True" FontSize="11" VerticalContentAlignment="Center" Background="#0A0E17" Foreground="{StaticResource Text}"/>
+                </DockPanel>
+
+                <!-- Permission toggle -->
+                <CheckBox x:Name="AllowRuleChangesCheck" Content="Allow phone to pause/resume DNS Sinkhole" IsChecked="False"
+                          Checked="OnPermissionChanged" Unchecked="OnPermissionChanged"
+                          ToolTip="When checked, authenticated phones can pause ad-blocking for 15 minutes."/>
+            </StackPanel>
+        </Border>
+
+        <!-- Footer -->
+        <DockPanel Grid.Row="2" Margin="0,14,0,0">
+            <Button Content="🔄 Refresh Token" Click="OnRefreshTokenClick" Padding="12,5" Foreground="{StaticResource Cyan}"/>
+            <Button DockPanel.Dock="Right" Content="Done / Close" Click="OnCloseClick" Padding="16,5" HorizontalAlignment="Right"/>
+        </DockPanel>
+    </Grid>
+</Window>

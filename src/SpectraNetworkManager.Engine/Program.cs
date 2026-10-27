@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace SpectraNetworkManager.Engine;
@@ -18,6 +18,14 @@ public static class Program
         if (args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
         {
             return await ServiceInstaller.UninstallAsync();
+        }
+
+        if (args.Contains("--browser-host", StringComparer.OrdinalIgnoreCase))
+        {
+            var guardManager = new SpectraNetworkManager.Core.BrowserGuard.BrowserGuardManager();
+            using var cts = new CancellationTokenSource();
+            await SpectraNetworkManager.Platform.Windows.BrowserGuard.BrowserExtensionHost.RunStdioLoopAsync(guardManager, cts.Token);
+            return 0;
         }
 
         bool isService = args.Contains("--service", StringComparer.OrdinalIgnoreCase);
