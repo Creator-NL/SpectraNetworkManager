@@ -14,6 +14,10 @@ public sealed record AppSettings
     public bool CheckForUpdatesOnStartup { get; init; } = true;
     public bool DnsFallbackModeEnabled { get; init; }
     public DateTimeOffset? LastUpdateCheck { get; init; }
+    public string Language { get; init; } = "Auto";
+    public bool AiAutoInvestigateUnverified { get; init; }
+    public string OllamaEndpoint { get; init; } = "http://127.0.0.1:11434";
+    public string OllamaModel { get; init; } = "qwen2.5:7b";
 }
 
 public sealed class AppSettingsStore

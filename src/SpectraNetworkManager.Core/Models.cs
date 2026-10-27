@@ -38,6 +38,8 @@ public enum IdentityVerificationLevel
     VerifiedPublisherBinary = 2,
     UnsignedOrUnverified = 3,
     TamperedOrUntrusted = 4,
+    SuspiciousLocation = 5,
+    EphemeralOrExited = 6,
 }
 
 /// <summary>The program that owns a connection, enriched with parent process, command-line, start time, and Windows service metadata.</summary>
@@ -76,7 +78,9 @@ public sealed record ProcessInfo(
         IdentityVerificationLevel.VerifiedSystemBinary => "✔ VERIFIED WINDOWS OS BINARY",
         IdentityVerificationLevel.VerifiedPublisherBinary => $"✔ VERIFIED PUBLISHER ({signature?.Publisher ?? "Signed"})",
         IdentityVerificationLevel.TamperedOrUntrusted => "🚨 WARNING: TAMPERED / UNTRUSTED SIGNATURE",
+        IdentityVerificationLevel.SuspiciousLocation => "⛔ WARNING: SUSPICIOUS EXECUTION DIRECTORY",
         IdentityVerificationLevel.UnsignedOrUnverified => "⚠ UNSIGNED / UNVERIFIED EXECUTABLE",
+        IdentityVerificationLevel.EphemeralOrExited => "? PROCESS EXITED BEFORE INSPECTION",
         _ => "? UNKNOWN / EPHEMERAL PROCESS"
     };
 }

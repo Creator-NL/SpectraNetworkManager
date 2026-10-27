@@ -41,6 +41,7 @@ public static class EngineStoragePaths
     public static string QuarantineVaultPath => GetMigratedPath("quarantine-vault.json");
     public static string BrowserDohBackupPath => GetMigratedPath("browser-doh-backup.json");
     public static string BrowserGuardRulesPath => GetMigratedPath("browser-guard-rules.json");
+    public static string AiInvestigationsPath => GetMigratedPath("ai-investigations.db");
     public static string LogsDirectory
     {
         get

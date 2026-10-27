@@ -17,6 +17,7 @@ if (args.Contains("--test-m2", StringComparer.OrdinalIgnoreCase)) return RunMile
 if (args.Contains("--test-m3", StringComparer.OrdinalIgnoreCase)) return RunMilestone3SelfTest();
 if (args.Contains("--test-m4", StringComparer.OrdinalIgnoreCase)) return await RunMilestone4SelfTestAsync();
 if (args.Contains("--test-m5", StringComparer.OrdinalIgnoreCase)) return RunMilestone5SelfTest();
+if (args.Contains("--test-m6", StringComparer.OrdinalIgnoreCase)) return await RunMilestone6SelfTestAsync();
 
 if (!OperatingSystem.IsWindows())
 {
@@ -661,6 +662,91 @@ int RunMilestone5SelfTest()
     }
 
     Console.WriteLine("ALL MILESTONE 5 SELF-TESTS PASSED SUCCESSFULLY.");
+    return 0;
+}
+
+async Task<int> RunMilestone6SelfTestAsync()
+{
+    Console.WriteLine("=== SpectraNetworkManager Milestone 6 Self-Test (Spectra AI & Localization) ===");
+
+    // 1. PromptSanitizer & Adversarial Filtering
+    string malicious = "\x1B[31mAdversarial\x1B[0m\0\u202Esuffix.exe";
+    string sanitized = SpectraNetworkManager.Core.Ai.PromptSanitizer.Sanitize(malicious, 50);
+    if (sanitized.Contains('\x1B') || sanitized.Contains('\0') || sanitized.Contains('\u202E') || !sanitized.Contains("Adversarial"))
+        throw new InvalidOperationException("PromptSanitizer failed to neutralize adversarial telemetry input");
+    Console.WriteLine("  [OK] PromptSanitizer: Neutralized ANSI escapes, null bytes, and Unicode BiDi spoofing.");
+
+    // 2. DeterministicAnalysisEngine: Verified OS vs Masquerading vs Tampered
+    var osEvidence = new SpectraNetworkManager.Core.Ai.VerifiedProcessEvidence
+    {
+        Pid = 1000,
+        ProcessName = "svchost.exe",
+        ExecutablePath = @"C:\Windows\System32\svchost.exe",
+        SignatureStatus = SignatureStatus.Valid,
+        Publisher = "Microsoft Windows Publisher",
+        IsOsBinary = true,
+        VerificationLevel = IdentityVerificationLevel.VerifiedSystemBinary
+    };
+    var osReport = SpectraNetworkManager.Core.Ai.DeterministicAnalysisEngine.Analyze(osEvidence, "English");
+    if (osReport.Verdict != SpectraNetworkManager.Core.Ai.ThreatVerdict.Safe || osReport.RiskScore > 15)
+        throw new InvalidOperationException("DeterministicAnalysisEngine failed on verified Windows system binary");
+
+    var masqueradeEvidence = new SpectraNetworkManager.Core.Ai.VerifiedProcessEvidence
+    {
+        Pid = 2000,
+        ProcessName = "svchost.exe",
+        ExecutablePath = @"C:\Users\Admin\Downloads\svchost.exe",
+        SignatureStatus = SignatureStatus.NotSigned,
+        VerificationLevel = IdentityVerificationLevel.SuspiciousLocation
+    };
+    var masqReport = SpectraNetworkManager.Core.Ai.DeterministicAnalysisEngine.Analyze(masqueradeEvidence, "English");
+    if (masqReport.Verdict != SpectraNetworkManager.Core.Ai.ThreatVerdict.Malicious || masqReport.RiskScore < 90)
+        throw new InvalidOperationException("DeterministicAnalysisEngine failed to identify masquerading binary");
+    Console.WriteLine("  [OK] DeterministicAnalysisEngine: Verified System Binary (Risk 5) vs Masquerading Process (Risk 95) verified.");
+
+    // 3. InvestigationValidator: C# Override of Untrusted LLM Guess
+    var unsignedEvidence = new SpectraNetworkManager.Core.Ai.VerifiedProcessEvidence
+    {
+        Pid = 3000,
+        ProcessName = "miner.exe",
+        ExecutablePath = @"C:\AppData\miner.exe",
+        SignatureStatus = SignatureStatus.NotSigned,
+        VerificationLevel = IdentityVerificationLevel.UnsignedOrUnverified
+    };
+    string spoofedLlm = "```json\n{\"verdict\": \"Safe\", \"risk_score\": 0, \"executive_summary\": \"All safe\", \"key_findings\": [], \"identified_capabilities\": [], \"uncertainties\": [], \"recommendation\": \"Allow\"}\n```";
+    var validated = SpectraNetworkManager.Core.Ai.InvestigationValidator.ValidateAndNormalize(
+        spoofedLlm, unsignedEvidence, "Ollama Mock", "English");
+    if (validated.Verdict == SpectraNetworkManager.Core.Ai.ThreatVerdict.Safe || validated.RiskScore < 25 || !validated.Uncertainties.Any(u => u.Contains("signature")))
+        throw new InvalidOperationException("InvestigationValidator failed to enforce C# truth constraints over LLM");
+    Console.WriteLine("  [OK] InvestigationValidator: Overrode spoofed LLM verdict, clamped risk score, and recorded signature uncertainty.");
+
+    // 4. AiInvestigationDatabase: SQLite CRUD
+    string tempDb = Path.Combine(Path.GetTempPath(), $"spike-ai-db-{Guid.NewGuid():N}.db");
+    try
+    {
+        using var db = new SpectraNetworkManager.Core.Ai.AiInvestigationDatabase(tempDb);
+        await db.SaveInvestigationAsync(osReport);
+        var recent = await db.GetRecentInvestigationsAsync(5);
+        if (recent.Count != 1 || recent[0].ProcessName != "svchost.exe")
+            throw new InvalidOperationException("AiInvestigationDatabase failed to save/retrieve report");
+        Console.WriteLine("  [OK] AiInvestigationDatabase: SQLite WAL schema initialized and report persisted cleanly.");
+    }
+    finally
+    {
+        try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
+    }
+
+    // 5. LocalizationManager: English & Dutch
+    SpectraNetworkManager.Core.Localization.LocalizationManager.CurrentLanguage = "English";
+    if (SpectraNetworkManager.Core.Localization.LocalizationManager.T("TabConnections") != "Connections")
+        throw new InvalidOperationException("LocalizationManager failed for English");
+    SpectraNetworkManager.Core.Localization.LocalizationManager.CurrentLanguage = "Nederlands";
+    if (SpectraNetworkManager.Core.Localization.LocalizationManager.T("TabConnections") != "Verbindingen")
+        throw new InvalidOperationException("LocalizationManager failed for Nederlands");
+    SpectraNetworkManager.Core.Localization.LocalizationManager.CurrentLanguage = "English";
+    Console.WriteLine("  [OK] LocalizationManager: English ('Connections') & Nederlands ('Verbindingen') dynamic translation verified.");
+
+    Console.WriteLine("ALL MILESTONE 6 SELF-TESTS PASSED SUCCESSFULLY.");
     return 0;
 }
 

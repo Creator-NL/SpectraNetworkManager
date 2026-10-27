@@ -70,6 +70,9 @@
             <RadioButton x:Name="BrowserGuardTab" Content="Browser Guard" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
                          ToolTip="Native URL &amp; video blocker, YouTube Shorts blocker, and Manifest V3 browser extension controls."/>
+            <RadioButton x:Name="AiTab" Content="Spectra AI" GroupName="view"
+                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                         ToolTip="Evidence-based process investigation, threat attribution, and local AI threat assessment."/>
             <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
             <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
@@ -91,6 +94,12 @@
             <CheckBox x:Name="NotificationSoundCheck" Content="Alert sounds"
                       VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnNotificationSoundChanged" Unchecked="OnNotificationSoundChanged"
                       ToolTip="Play alert sounds for network prompts. Uncheck to silence all notification sounds."/>
+            <ComboBox x:Name="LanguageCombo" Width="135" Margin="20,0,0,0" VerticalAlignment="Center"
+                      SelectionChanged="OnLanguageSelectionChanged" ToolTip="Select interface language / Kies interfacetaal">
+                <ComboBoxItem Content="🌐 Auto (System)" Tag="Auto" IsSelected="True"/>
+                <ComboBoxItem Content="🇬🇧 English" Tag="English"/>
+                <ComboBoxItem Content="🇳🇱 Nederlands" Tag="Nederlands"/>
+            </ComboBox>
         </WrapPanel>
 
         <!-- Ask mode: decision bar -->
@@ -169,6 +178,8 @@
                               PreviewMouseLeftButtonUp="OnConnectionsGridMouseUp">
                         <DataGrid.ContextMenu>
                             <ContextMenu>
+                                <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                <Separator/>
                                 <MenuItem Header="Close This Connection" Click="OnCloseSelectedConnection"/>
                                 <MenuItem Header="Close All Connections for Program" Click="OnCloseConnectionProgram"/>
                                 <MenuItem Header="End Process (Kill)" Click="OnKillConnectionProcess"/>
@@ -393,6 +404,8 @@
             <DataGrid x:Name="ProgramsGrid" Grid.Row="2" ItemsSource="{Binding Programs}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <Separator/>
                         <MenuItem Header="Close Open Connections" Click="OnCloseProgramConnections"/>
                         <MenuItem Header="End Process (Kill)" Click="OnKillProgramProcess"/>
                         <MenuItem Header="🛑 Stop Windows Service..." Click="OnStopProgramService"/>
@@ -481,6 +494,8 @@
             <DataGrid x:Name="StartupGrid" Grid.Row="2" ItemsSource="{Binding StartupItems}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <Separator/>
                         <MenuItem Header="⏸ Turn Off (Disable)" Click="OnDisableStartupItem"/>
                         <MenuItem Header="▶ Turn On (Enable)" Click="OnEnableStartupItem"/>
                         <Separator/>
@@ -812,6 +827,8 @@
                           SelectionChanged="OnPacketsGridSelectionChanged">
                     <DataGrid.ContextMenu>
                         <ContextMenu>
+                            <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                            <Separator/>
                             <MenuItem Header="📋 Copy Host / SNI" Click="OnCopyPacketHost"/>
                             <MenuItem Header="📋 Copy Source IP:Port" Click="OnCopyPacketSource"/>
                             <MenuItem Header="📋 Copy Destination IP:Port" Click="OnCopyPacketDestination"/>
@@ -918,6 +935,8 @@
             <DataGrid x:Name="RulesGrid" Grid.Row="2" ItemsSource="{Binding RuleRows}" SelectionMode="Single">
                 <DataGrid.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                        <Separator/>
                         <MenuItem Header="Edit block..." Click="OnRulesEdit"/>
                         <MenuItem Header="Allow" Click="OnRulesAllow"/>
                         <MenuItem Header="Forget decision" Click="OnRulesForget"/>
@@ -1605,6 +1624,145 @@
                     </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
+        </Grid>
+
+        <!-- Spectra AI Threat Intelligence & Investigation view -->
+        <Grid x:Name="AiPanel" Grid.Row="3" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Target Selection & Execution Header Bar -->
+            <Border Grid.Row="0" Background="{StaticResource Selected}" BorderBrush="{StaticResource Cyan}" BorderThickness="1" CornerRadius="4" Padding="12,10" Margin="0,0,0,10">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="AiInvestigateButton" Content="✨ Run Investigation" Padding="16,6" FontWeight="SemiBold"
+                                Background="{StaticResource Cyan}" Foreground="#0D1117" Click="OnRunAiInvestigationClick"
+                                ToolTip="Execute a multi-factor deterministic threat investigation and optional local Ollama analysis on the target."/>
+                    </StackPanel>
+
+                    <WrapPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="AiSelectProcessLabel" Text="Target Process:" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="AiProcessCombo" Width="260" Margin="0,0,10,0" VerticalAlignment="Center"
+                                  SelectionChanged="OnAiProcessSelectionChanged"/>
+                        <Button x:Name="AiBrowseButton" Content="📁 Browse .exe..." Padding="10,3" Margin="0,0,14,0" Click="OnAiBrowseClick"
+                                ToolTip="Select an executable on disk to investigate."/>
+                        <TextBlock x:Name="AiTargetDisplay" Text="No target selected" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="0,0,20,0"/>
+
+                        <CheckBox x:Name="AiAutoInvestigateCheck" Content="Auto-investigate new unverified programs"
+                                  VerticalAlignment="Center" Margin="10,0,0,0" Checked="OnAiAutoInvestigateChanged" Unchecked="OnAiAutoInvestigateChanged"
+                                  ToolTip="When enabled, newly detected unverified processes will automatically have a background AI evidence record generated."/>
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Ollama Engine & Status Banner -->
+            <Border Grid.Row="1" Background="#161B22" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="4" Padding="12,6" Margin="0,0,0,10">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Model:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource Muted}"/>
+                        <TextBox x:Name="AiModelText" Text="qwen2.5:7b" Width="110" Height="22" FontFamily="Consolas" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <Button x:Name="AiTestLlmButton" Content="🔄 Test LLM" Padding="8,2" FontSize="11" Click="OnAiTestLlmClick"
+                                ToolTip="Test connection to local Ollama API (http://127.0.0.1:11434)."/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="AiOllamaStatusText" Text="⚪ Offline Deterministic Engine (Ollama Offline)" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="AiRunningIndicator" Text="  [⏳ Investigating...]" Visibility="Collapsed" FontWeight="Bold" Foreground="{StaticResource Amber}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Two-column main view: Left = Current Report Card, Right = Historical Investigations -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="6*"/>
+                    <ColumnDefinition Width="4*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Column: Active Investigation Card -->
+                <Border Grid.Column="0" Background="{StaticResource Selected}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="4" Padding="14" Margin="0,0,10,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <!-- Badges & Score Header -->
+                            <DockPanel Margin="0,0,0,12">
+                                <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock x:Name="AiRiskScoreHeader" Text="THREAT RISK SCORE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" HorizontalAlignment="Right"/>
+                                    <TextBlock x:Name="AiRiskScoreDisplay" Text="--" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Cyan}" HorizontalAlignment="Right"/>
+                                </StackPanel>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="AiTargetTitle" Text="Select a process or executable above" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border x:Name="AiVerificationBadge" Padding="8,2" CornerRadius="3" Background="#21262D" BorderBrush="{StaticResource Cyan}" BorderThickness="1" Margin="0,0,8,0">
+                                            <TextBlock x:Name="AiVerificationText" Text="Identity Verification Pending" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                        </Border>
+                                        <Border x:Name="AiVerdictBadge" Padding="8,2" CornerRadius="3" Background="#21262D" BorderBrush="{StaticResource Amber}" BorderThickness="1">
+                                            <TextBlock x:Name="AiVerdictText" Text="Status: Unknown" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Amber}"/>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Executive Summary Box -->
+                            <TextBlock x:Name="AiSummaryHeader" Text="Executive Summary" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,4,0,2"/>
+                            <Border Background="#161B22" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,12">
+                                <TextBlock x:Name="AiSummaryText" Text="Run an investigation to view AI and deterministic telemetry assessment." TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource Text}"/>
+                            </Border>
+
+                            <!-- Action Bar -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Button x:Name="AiAllowButton" Content="🛡️ Allow Program" Padding="10,4" Margin="0,0,8,0" Click="OnAiAllowProgramClick" ToolTip="Add permanent Allow rule for this program."/>
+                                <Button x:Name="AiBlockButton" Content="🚫 Block Outbound" Padding="10,4" Margin="0,0,8,0" Foreground="{StaticResource Magenta}" Click="OnAiBlockProgramClick" ToolTip="Add permanent Block rule for this program."/>
+                                <Button x:Name="AiQuarantineButton" Content="⚠️ 4-Stage Quarantine" Padding="10,4" Margin="0,0,8,0" Foreground="{StaticResource Amber}" Click="OnAiQuarantineProgramClick" ToolTip="Execute reversible 4-stage quarantine on this process."/>
+                                <Button x:Name="AiVirusTotalButton" Content="🌐 VirusTotal" Padding="10,4" Margin="0,0,8,0" Click="OnAiVirusTotalClick" ToolTip="Look up SHA-256 hash on VirusTotal."/>
+                                <Button x:Name="AiCopyReportButton" Content="📋 Copy JSON" Padding="10,4" Click="OnAiCopyReportClick" ToolTip="Copy complete JSON investigation report to clipboard."/>
+                            </StackPanel>
+
+                            <!-- Key Findings -->
+                            <TextBlock x:Name="AiFindingsHeader" Text="Deterministic Telemetry Findings" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,4,0,2"/>
+                            <Border Background="#161B22" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,12">
+                                <TextBlock x:Name="AiFindingsText" Text="No telemetry gathered yet." FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource Text}"/>
+                            </Border>
+
+                            <!-- Identified Capabilities -->
+                            <TextBlock x:Name="AiCapabilitiesHeader" Text="Identified Capabilities &amp; Behaviors" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,4,0,2"/>
+                            <WrapPanel x:Name="AiCapabilitiesPanel" Margin="0,0,0,12">
+                                <TextBlock Text="None recorded" Foreground="{StaticResource Muted}" FontSize="11"/>
+                            </WrapPanel>
+
+                            <!-- Uncertainties & Blind Spots -->
+                            <TextBlock x:Name="AiUncertaintiesHeader" Text="Uncertainties &amp; Blind Spots" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Amber}" Margin="0,4,0,2"/>
+                            <Border Background="#1C1B14" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,4">
+                                <TextBlock x:Name="AiUncertaintiesText" Text="None reported" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource Amber}"/>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Right Column: Past Investigations History -->
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                        <Button x:Name="AiClearHistoryButton" DockPanel.Dock="Right" Content="Clear History" Padding="8,2" FontSize="11" Click="OnAiClearHistoryClick"/>
+                        <TextBlock x:Name="AiHistoryHeader" Text="Investigation History" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                    </DockPanel>
+
+                    <DataGrid x:Name="AiHistoryGrid" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnAiHistorySelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="TIME" Binding="{Binding TimestampDisplay}" Width="80"/>
+                            <DataGridTextColumn Header="PROCESS / TARGET" Binding="{Binding ProcessName}" Width="130" Foreground="{StaticResource Cyan}"/>
+                            <DataGridTextColumn Header="VERDICT" Binding="{Binding VerdictDisplay}" Width="85"/>
+                            <DataGridTextColumn Header="RISK" Binding="{Binding RiskScore}" Width="45"/>
+                            <DataGridTextColumn Header="ENGINE" Binding="{Binding ModelUsed}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Grid>
         </Grid>
 
         <!-- Firewall blocks view -->

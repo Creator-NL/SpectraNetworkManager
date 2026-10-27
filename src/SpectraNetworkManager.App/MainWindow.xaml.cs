@@ -15,10 +15,13 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SpectraNetworkManager.Core;
+using SpectraNetworkManager.Core.Ai;
 using SpectraNetworkManager.Core.BrowserGuard;
 using SpectraNetworkManager.Core.Devices;
 using SpectraNetworkManager.Core.Ipc;
+using SpectraNetworkManager.Core.Localization;
 using SpectraNetworkManager.Platform.Windows;
+using SpectraNetworkManager.Platform.Windows.Ai;
 using SpectraNetworkManager.Platform.Windows.BrowserGuard;
 using SpectraNetworkManager.Platform.Windows.Mobile;
 using SpectraNetworkManager.Sinkhole;
@@ -103,12 +106,25 @@ public partial class MainWindow : Window
     public ICollectionView CapturedPacketsView { get; }
     public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
+    public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
     private readonly BrowserGuardManager _browserGuardManager;
+    private readonly AiInvestigationDatabase _aiDb = new();
+    private readonly AiInvestigationCoordinator _aiCoordinator;
+    private InvestigationReport? _currentAiReport;
+    private string? _aiSelectedPath;
+    private int _aiSelectedPid;
     private MobileCompanionServer? _mobileServer;
 
     public MainWindow()
     {
         _browserGuardManager = new BrowserGuardManager();
+        _aiCoordinator = new AiInvestigationCoordinator(
+            _processResolver,
+            _hashCache,
+            _aiDb,
+            new OllamaClient(
+                endpointUrl: _appSettings.Settings.OllamaEndpoint,
+                defaultModel: _appSettings.Settings.OllamaModel));
         _scanner = new NetworkScanner(_neighborScanner);
         _localInventory = new LocalSocketInventory(new IpHelperConnectionSource(), _processResolver);
         _dnsSwitch = new SystemDnsSwitchManager(null, null, () => _sink.LocalEndPoint);
@@ -181,6 +197,7 @@ public partial class MainWindow : Window
             _hostsMonitor.Dispose();
             _packetCaptureManager.Dispose();
             _mobileServer?.Dispose();
+            _aiDb.Dispose();
         };
 
         _timer.Tick += async (_, _) => await TickAsync();
@@ -213,6 +230,16 @@ public partial class MainWindow : Window
             Topmost = _appSettings.Settings.AlwaysOnTop;
             NotificationSoundCheck.IsChecked = _appSettings.Settings.NotificationSoundEnabled;
             DnsFallbackModeBox.IsChecked = _appSettings.Settings.DnsFallbackModeEnabled;
+
+            AiHistoryGrid.ItemsSource = AiHistory;
+            AiAutoInvestigateCheck.IsChecked = _appSettings.Settings.AiAutoInvestigateUnverified;
+            AiModelText.Text = _appSettings.Settings.OllamaModel;
+            LocalizationManager.CurrentLanguage = _appSettings.Settings.Language;
+            SetLanguageComboSelected(_appSettings.Settings.Language);
+            LocalizationManager.LanguageChanged += ApplyLocalization;
+            ApplyLocalization();
+            _ = RefreshAiHistoryAsync();
+            _ = CheckOllamaStatusAsync();
 
             await TickAsync();
             _timer.Start();
@@ -3848,6 +3875,7 @@ public partial class MainWindow : Window
         PacketsPanel.Visibility = PacketsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         TvMobilePanel.Visibility = TvMobileTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BrowserGuardPanel.Visibility = BrowserGuardTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        AiPanel.Visibility = AiTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RulesPanel.Visibility = RulesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         StrictPanel.Visibility = StrictTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         DnsPanel.Visibility = DnsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -3855,6 +3883,7 @@ public partial class MainWindow : Window
 
         if (TvMobileTab.IsChecked == true) RefreshTvMobileUi();
         if (BrowserGuardTab.IsChecked == true) RefreshBrowserGuardUi();
+        if (AiTab.IsChecked == true) RefreshAiUi();
         if (ScannerTab.IsChecked == true) InitScannerTargetSubnet();
         if (StartupTab.IsChecked == true) RefreshStartupItems();
         if (StrictTab.IsChecked == true) UpdateStrictUi();
@@ -6130,4 +6159,500 @@ public partial class MainWindow : Window
         MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
     private static bool IsAdministrator() => ElevationHelper.IsAdministrator();
+
+    // ---- Spectra AI & Localization System (Milestone 6) --------------------
+
+    private void SetLanguageComboSelected(string lang)
+    {
+        foreach (ComboBoxItem item in LanguageCombo.Items)
+        {
+            if (string.Equals(item.Tag as string, lang, StringComparison.OrdinalIgnoreCase))
+            {
+                LanguageCombo.SelectedItem = item;
+                break;
+            }
+        }
+    }
+
+    private void OnLanguageSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (LanguageCombo.SelectedItem is ComboBoxItem item && item.Tag is string lang)
+        {
+            LocalizationManager.CurrentLanguage = lang;
+            _appSettings.Save(_appSettings.Settings with { Language = lang });
+        }
+    }
+
+    private void ApplyLocalization()
+    {
+        // Update tabs
+        ConnectionsTab.Content = LocalizationManager.T("TabConnections");
+        ProgramsTab.Content = LocalizationManager.T("TabPrograms");
+        StartupTab.Content = LocalizationManager.T("TabStartup");
+        TrafficTab.Content = LocalizationManager.T("TabTraffic");
+        ScannerTab.Content = LocalizationManager.T("TabScanner");
+        PacketsTab.Content = LocalizationManager.T("TabPackets");
+        TvMobileTab.Content = LocalizationManager.T("TabTvMobile");
+        BrowserGuardTab.Content = LocalizationManager.T("TabBrowserGuard");
+        AiTab.Content = LocalizationManager.T("TabAi");
+        RulesTab.Content = LocalizationManager.T("TabRules");
+        StrictTab.Content = LocalizationManager.T("TabStrictMode");
+        DnsTab.Content = LocalizationManager.T("TabDns");
+        BlocksTab.Content = LocalizationManager.T("TabBlocks");
+
+        // Update toolbar checkboxes
+        AskMode.Content = LocalizationManager.T("AskModeCheck");
+        AlwaysAdminCheck.Content = LocalizationManager.T("AlwaysAdminCheck");
+        AlwaysOnTopCheck.Content = LocalizationManager.T("AlwaysOnTopCheck");
+        NotificationSoundCheck.Content = LocalizationManager.T("AlertSoundsCheck");
+
+        // Update AI UI elements
+        AiSelectProcessLabel.Text = LocalizationManager.T("AiSelectProcess");
+        AiBrowseButton.Content = "📁 " + LocalizationManager.T("AiBrowseExe");
+        AiInvestigateButton.Content = LocalizationManager.T("AiRunInvestigation");
+        AiAutoInvestigateCheck.Content = LocalizationManager.T("AiAutoInvestigate");
+        AiTestLlmButton.Content = "🔄 " + LocalizationManager.T("AiTestOllama");
+        AiRiskScoreHeader.Text = LocalizationManager.T("AiRiskScore");
+        AiSummaryHeader.Text = LocalizationManager.T("AiExecutiveSummary");
+        AiFindingsHeader.Text = LocalizationManager.T("AiKeyFindings");
+        AiCapabilitiesHeader.Text = LocalizationManager.T("AiCapabilities");
+        AiUncertaintiesHeader.Text = LocalizationManager.T("AiUncertainties");
+        AiHistoryHeader.Text = LocalizationManager.T("AiHistory");
+        AiClearHistoryButton.Content = LocalizationManager.T("AiClearHistory");
+        AiAllowButton.Content = LocalizationManager.T("AiActionAllow");
+        AiBlockButton.Content = LocalizationManager.T("AiActionBlock");
+        AiQuarantineButton.Content = LocalizationManager.T("AiActionQuarantine");
+        AiVirusTotalButton.Content = LocalizationManager.T("AiVirusTotal");
+        AiCopyReportButton.Content = LocalizationManager.T("AiCopyJson");
+
+        if (_currentAiReport != null)
+        {
+            DisplayAiReport(_currentAiReport);
+        }
+    }
+
+    private void RefreshAiUi()
+    {
+        AiProcessCombo.Items.Clear();
+
+        var seenPids = new HashSet<int>();
+        foreach (var r in Rows)
+        {
+            if (r.Pid > 0 && seenPids.Add(r.Pid))
+            {
+                AiProcessCombo.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{r.Program} (PID {r.Pid})",
+                    Tag = (r.Pid, r.Path)
+                });
+            }
+        }
+
+        if (AiProcessCombo.Items.Count > 0 && AiProcessCombo.SelectedItem == null)
+        {
+            AiProcessCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void OnAiProcessSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (AiProcessCombo.SelectedItem is ComboBoxItem item && item.Tag is ValueTuple<int, string?> tag)
+        {
+            _aiSelectedPid = tag.Item1;
+            _aiSelectedPath = tag.Item2;
+            AiTargetDisplay.Text = $"PID {_aiSelectedPid}: {_aiSelectedPath ?? item.Content.ToString()}";
+            AiTargetTitle.Text = item.Content.ToString();
+        }
+    }
+
+    private void OnAiBrowseClick(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select Executable to Investigate",
+            Filter = "Executable Files (*.exe)|*.exe|All Files (*.*)|*.*"
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            _aiSelectedPath = dlg.FileName;
+            _aiSelectedPid = 0;
+            AiTargetDisplay.Text = dlg.FileName;
+            AiTargetTitle.Text = Path.GetFileName(dlg.FileName);
+        }
+    }
+
+    private async void OnRunAiInvestigationClick(object? sender, RoutedEventArgs? e)
+    {
+        if (_aiSelectedPid <= 0 && string.IsNullOrWhiteSpace(_aiSelectedPath))
+        {
+            Info("Please select a running process or browse an executable file first.");
+            return;
+        }
+
+        AiInvestigateButton.IsEnabled = false;
+        AiRunningIndicator.Visibility = Visibility.Visible;
+        StatusText.Text = "Spectra AI: Collecting process evidence and evaluating threat telemetry...";
+
+        try
+        {
+            var startupList = StartupManager.GetAllEntries();
+            var sockets = _localInventory.GetLocalInventory().OpenPorts;
+            var recentConns = await _historyDb.GetRecentConnectionsAsync(50);
+            string lang = LocalizationManager.IsDutch ? "Nederlands" : "English";
+            string model = AiModelText.Text.Trim();
+
+            InvestigationReport report;
+            if (_aiSelectedPid > 0)
+            {
+                report = await _aiCoordinator.InvestigatePidAsync(
+                    _aiSelectedPid, lang, model, startupList, sockets, recentConns);
+            }
+            else
+            {
+                report = await _aiCoordinator.InvestigatePathAsync(
+                    _aiSelectedPath!, lang, model, startupList, sockets, recentConns);
+            }
+
+            DisplayAiReport(report);
+            await RefreshAiHistoryAsync();
+            StatusText.Text = $"Spectra AI Investigation Complete: {report.ProcessName} — {report.FormatVerdictBadge()} (Risk: {report.RiskScore}/100)";
+        }
+        catch (Exception ex)
+        {
+            Error("AI Investigation failed", ex);
+        }
+        finally
+        {
+            AiInvestigateButton.IsEnabled = true;
+            AiRunningIndicator.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void DisplayAiReport(InvestigationReport report)
+    {
+        _currentAiReport = report;
+        AiTargetTitle.Text = $"{report.ProcessName} {(report.Pid > 0 ? $"(PID {report.Pid})" : "")}";
+
+        // Verification Badge
+        string verBadge = report.Evidence?.FormatVerificationBadge() ?? report.VerificationLevel.ToString();
+        AiVerificationText.Text = verBadge;
+        AiVerificationBadge.BorderBrush = report.VerificationLevel switch
+        {
+            IdentityVerificationLevel.VerifiedSystemBinary => (Brush)FindResource("Cyan"),
+            IdentityVerificationLevel.VerifiedPublisherBinary => (Brush)FindResource("Cyan"),
+            IdentityVerificationLevel.TamperedOrUntrusted => (Brush)FindResource("Magenta"),
+            IdentityVerificationLevel.SuspiciousLocation => (Brush)FindResource("Magenta"),
+            _ => (Brush)FindResource("Amber")
+        };
+
+        // Verdict Badge
+        AiVerdictText.Text = report.FormatVerdictBadge();
+        AiVerdictBadge.BorderBrush = report.Verdict switch
+        {
+            ThreatVerdict.Safe => (Brush)FindResource("Cyan"),
+            ThreatVerdict.LowRisk => (Brush)FindResource("Cyan"),
+            ThreatVerdict.Suspicious => (Brush)FindResource("Amber"),
+            ThreatVerdict.Malicious => (Brush)FindResource("Magenta"),
+            _ => (Brush)FindResource("Muted")
+        };
+
+        // Risk Score
+        AiRiskScoreDisplay.Text = $"{report.RiskScore}/100";
+        AiRiskScoreDisplay.Foreground = report.RiskScore switch
+        {
+            < 25 => (Brush)FindResource("Cyan"),
+            < 50 => (Brush)FindResource("Text"),
+            < 75 => (Brush)FindResource("Amber"),
+            _ => (Brush)FindResource("Magenta")
+        };
+
+        // Executive Summary
+        AiSummaryText.Text = report.ExecutiveSummary;
+
+        // Telemetry Findings
+        AiFindingsText.Text = report.KeyFindings.Count > 0
+            ? string.Join("\n", report.KeyFindings.Select(f => $"• {f}"))
+            : "No specific telemetry flags identified.";
+
+        // Capabilities
+        AiCapabilitiesPanel.Children.Clear();
+        if (report.IdentifiedCapabilities.Count > 0)
+        {
+            foreach (var cap in report.IdentifiedCapabilities)
+            {
+                var border = new Border
+                {
+                    Background = (Brush)FindResource("Selected"),
+                    BorderBrush = (Brush)FindResource("Cyan"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(8, 2, 8, 2),
+                    Margin = new Thickness(0, 0, 8, 4)
+                };
+                border.Child = new TextBlock
+                {
+                    Text = cap,
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = (Brush)FindResource("Cyan")
+                };
+                AiCapabilitiesPanel.Children.Add(border);
+            }
+        }
+        else
+        {
+            AiCapabilitiesPanel.Children.Add(new TextBlock
+            {
+                Text = "None recorded",
+                FontSize = 11,
+                Foreground = (Brush)FindResource("Muted")
+            });
+        }
+
+        // Uncertainties
+        AiUncertaintiesText.Text = report.Uncertainties.Count > 0
+            ? string.Join("\n", report.Uncertainties.Select(u => $"⚠ {u}"))
+            : "None reported (high confidence).";
+    }
+
+    private async void OnAiTestLlmClick(object sender, RoutedEventArgs e)
+    {
+        AiTestLlmButton.IsEnabled = false;
+        StatusText.Text = "Testing connection to local Ollama API...";
+        try
+        {
+            _aiCoordinator.Ollama.DefaultModel = AiModelText.Text.Trim();
+            bool available = await _aiCoordinator.Ollama.IsAvailableAsync();
+            if (available)
+            {
+                var models = await _aiCoordinator.Ollama.GetAvailableModelsAsync();
+                string modelList = models.Count > 0 ? string.Join(", ", models.Take(3)) : "online";
+                AiOllamaStatusText.Text = $"🟢 Ollama Connected: {modelList}";
+                AiOllamaStatusText.Foreground = (Brush)FindResource("Cyan");
+                StatusText.Text = $"Ollama is online! Found {models.Count} model(s): {modelList}";
+            }
+            else
+            {
+                AiOllamaStatusText.Text = "⚪ Offline Deterministic Engine (Ollama Offline)";
+                AiOllamaStatusText.Foreground = (Brush)FindResource("Muted");
+                StatusText.Text = "Ollama is not running on 127.0.0.1:11434. Spectra AI will use the Deterministic Offline Engine.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Error connecting to Ollama", ex);
+        }
+        finally
+        {
+            AiTestLlmButton.IsEnabled = true;
+        }
+    }
+
+    private async Task CheckOllamaStatusAsync()
+    {
+        try
+        {
+            bool ready = await _aiCoordinator.Ollama.IsAvailableAsync();
+            Dispatcher.Invoke(() =>
+            {
+                if (ready)
+                {
+                    AiOllamaStatusText.Text = $"🟢 Ollama Connected ({_aiCoordinator.Ollama.DefaultModel})";
+                    AiOllamaStatusText.Foreground = (Brush)FindResource("Cyan");
+                }
+                else
+                {
+                    AiOllamaStatusText.Text = "⚪ Offline Deterministic Engine (Ollama Offline)";
+                    AiOllamaStatusText.Foreground = (Brush)FindResource("Muted");
+                }
+            });
+        }
+        catch { }
+    }
+
+    private void OnAiAutoInvestigateChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        bool enabled = AiAutoInvestigateCheck.IsChecked == true;
+        _appSettings.Save(_appSettings.Settings with { AiAutoInvestigateUnverified = enabled });
+    }
+
+    private void OnAiAllowProgramClick(object sender, RoutedEventArgs e)
+    {
+        string? path = _currentAiReport?.Evidence?.ExecutablePath ?? _aiSelectedPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            Info("No executable path available to allow.");
+            return;
+        }
+        _rules.Set(new ProgramRule(path, RuleAction.Allow, DateTimeOffset.Now));
+        _enforcer.Unblock(path);
+        StatusText.Text = $"Allowed program in firewall rules: {Path.GetFileName(path)}";
+    }
+
+    private void OnAiBlockProgramClick(object sender, RoutedEventArgs e)
+    {
+        string? path = _currentAiReport?.Evidence?.ExecutablePath ?? _aiSelectedPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            Info("No executable path available to block.");
+            return;
+        }
+        _rules.Set(new ProgramRule(path, RuleAction.Block, DateTimeOffset.Now, null, RuleDirection.Outbound, null));
+        var plan = RulePlanner.Plan(RuleDirection.Outbound, TrafficScope.All);
+        _enforcer.Block(path, plan);
+        StatusText.Text = $"Blocked outbound traffic for: {Path.GetFileName(path)}";
+    }
+
+    private async void OnAiQuarantineProgramClick(object sender, RoutedEventArgs e)
+    {
+        string? path = _currentAiReport?.Evidence?.ExecutablePath ?? _aiSelectedPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            Info("No executable path available to quarantine.");
+            return;
+        }
+        if (Confirm($"Execute 4-Stage Active Defense Quarantine on '{Path.GetFileName(path)}'?\n\nThis will terminate active sockets, stop dedicated services, disable auto-start, and block in Windows Firewall.\n(100% reversible with 1-click restore).", "Confirm 4-Stage Quarantine"))
+        {
+            var (success, msg, snapshot) = await _quarantineManager.QuarantineAsync(path, "Quarantined via Spectra AI");
+            if (success)
+            {
+                StatusText.Text = $"Program quarantined successfully: {Path.GetFileName(path)} (Vault ID: {snapshot?.Id})";
+                await RefreshAiHistoryAsync();
+            }
+            else
+            {
+                Warn($"Quarantine aborted: {msg}", "Quarantine Guard");
+            }
+        }
+    }
+
+    private void OnAiVirusTotalClick(object sender, RoutedEventArgs e)
+    {
+        string? sha256 = _currentAiReport?.Evidence?.Sha256;
+        if (string.IsNullOrWhiteSpace(sha256) && !string.IsNullOrWhiteSpace(_aiSelectedPath))
+        {
+            sha256 = _hashCache.GetSha256(_aiSelectedPath);
+        }
+        if (!string.IsNullOrWhiteSpace(sha256))
+        {
+            string url = ExecutableHashCache.GetVirusTotalUrl(sha256);
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            StatusText.Text = $"Opened VirusTotal for SHA-256: {sha256}";
+        }
+        else
+        {
+            Info("No SHA-256 hash available for this target.");
+        }
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions AiJsonOptions = new() { WriteIndented = true };
+
+    private void OnAiCopyReportClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentAiReport == null)
+        {
+            Info("No investigation report to copy.");
+            return;
+        }
+        string json = System.Text.Json.JsonSerializer.Serialize(_currentAiReport, AiJsonOptions);
+        System.Windows.Clipboard.SetText(json);
+        StatusText.Text = "Copied full AI investigation JSON report to clipboard.";
+    }
+
+    private async Task RefreshAiHistoryAsync()
+    {
+        try
+        {
+            var list = await _aiDb.GetRecentInvestigationsAsync(50);
+            AiHistory.Clear();
+            foreach (var r in list)
+            {
+                AiHistory.Add(new AiInvestigationViewModel(
+                    r.Id,
+                    r.Timestamp.ToLocalTime().ToString("HH:mm:ss"),
+                    r.ProcessName,
+                    r.FormatVerdictBadge(),
+                    r.RiskScore,
+                    r.ModelUsed,
+                    r));
+            }
+        }
+        catch { }
+    }
+
+    private void OnAiHistorySelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (AiHistoryGrid.SelectedItem is AiInvestigationViewModel vm)
+        {
+            DisplayAiReport(vm.Report);
+        }
+    }
+
+    private async void OnAiClearHistoryClick(object sender, RoutedEventArgs e)
+    {
+        if (Confirm("Clear all AI investigation history?", "Clear History"))
+        {
+            await _aiDb.ClearAllAsync();
+            AiHistory.Clear();
+            StatusText.Text = "Cleared all AI investigation history records.";
+        }
+    }
+
+    private void OnContextMenuInvestigateAi(object sender, RoutedEventArgs e)
+    {
+        int targetPid = 0;
+        string? targetPath = null;
+        string targetName = "";
+
+        if (ConnectionsGrid.SelectedItem is ConnectionRow connRow)
+        {
+            targetPid = connRow.Pid;
+            targetPath = connRow.Path;
+            targetName = connRow.Program;
+        }
+        else if (ProgramsGrid.SelectedItem is ProgramRow progRow)
+        {
+            targetPath = progRow.Path;
+            targetName = progRow.Name;
+        }
+        else if (StartupGrid.SelectedItem is StartupRow startRow)
+        {
+            targetPath = startRow.ExecutablePath;
+            targetName = startRow.Name;
+        }
+        else if (RulesGrid.SelectedItem is RuleRow ruleRow)
+        {
+            targetPath = ruleRow.Path;
+            targetName = ruleRow.Name;
+        }
+        else if (PacketsGrid.SelectedItem is PacketRow pktRow)
+        {
+            targetName = pktRow.ProcessDisplay;
+            targetPid = pktRow.Packet.ProcessId ?? 0;
+            if (string.IsNullOrWhiteSpace(targetName) || targetName == "-")
+                targetName = pktRow.HostOrSni ?? pktRow.Info;
+        }
+
+        _aiSelectedPid = targetPid;
+        _aiSelectedPath = targetPath;
+
+        AiTab.IsChecked = true;
+        OnViewChanged(AiTab, new RoutedEventArgs());
+
+        AiTargetDisplay.Text = targetPid > 0 ? $"PID {targetPid}: {targetName}" : (targetPath ?? targetName);
+        AiTargetTitle.Text = !string.IsNullOrWhiteSpace(targetName) ? targetName : Path.GetFileName(targetPath ?? "");
+
+        OnRunAiInvestigationClick(this, new RoutedEventArgs());
+    }
 }
+
+public sealed record AiInvestigationViewModel(
+    string Id,
+    string TimestampDisplay,
+    string ProcessName,
+    string VerdictDisplay,
+    int RiskScore,
+    string ModelUsed,
+    InvestigationReport Report);
