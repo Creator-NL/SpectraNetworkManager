@@ -856,6 +856,7 @@ public partial class MainWindow : Window
 
     private void OnAlwaysOnTopChanged(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded) return;
         bool enable = AlwaysOnTopCheck.IsChecked == true;
         Topmost = enable;
         if (enable == _appSettings.Settings.AlwaysOnTop) return;
@@ -868,6 +869,7 @@ public partial class MainWindow : Window
 
     private void OnNotificationSoundChanged(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded) return;
         bool enable = NotificationSoundCheck.IsChecked == true;
         if (enable == _appSettings.Settings.NotificationSoundEnabled) return;
         _appSettings.Save(_appSettings.Settings with { NotificationSoundEnabled = enable });
@@ -879,6 +881,7 @@ public partial class MainWindow : Window
 
     private void OnFallbackModeChanged(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded) return;
         bool enable = DnsFallbackModeBox.IsChecked == true;
         if (enable == _appSettings.Settings.DnsFallbackModeEnabled) return;
         _appSettings.Save(_appSettings.Settings with { DnsFallbackModeEnabled = enable });
@@ -1538,6 +1541,7 @@ public partial class MainWindow : Window
 
     private void OnConnectionsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (ConnectionsGrid.SelectedItem is ConnectionRow row)
         {
             ShowConnectionInspector(row);
@@ -2774,7 +2778,7 @@ public partial class MainWindow : Window
 
     private void OnDnsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isUpdatingDnsRows) return;
+        if (!IsLoaded || _isUpdatingDnsRows) return;
         if (e.AddedItems.Count > 0 && e.AddedItems[0] is DnsRow added)
         {
             ShowDnsInspector(added);
@@ -4726,6 +4730,7 @@ public partial class MainWindow : Window
 
     private void OnAlwaysAdminChanged(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded) return;
         bool enable = AlwaysAdminCheck.IsChecked == true;
         if (enable == _appSettings.Settings.AlwaysStartAsAdministrator) return;
 
@@ -5111,6 +5116,7 @@ public partial class MainWindow : Window
 
     private void OnDevicesGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (DevicesGrid.SelectedItem is DiscoveredDevice dev)
         {
             DeviceTypeBadgeText.Text = dev.KindDisplay.ToUpperInvariant();
@@ -5446,6 +5452,7 @@ public partial class MainWindow : Window
 
     private async void OnCaptureInterfaceChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (_packetCaptureManager?.IsRunning == true)
         {
             await _packetCaptureManager.StopAsync();
@@ -5456,6 +5463,7 @@ public partial class MainWindow : Window
 
     private void OnPacketFilterChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (PacketProtocolFilterCombo.SelectedItem is ComboBoxItem item)
         {
             string content = item.Content?.ToString() ?? "All Traffic";
@@ -5474,6 +5482,7 @@ public partial class MainWindow : Window
 
     private void OnPacketSearchChanged(object sender, TextChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         _packetSearchTerm = PacketSearchBox.Text.Trim();
         CapturedPacketsView?.Refresh();
     }
@@ -5488,6 +5497,7 @@ public partial class MainWindow : Window
 
     private void OnPacketsGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (PacketsGrid.SelectedItem is PacketRow row)
         {
             ShowPacketInspector(row.Packet);
@@ -5833,6 +5843,8 @@ public partial class MainWindow : Window
         TvBypassingCount.Text = bypassCount.ToString();
     }
 
+    private bool _isUpdatingGuardUi;
+
     private void RefreshBrowserGuardUi()
     {
         bool isRegistered = BrowserExtensionHost.IsHostRegistered();
@@ -5855,11 +5867,20 @@ public partial class MainWindow : Window
             BrowserGuardRules.Add(new BrowserGuardRuleRow(rule));
         }
 
-        GuardBlockShortsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeShorts;
-        GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams;
-        GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds;
-        GuardPlaceholderCheck.IsChecked = _browserGuardManager.Config.ShowInPagePlaceholder;
-        GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
+        _isUpdatingGuardUi = true;
+        try
+        {
+            if (GuardBlockShortsCheck != null) GuardBlockShortsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeShorts;
+            if (GuardBlockStreamsCheck != null) GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams;
+            if (GuardBlockTikTokCheck != null) GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds;
+            if (GuardPlaceholderCheck != null) GuardPlaceholderCheck.IsChecked = _browserGuardManager.Config.ShowInPagePlaceholder;
+            if (GuardBlockAdsCheck != null) GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
+            if (GuardBlockReelsCheck != null) GuardBlockReelsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "ig-reels" && r.Enabled);
+        }
+        finally
+        {
+            _isUpdatingGuardUi = false;
+        }
     }
 
     private void OnShieldAllSmartTvs(object sender, RoutedEventArgs e)
@@ -5931,6 +5952,7 @@ public partial class MainWindow : Window
 
     private void OnTvMobileSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
         {
             TvDeviceInspector.Visibility = Visibility.Visible;
@@ -6091,7 +6113,11 @@ public partial class MainWindow : Window
 
     private void OnGuardToggleChanged(object sender, RoutedEventArgs e)
     {
-        if (_browserGuardManager == null) return;
+        if (!IsLoaded || _isUpdatingGuardUi || _browserGuardManager == null) return;
+        if (GuardBlockShortsCheck == null || GuardBlockStreamsCheck == null ||
+            GuardBlockAdsCheck == null || GuardBlockTikTokCheck == null ||
+            GuardBlockReelsCheck == null || GuardPlaceholderCheck == null) return;
+
         _browserGuardManager.Config.BlockYouTubeShorts = GuardBlockShortsCheck.IsChecked == true;
         _browserGuardManager.Config.BlockYouTubeVideoStreams = GuardBlockStreamsCheck.IsChecked == true;
         _browserGuardManager.Config.BlockSocialVideoFeeds = GuardBlockTikTokCheck.IsChecked == true || GuardBlockReelsCheck.IsChecked == true;
@@ -6104,7 +6130,6 @@ public partial class MainWindow : Window
         _browserGuardManager.ToggleRule("ig-reels", GuardBlockReelsCheck.IsChecked == true);
 
         _browserGuardManager.Save();
-        RefreshBrowserGuardUi();
     }
 
     private void OnAddBrowserGuardRule(object sender, RoutedEventArgs e)
@@ -6257,6 +6282,7 @@ public partial class MainWindow : Window
 
     private void OnAiProcessSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (AiProcessCombo.SelectedItem is ComboBoxItem item && item.Tag is ValueTuple<int, string?> tag)
         {
             _aiSelectedPid = tag.Item1;
@@ -6584,6 +6610,7 @@ public partial class MainWindow : Window
 
     private void OnAiHistorySelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!IsLoaded) return;
         if (AiHistoryGrid.SelectedItem is AiInvestigationViewModel vm)
         {
             DisplayAiReport(vm.Report);

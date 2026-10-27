@@ -1576,22 +1576,22 @@
             <!-- Quick Shields Toggles -->
             <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,10">
                 <WrapPanel VerticalAlignment="Center">
-                    <CheckBox x:Name="GuardBlockShortsCheck" Content="🚫 Block YouTube Shorts" IsChecked="True"
+                    <CheckBox x:Name="GuardBlockShortsCheck" Content="🚫 Block YouTube Shorts"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks all YouTube Shorts pages and short-form video feeds"/>
-                    <CheckBox x:Name="GuardBlockStreamsCheck" Content="🚫 Block Video Streams (googlevideo)" IsChecked="False"
+                    <CheckBox x:Name="GuardBlockStreamsCheck" Content="🚫 Block Video Streams (googlevideo)"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks raw video playback delivery segments (stops videos from loading)"/>
-                    <CheckBox x:Name="GuardBlockAdsCheck" Content="🚫 Block In-Player Ad Beacons" IsChecked="True"
+                    <CheckBox x:Name="GuardBlockAdsCheck" Content="🚫 Block In-Player Ad Beacons"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks in-player YouTube ad statistics and telemetry"/>
-                    <CheckBox x:Name="GuardBlockTikTokCheck" Content="🚫 Block TikTok Video Feeds" IsChecked="False"
+                    <CheckBox x:Name="GuardBlockTikTokCheck" Content="🚫 Block TikTok Video Feeds"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks TikTok short-form web video playback"/>
-                    <CheckBox x:Name="GuardBlockReelsCheck" Content="🚫 Block Instagram Reels" IsChecked="False"
+                    <CheckBox x:Name="GuardBlockReelsCheck" Content="🚫 Block Instagram Reels"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks Instagram Reels video page navigation"/>
-                    <CheckBox x:Name="GuardPlaceholderCheck" Content="🛡️ Show In-Page Dark Overlay on Blocked Videos" IsChecked="True"
+                    <CheckBox x:Name="GuardPlaceholderCheck" Content="🛡️ Show In-Page Dark Overlay on Blocked Videos"
                               VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Replaces blocked video players with sleek cybernetic overlay and 'Allow Once' button"/>
                 </WrapPanel>
