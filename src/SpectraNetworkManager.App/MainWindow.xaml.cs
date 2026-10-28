@@ -138,6 +138,7 @@ public partial class MainWindow : Window
         CapturedPacketsView = CollectionViewSource.GetDefaultView(CapturedPackets);
         CapturedPacketsView.Filter = PacketRowFilter;
         InitializeComponent();
+        UpdateHostsBannerUi(_hostsMonitor.GetStatus());
         TvMobileGrid.ItemsSource = TvMobileDevices;
         BrowserGuardGrid.ItemsSource = BrowserGuardRules;
         InitPacketCaptureInterfaces();
@@ -2732,10 +2733,22 @@ public partial class MainWindow : Window
             string preview = string.Join(", ", status.SuspiciousEntries.Take(3));
             if (status.SuspiciousEntries.Count > 3) preview += $" (+{status.SuspiciousEntries.Count - 3} more)";
             HostsTamperBannerText.Text = $"Attention: Windows hosts file contains {status.SuspiciousEntries.Count} suspicious redirect(s) ({preview})!";
+
+            if (HostsFileStatusBadge != null)
+            {
+                HostsFileStatusBadge.Text = $"⚠️ Hosts File Guard: {status.SuspiciousEntries.Count} suspicious redirect(s) detected!";
+                HostsFileStatusBadge.Foreground = (Brush)FindResource("Magenta");
+            }
         }
         else
         {
             HostsTamperBanner.Visibility = Visibility.Collapsed;
+
+            if (HostsFileStatusBadge != null)
+            {
+                HostsFileStatusBadge.Text = $"🟢 Hosts File Guard: Clean ({status.TotalActiveEntries} active entries, 0 redirects)";
+                HostsFileStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0xFF, 0x88));
+            }
         }
     }
 

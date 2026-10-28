@@ -1591,6 +1591,16 @@
                             <CheckBox x:Name="BrowserDohGuardBox" Content="🛡️ Force Chrome, Edge, Brave &amp; Firefox to use this DNS (Disable DoH bypass)" Margin="0,2,0,4"
                                       Checked="OnBrowserDohGuardChanged" Unchecked="OnBrowserDohGuardChanged"
                                       ToolTip="Enforces Windows Group Policies so web browsers cannot bypass local DNS or blocklists using internal encrypted DNS-over-HTTPS."/>
+
+                            <!-- Hosts File Guard Status Card -->
+                            <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,4,0,6">
+                                <DockPanel LastChildFill="True">
+                                    <Button DockPanel.Dock="Right" Content="⚡ Restore Clean Template" Click="OnRestoreDefaultHosts" Padding="8,2" FontSize="10" ToolTip="Reset Windows hosts file to official Microsoft default"/>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock x:Name="HostsFileStatusBadge" Text="🟢 Hosts File Guard: Clean (No suspicious redirects detected)" FontSize="11" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
                             <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when SpectraNetworkManager starts" Margin="0,2,0,4" Checked="OnAutoStartDnsChanged" Unchecked="OnAutoStartDnsChanged"/>
                             <CheckBox x:Name="RestrictClientsBox" Content="Only answer queries from local / private networks" Margin="0,2,0,4"
                                       ToolTip="Protects your PC from acting as an open resolver on the internet if listening on 0.0.0.0."/>
