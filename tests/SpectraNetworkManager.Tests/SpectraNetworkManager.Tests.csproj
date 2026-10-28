@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -24,6 +24,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SpectraNetworkManager.Core\SpectraNetworkManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="zxing">
+      <HintPath>..\..\lib\zxing.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

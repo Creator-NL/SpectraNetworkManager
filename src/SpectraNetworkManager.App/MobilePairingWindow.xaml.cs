@@ -76,12 +76,13 @@ public partial class MobilePairingWindow : Window
                 total, total, 96, 96,
                 PixelFormats.Bgr32, null,
                 pixels, total * 4);
+            bmp.Freeze();
 
             QrImage.Source = bmp;
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback
+            System.Diagnostics.Debug.WriteLine($"[MobilePairing] QR Render Error: {ex}");
         }
     }
 

@@ -27,7 +27,7 @@
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <!-- QR Image container -->
                 <Border Background="#0A0E17" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10" HorizontalAlignment="Center">
-                    <Image x:Name="QrImage" Width="200" Height="200" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                    <Image x:Name="QrImage" Width="200" Height="200" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
                 </Border>
 
                 <!-- One-time PIN -->

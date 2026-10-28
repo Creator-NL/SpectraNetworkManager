@@ -17,6 +17,25 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Ensure all local assemblies (like zxing.dll) resolve seamlessly in self-contained mode
+        AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+        {
+            try
+            {
+                var an = new System.Reflection.AssemblyName(args.Name).Name;
+                if (!string.IsNullOrEmpty(an))
+                {
+                    string candidate = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, an + ".dll");
+                    if (System.IO.File.Exists(candidate))
+                    {
+                        return System.Reflection.Assembly.LoadFrom(candidate);
+                    }
+                }
+            }
+            catch { }
+            return null;
+        };
+
         // 0. Prevent WPF controls (TextBox overtype and DataGrid row edit) from swallowing Push-To-Talk keys like Insert
         DisableBuiltInInsertKeyCapture();
 

@@ -21,4 +21,10 @@
     <ProjectReference Include="..\SpectraNetworkManager.Core\SpectraNetworkManager.Core.csproj" />
     <ProjectReference Include="..\SpectraNetworkManager.Platform.Windows\SpectraNetworkManager.Platform.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Reference Include="zxing">
+      <HintPath>..\..\lib\zxing.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
 </Project>
