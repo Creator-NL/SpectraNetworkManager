@@ -1716,21 +1716,43 @@
                 </WrapPanel>
             </DockPanel>
 
-            <!-- Router Forwarding Notice Banner -->
-            <Border x:Name="TvGatewayNoticeBanner" Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
-                    CornerRadius="4" Padding="12,8" Margin="0,0,0,10" Visibility="Collapsed">
-                <DockPanel LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Content="How to Fix..." Click="OnShowDnsSetupGuide" Padding="8,3" VerticalAlignment="Center" Margin="12,0,0,0"/>
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🟡 ROUTER DNS FORWARDING DETECTED" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
-                            <TextBlock x:Name="TvGatewayNoticeText" Text=" (Gateway: 192.168.1.1)" FontSize="12" Foreground="{StaticResource Muted}"/>
+            <!-- Banners Area -->
+            <StackPanel Grid.Row="1" Margin="0,0,0,10">
+                <!-- LAN DNS Protection Status & 1-Click Activation Banner -->
+                <Border x:Name="TvLanStatusBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                        CornerRadius="4" Padding="12,8" Margin="0,0,0,6">
+                    <DockPanel LastChildFill="True">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="TvEnableLanBtn" Content="🛡️ Enable LAN Protection (0.0.0.0 &amp; Firewall)" Click="OnEnableLanProtectionClick"
+                                    Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Padding="12,5" Margin="8,0,0,0"/>
                         </StackPanel>
-                        <TextBlock Text="Your router forwards DNS queries on behalf of LAN devices. Global blocklists work, but per-device Smart TV &amp; GSM rules require setting Spectra's LAN IP as the DNS server in your device Wi-Fi settings."
-                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
-                    </StackPanel>
-                </DockPanel>
-            </Border>
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="TvLanStatusTitle" Text="🌐 LAN SINKHOLE STATUS: " FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock x:Name="TvLanStatusSub" Text="Checking..." FontSize="12" Foreground="{StaticResource Text}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TvLanStatusDesc" Text="Smart TVs and phones require Spectra to listen on 0.0.0.0 and allow inbound port 53."
+                                       FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- Router Forwarding Notice Banner -->
+                <Border x:Name="TvGatewayNoticeBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
+                        CornerRadius="4" Padding="12,8" Visibility="Collapsed">
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="How to Fix..." Click="OnShowDnsSetupGuide" Padding="8,3" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="🟡 ROUTER DNS FORWARDING DETECTED" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
+                                <TextBlock x:Name="TvGatewayNoticeText" Text=" (Gateway: 192.168.1.1)" FontSize="12" Foreground="{StaticResource Muted}"/>
+                            </StackPanel>
+                            <TextBlock Text="Your router forwards DNS queries on behalf of LAN devices. Global blocklists work, but per-device Smart TV &amp; GSM rules require setting Spectra's LAN IP as the DNS server in your device Wi-Fi settings."
+                                       FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+            </StackPanel>
 
             <!-- TV & Mobile Devices DataGrid -->
             <DataGrid x:Name="TvMobileGrid" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnTvMobileSelectionChanged">
@@ -1765,7 +1787,11 @@
                     BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,8" Visibility="Collapsed">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ComboBox x:Name="TvGroupAssignCombo" Width="140" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <Button x:Name="TvInspectorPairBtn" Content="📱 Pair Phone (QR Code)" Click="OnInspectorPairMobileClick" Margin="0,0,8,0" Padding="10,4"
+                                Foreground="{StaticResource Amber}" ToolTip="Open the QR code pairing window for this phone / mobile device"/>
+                        <Button Content="⚙️ DNS Setup Instructions" Click="OnInspectorShowGuideClick" Margin="0,0,8,0" Padding="10,4"
+                                ToolTip="View step-by-step Wi-Fi DNS setup steps for this device"/>
+                        <ComboBox x:Name="TvGroupAssignCombo" Width="130" Margin="0,0,8,0" VerticalAlignment="Center"/>
                         <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
                         <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
                     </StackPanel>

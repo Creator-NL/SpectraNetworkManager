@@ -1,7 +1,7 @@
 <Window x:Class="SpectraNetworkManager.Ui.MobilePairingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Spectra Mobile Defense Companion" Width="480" Height="580" MinWidth="420" MinHeight="520"
+        Title="Spectra Mobile Defense Companion" Width="500" Height="640" MinWidth="440" MinHeight="560"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Icon="app.ico"
         Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
@@ -50,6 +50,15 @@
                 <CheckBox x:Name="AllowRuleChangesCheck" Content="Allow phone to pause/resume DNS Sinkhole" IsChecked="False"
                           Checked="OnPermissionChanged" Unchecked="OnPermissionChanged"
                           ToolTip="When checked, authenticated phones can pause ad-blocking for 15 minutes."/>
+
+                <!-- Wi-Fi DNS Tip -->
+                <Border Background="#1400E5FF" BorderBrush="#3300E5FF" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,10,0,0" Width="360">
+                    <StackPanel>
+                        <TextBlock Text="💡 PHONE DNS AD-BLOCKING TIP" FontWeight="Bold" FontSize="10" Foreground="{StaticResource Cyan}"/>
+                        <TextBlock Text="To sinkhole ads &amp; telemetry on this phone: set Wi-Fi DNS to this PC's IP and set 'Private DNS' to OFF in Android Wi-Fi settings."
+                                   FontSize="10" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Border>
 

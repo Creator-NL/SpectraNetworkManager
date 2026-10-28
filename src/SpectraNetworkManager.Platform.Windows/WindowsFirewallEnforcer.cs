@@ -239,24 +239,35 @@ public sealed class WindowsFirewallEnforcer
     private const int ProfilesDomainAndPrivate = 3;     // never on "Public" networks (cafes, hotels)
 
     /// <summary>
-    /// Lets other devices on your LOCAL network (not the internet) send DNS queries to SpectraNetworkManager: inbound TCP and UDP on the DNS port,
+    /// Lets other devices on your LOCAL network (not the internet) send DNS queries and access the Mobile Companion:
+    /// inbound TCP and UDP on the DNS port (53) and TCP on the mobile companion port (8765),
     /// only from the local subnet, only on Private and Domain networks.
     /// </summary>
-    public void AllowInboundDns(string exePath, int port)
+    public void AllowInboundDns(string exePath, int port, int mobileCompanionPort = 8765)
     {
         dynamic policy = Create("HNetCfg.FWPolicy2");
         RemoveInboundDns(exePath);
 
-        foreach (var (protocol, label) in new[] { (ProtocolUdp, "udp"), (ProtocolTcp, "tcp") })
+        var ruleSpecs = new List<(int Protocol, string Label, int Port)>
+        {
+            (ProtocolUdp, "dns-udp", port),
+            (ProtocolTcp, "dns-tcp", port)
+        };
+        if (mobileCompanionPort > 0)
+        {
+            ruleSpecs.Add((ProtocolTcp, "mobile-companion-tcp", mobileCompanionPort));
+        }
+
+        foreach (var (protocol, label, targetPort) in ruleSpecs)
         {
             dynamic rule = Create("HNetCfg.FWRule");
             rule.Name = InboundDnsRuleName(exePath, label);
-            rule.Description = "Lets devices on your local network use the SpectraNetworkManager DNS server. Removed from SpectraNetworkManager's DNS tab.";
+            rule.Description = "Lets devices on your local network use SpectraNetworkManager DNS and Mobile Companion. Managed by SpectraNetworkManager.";
             rule.ApplicationName = exePath;
             rule.Direction = DirectionIn;
             rule.Action = ActionAllow;
             rule.Protocol = protocol;
-            rule.LocalPorts = port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            rule.LocalPorts = targetPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
             rule.RemoteAddresses = "LocalSubnet";
             rule.Profiles = ProfilesDomainAndPrivate;
             rule.Grouping = Group;

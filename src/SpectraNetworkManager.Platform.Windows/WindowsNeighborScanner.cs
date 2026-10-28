@@ -40,7 +40,7 @@ public sealed class WindowsNeighborScanner : INeighborScanner
                                 string mac = string.Join("-", row.PhysAddr.Take(6).Select(b => b.ToString("X2")));
 
                                 // Type 3 = Dynamic, 4 = Static
-                                if (row.Type is 3 or 4 && !mac.StartsWith("FF-FF-FF", StringComparison.OrdinalIgnoreCase))
+                                if (row.Type is 3 or 4 && IsValidLanHost(ip, mac))
                                 {
                                     list.Add((ip, mac, false));
                                 }
@@ -85,7 +85,7 @@ public sealed class WindowsNeighborScanner : INeighborScanner
                         if (IPAddress.TryParse(m.Groups[1].Value, out var ip))
                         {
                             string mac = m.Groups[2].Value.ToUpperInvariant();
-                            if (!mac.StartsWith("FF-FF-FF", StringComparison.OrdinalIgnoreCase))
+                            if (IsValidLanHost(ip, mac))
                             {
                                 list.Add((ip, mac, false));
                             }
@@ -100,6 +100,39 @@ public sealed class WindowsNeighborScanner : INeighborScanner
         }
 
         return list;
+    }
+
+    private static bool IsValidLanHost(IPAddress ip, string mac)
+    {
+        if (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.None) || ip.Equals(IPAddress.Broadcast))
+            return false;
+
+        byte[] b = ip.GetAddressBytes();
+        if (b.Length == 4)
+        {
+            // Multicast range 224.0.0.0 to 239.255.255.255 (Class D)
+            if (b[0] >= 224 && b[0] <= 239)
+                return false;
+            // Reserved / Experimental range 240.0.0.0 to 255.255.255.255 (Class E)
+            if (b[0] >= 240)
+                return false;
+            // 0.0.0.0/8
+            if (b[0] == 0)
+                return false;
+            // Subnet broadcast ending in 255
+            if (b[3] == 255)
+                return false;
+        }
+
+        // Multicast MAC addresses (starts with 01-00-5E or 33-33)
+        if (mac.StartsWith("01-00-5E", StringComparison.OrdinalIgnoreCase) ||
+            mac.StartsWith("33-33", StringComparison.OrdinalIgnoreCase) ||
+            mac.StartsWith("FF-FF-FF", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     public Task<string?> ProbeMacAddressAsync(IPAddress ip)

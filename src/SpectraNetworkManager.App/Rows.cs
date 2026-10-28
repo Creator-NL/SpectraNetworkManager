@@ -455,6 +455,11 @@ public sealed class TvMobileDeviceRow : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
     }
 
+    public void Refresh()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 

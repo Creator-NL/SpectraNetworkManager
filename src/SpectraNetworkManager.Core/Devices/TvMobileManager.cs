@@ -157,23 +157,27 @@ public sealed class TvMobileManager
                    "3. Restart your Roku. All Roku audience tracking & telemetry will be filtered!";
         }
 
-        if (v.Contains("apple"))
+        if (v.Contains("apple") || v.Contains("iphone") || v.Contains("ipad"))
         {
-            return "Apple TV / iOS Device:\n" +
-                   "1. Open Settings ➔ Network ➔ Select your Wi-Fi network.\n" +
-                   "2. Click Configure DNS ➔ Select Manual.\n" +
-                   $"3. Add DNS Server: {spectraLanIp}\n" +
-                   "4. Save. App telemetry & tracking beacons will be sinkholed!";
+            return "Apple iPhone / iPad / Apple TV:\n" +
+                   "1. Open Settings ➔ Wi-Fi ➔ Tap the (i) next to your connected network.\n" +
+                   "2. Tap Configure DNS ➔ Select Manual.\n" +
+                   "3. Delete existing DNS servers, then tap Add Server:\n" +
+                   $"   {spectraLanIp}\n" +
+                   "4. Tap Save. App telemetry & tracking beacons will be sinkholed!";
         }
 
-        if (v.Contains("android") || v.Contains("sony") || v.Contains("google"))
+        if (v.Contains("android") || v.Contains("sony") || v.Contains("google") || v.Contains("mobile") || v.Contains("galaxy") || v.Contains("pixel") || v.Contains("xiaomi"))
         {
-            return "Android TV / Google TV / Android Phone:\n" +
+            return "Android Phone / Tablet / Google TV:\n" +
                    "1. Open Settings ➔ Network & Internet ➔ Wi-Fi.\n" +
-                   "2. Select your connected network ➔ Modify / Advanced Options.\n" +
+                   "2. Tap the Gear icon next to your Wi-Fi network ➔ Modify / Advanced.\n" +
                    "3. Change IP Settings from DHCP to Static (keep current IP & Gateway).\n" +
-                   $"4. Set DNS 1 to: {spectraLanIp}\n" +
-                   "5. Save. Ad networks and tracking SDKs will be blocked!";
+                   $"4. Set DNS 1 to: {spectraLanIp}\n\n" +
+                   "5. ⚠️ CRITICAL STEP FOR ANDROID:\n" +
+                   "   Go to Settings ➔ Network & Internet ➔ Private DNS.\n" +
+                   "   Select 'Off' (prevents Android from bypassing Wi-Fi DNS via Google DoT).\n\n" +
+                   "6. Save and reconnect. Telemetry and mobile ads will be filtered automatically!";
         }
 
         // Generic guide
@@ -182,6 +186,7 @@ public sealed class TvMobileManager
                "2. Select your connected Wi-Fi network ➔ Configure IP / DNS.\n" +
                "3. Change DNS Mode to 'Manual' or 'Static'.\n" +
                $"4. Set DNS Server to: {spectraLanIp}\n" +
-               "5. Save and reconnect. Telemetry and ads will be filtered automatically!";
+               "5. On Android phones, ensure Settings ➔ Private DNS is set to 'Off'.\n" +
+               "6. Save and reconnect. Telemetry and ads will be filtered automatically!";
     }
 }

@@ -257,7 +257,13 @@ public static class DeviceClassifier
             return (ouiMatch.Kind, ouiMatch.Vendor, $"{ouiMatch.Vendor} ({ouiMatch.Kind})");
         }
 
-        // 6. Generic computer / workstation if RDP/SMB/SSH open
+        // 6. Modern Smartphone / Tablet Randomized MAC (Locally Administered Unicast)
+        if (IsRandomizedMac(normMac))
+        {
+            return (DeviceKind.MobileOrTablet, "Mobile (Private Wi-Fi MAC)", "Smartphone / Tablet (Randomized MAC Privacy Active)");
+        }
+
+        // 7. Generic computer / workstation if RDP/SMB/SSH open
         if (portNumbers.Contains(3389) || portNumbers.Contains(445) || portNumbers.Contains(135))
         {
             return (DeviceKind.Workstation, "Windows PC", "Windows PC / Workstation (SMB/RDP active)");
@@ -277,7 +283,27 @@ public static class DeviceClassifier
         {
             return e.Vendor;
         }
+        if (IsRandomizedMac(norm))
+        {
+            return "Mobile (Private Wi-Fi MAC)";
+        }
         return null;
+    }
+
+    /// <summary>
+    /// Checks if a MAC address has the Locally Administered Address (LAA) unicast bit set,
+    /// which indicates iOS Private Wi-Fi Address or Android MAC Randomization.
+    /// </summary>
+    public static bool IsRandomizedMac(string macAddress)
+    {
+        string norm = NormalizeMac(macAddress);
+        if (norm.Length < 2) return false;
+        if (int.TryParse(norm[..2], System.Globalization.NumberStyles.HexNumber, null, out int firstByte))
+        {
+            // Unicast (bit 0 == 0) and Locally Administered (bit 1 == 1)
+            return (firstByte & 0x01) == 0 && (firstByte & 0x02) != 0;
+        }
+        return false;
     }
 
     private static string NormalizeMac(string mac)

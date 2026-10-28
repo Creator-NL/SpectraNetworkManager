@@ -3752,7 +3752,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _enforcer.AllowInboundDns(exe, settings.Port);
+            _enforcer.AllowInboundDns(exe, settings.Port, _mobileServer?.Port ?? 8765);
             StatusText.Text = $"Local network devices may now use the DNS server on port {settings.Port}.";
         }
         catch (Exception ex)
@@ -4097,6 +4097,23 @@ public partial class MainWindow : Window
                     if (ReferenceEquals(row, _inspectedConnectionRow) && ConnectionInspectorPanel.Visibility == Visibility.Visible)
                         ShowConnectionInspector(row);
                 }
+
+            foreach (var dev in DiscoveredDevices)
+            {
+                if (dev.Ip != null && dev.Ip.Equals(ip))
+                {
+                    dev.Hostname = name;
+                }
+            }
+
+            foreach (var tvRow in TvMobileDevices)
+            {
+                if (tvRow.Device?.Ip != null && tvRow.Device.Ip.Equals(ip))
+                {
+                    tvRow.Device.Hostname = name;
+                    tvRow.Refresh();
+                }
+            }
         }));
     }
 
@@ -5657,6 +5674,8 @@ public partial class MainWindow : Window
             {
                 _sink.Settings.ListenAddress = "0.0.0.0";
                 _sink.SaveSettingsOnly(_sink.Settings);
+                string exe = Environment.ProcessPath ?? "";
+                _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765);
                 if (_sink.IsRunning)
                 {
                     _sink.Stop();
@@ -6207,6 +6226,33 @@ public partial class MainWindow : Window
     {
         TvMobileManager.EnsureDefaultGroups(_sink.Settings);
 
+        // Check LAN DNS listening status and firewall
+        string exe = Environment.ProcessPath ?? "";
+        bool hasFirewall = _enforcer.HasInboundDns(exe);
+        bool isLanListening = _sink.Settings.ListenAddress == "0.0.0.0";
+        var localIp = GetLocalActiveIp();
+        string localIpStr = localIp?.ToString() ?? "192.168.1.X";
+
+        if (isLanListening && _sink.IsRunning && hasFirewall)
+        {
+            TvLanStatusBanner.BorderBrush = (Brush)FindResource("Cyan");
+            TvLanStatusTitle.Text = "🟢 LAN DNS SINKHOLE ACTIVE: ";
+            TvLanStatusTitle.Foreground = (Brush)FindResource("Cyan");
+            TvLanStatusSub.Text = $"Listening on 0.0.0.0:{_sink.Settings.Port} • PC IP: {localIpStr} • Firewall OPEN";
+            TvLanStatusDesc.Text = $"All devices on your Wi-Fi/LAN can reach Spectra. Set device Wi-Fi DNS to: {localIpStr}";
+            TvEnableLanBtn.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            TvLanStatusBanner.BorderBrush = (Brush)FindResource("Amber");
+            TvLanStatusTitle.Text = "🟡 LAN DNS RESTRICTED (LOCALHOST ONLY): ";
+            TvLanStatusTitle.Foreground = (Brush)FindResource("Amber");
+            TvLanStatusSub.Text = !isLanListening ? "Restricted to 127.0.0.1 (Localhost)" : (!hasFirewall ? "Windows Firewall Rule Missing" : "DNS Server Not Running");
+            TvLanStatusDesc.Text = "Smart TVs and phones cannot connect yet. Click the button to enable LAN listening on 0.0.0.0 and open Windows Firewall.";
+            TvEnableLanBtn.Visibility = Visibility.Visible;
+            TvEnableLanBtn.Content = "🛡️ Enable LAN Protection (0.0.0.0 & Firewall)";
+        }
+
         // Detect Gateway IP
         IPAddress? gatewayIp = null;
         try
@@ -6235,20 +6281,30 @@ public partial class MainWindow : Window
 
         foreach (var dev in DiscoveredDevices)
         {
-            if (dev.Ip != null && !IPAddress.IsLoopback(dev.Ip) && !dev.Ip.Equals(IPAddress.None))
-                knownDevices[dev.Ip.ToString()] = dev;
+            if (dev.Ip != null && !IPAddress.IsLoopback(dev.Ip) && !dev.Ip.Equals(IPAddress.None) && !dev.Ip.Equals(IPAddress.Broadcast))
+            {
+                byte[] b = dev.Ip.GetAddressBytes();
+                if (b.Length != 4 || (b[0] < 224 && b[0] != 0 && b[3] != 255))
+                    knownDevices[dev.Ip.ToString()] = dev;
+            }
         }
 
         foreach (var n in neighbors)
         {
             if (n.Ip != null && !knownDevices.ContainsKey(n.Ip.ToString()))
             {
-                var classification = DeviceClassifier.Classify(n.Mac, "", null, n.IsGateway);
+                byte[] b = n.Ip.GetAddressBytes();
+                if (b.Length == 4 && (b[0] >= 224 || b[0] == 0 || b[3] == 255))
+                    continue;
+
+                string? host = _dns.Request(n.Ip);
+                var classification = DeviceClassifier.Classify(n.Mac, host ?? "", null, n.IsGateway);
                 var dev = new DiscoveredDevice
                 {
                     Ip = n.Ip,
                     MacAddress = n.Mac,
                     Vendor = classification.Vendor,
+                    Hostname = host ?? "",
                     Kind = classification.Kind,
                     DeviceDescription = classification.Description,
                     IsGateway = n.IsGateway,
@@ -6358,8 +6414,67 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnShieldAllSmartTvs(object sender, RoutedEventArgs e)
+    private async void OnEnableLanProtectionClick(object sender, RoutedEventArgs e)
     {
+        await EnableLanDnsProtectionAsync();
+    }
+
+    private async Task EnableLanDnsProtectionAsync()
+    {
+        if (!_isAdmin)
+        {
+            Info("Enabling LAN Protection requires Administrator privileges to open Windows Firewall.");
+            return;
+        }
+
+        try
+        {
+            _sink.Settings.ListenAddress = "0.0.0.0";
+            _sink.SaveSettingsOnly(_sink.Settings);
+
+            string exe = Environment.ProcessPath ?? "";
+            _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765);
+
+            if (_sink.IsRunning)
+            {
+                _sink.Stop();
+                await StartDnsAsync();
+            }
+
+            if (_mobileServer != null && !_mobileServer.IsRunning)
+            {
+                try { _mobileServer.Start(); } catch { }
+            }
+
+            RefreshTvMobileUi();
+
+            var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+            Info(
+                $"🛡️ LAN Protection is now ACTIVE!\n\n" +
+                $"• DNS Listen Address: 0.0.0.0 (Port {_sink.Settings.Port})\n" +
+                $"• Windows Firewall: Inbound DNS (Port {_sink.Settings.Port} UDP/TCP) and Mobile Companion (Port 8765 TCP) are OPEN.\n" +
+                $"• Your PC LAN IP: {localIp}\n\n" +
+                $"To protect your Smart TV or Phone:\n" +
+                $"1. Set the device Wi-Fi DNS server to: {localIp}\n" +
+                $"2. On Android phones: Turn OFF 'Private DNS' in Wi-Fi settings.\n\n" +
+                $"Spectra is now actively ready to receive and filter all DNS traffic from your network!");
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to enable LAN DNS protection", ex);
+        }
+    }
+
+    private async void OnShieldAllSmartTvs(object sender, RoutedEventArgs e)
+    {
+        if (_sink.Settings.ListenAddress == "127.0.0.1")
+        {
+            if (Confirm("Spectra's DNS server is currently restricted to localhost (127.0.0.1). For Smart TVs and phones to connect, LAN listening (0.0.0.0) and Windows Firewall must be enabled.\n\nWould you like to enable LAN Protection now?", "Enable LAN Protection"))
+            {
+                await EnableLanDnsProtectionAsync();
+            }
+        }
+
         TvMobileManager.EnsureDefaultGroups(_sink.Settings);
         int added = 0;
         foreach (var row in TvMobileDevices.Where(d => d.Device.Kind == DeviceKind.SmartTv))
@@ -6373,8 +6488,16 @@ public partial class MainWindow : Window
         Info($"Smart TV Shield Active!\n\nAll {added} Smart TVs have been assigned to the '{TvMobileManager.SmartTvsGroupName}' group with Automatic Content Recognition (ACR) and banner ads blocked.\n\nEnsure each TV's DNS is pointed to this PC ({GetLocalActiveIp()}).");
     }
 
-    private void OnShieldAllMobileDevices(object sender, RoutedEventArgs e)
+    private async void OnShieldAllMobileDevices(object sender, RoutedEventArgs e)
     {
+        if (_sink.Settings.ListenAddress == "127.0.0.1")
+        {
+            if (Confirm("Spectra's DNS server is currently restricted to localhost (127.0.0.1). For mobile phones to connect, LAN listening (0.0.0.0) and Windows Firewall must be enabled.\n\nWould you like to enable LAN Protection now?", "Enable LAN Protection"))
+            {
+                await EnableLanDnsProtectionAsync();
+            }
+        }
+
         TvMobileManager.EnsureDefaultGroups(_sink.Settings);
         int added = 0;
         foreach (var row in TvMobileDevices.Where(d => d.Device.Kind == DeviceKind.MobileOrTablet))
@@ -6386,6 +6509,25 @@ public partial class MainWindow : Window
         _sink.SaveSettingsOnly(_sink.Settings);
         RefreshTvMobileUi();
         Info($"Mobile Defense Shield Active!\n\nAll {added} mobile devices have been assigned to the '{TvMobileManager.MobileDevicesGroupName}' group with mobile ad networks and tracking SDKs blocked.\n\nEnsure Wi-Fi DNS is pointed to this PC ({GetLocalActiveIp()}).");
+    }
+
+    private void OnInspectorPairMobileClick(object sender, RoutedEventArgs e)
+    {
+        OnLaunchMobileCompanion(sender, e);
+    }
+
+    private void OnInspectorShowGuideClick(object sender, RoutedEventArgs e)
+    {
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+            string guide = TvMobileManager.GetDnsSetupGuide(row.Vendor, localIp);
+            MessageBox.Show(this, guide, $"DNS Setup Guide: {row.Hostname}", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else
+        {
+            OnShowDnsSetupGuide(sender, e);
+        }
     }
 
     private void OnLaunchMobileCompanion(object sender, RoutedEventArgs e)
