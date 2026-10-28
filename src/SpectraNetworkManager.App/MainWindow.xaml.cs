@@ -1425,7 +1425,7 @@ public partial class MainWindow : Window
         QuarantineTab.IsChecked = true;
     }
 
-    private async Task PromptAndQuarantineAsync(string path, string name)
+    private async Task PromptAndQuarantineAsync(string path, string name, string reason = "Quarantined by user")
     {
         if (!_isAdmin)
         {
@@ -1473,7 +1473,7 @@ public partial class MainWindow : Window
         try
         {
             StatusText.Text = $"Quarantining {name}...";
-            var (success, msg, snapshot) = await _quarantineManager.QuarantineAsync(path, "Quarantined by user");
+            var (success, msg, snapshot) = await _quarantineManager.QuarantineAsync(path, reason);
             if (success && snapshot != null)
             {
                 StatusText.Text = $"Quarantined {name}: {snapshot.SummaryDisplay}";
@@ -1533,13 +1533,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (snapshot.IsRestored)
+        {
+            Info($"\"{name}\" has already been restored from quarantine.\n\nExecution lockout, firewall rules, and startup entries are already back to normal.");
+            return;
+        }
+
         var answer = MessageBox.Show(this,
             $"Restore \"{name}\" from Quarantine?\n\n" +
-            "This will reverse all quarantine actions:\n" +
+            "This will reverse all 5 quarantine actions:\n" +
             "1. ⛔ Remove kernel-level execution lockout (IFEO).\n" +
             "2. 🧱 Remove Inbound/Outbound quarantine firewall block rules.\n" +
             "3. 🚀 Re-enable auto-start registry keys and startup items.\n" +
-            "4. ⚙️ Restore Windows Service start types and prompt to restart if needed.\n\n" +
+            "4. ⚙️ Restore Windows Service start types and prompt to restart if needed.\n" +
+            "5. 🟢 Restore normal process execution.\n\n" +
             "Proceed with restore?",
             $"🔄 Restore: {name}", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
 
@@ -1577,30 +1584,42 @@ public partial class MainWindow : Window
 
     private void RefreshQuarantineVault()
     {
-        var snapshots = _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).ToList();
+        bool showRestored = QuarantineShowRestoredCheck?.IsChecked == true;
+        var all = _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).ToList();
+        var snapshots = showRestored ? all : all.Where(s => !s.IsRestored).ToList();
+
         QuarantinedItems.Clear();
         foreach (var s in snapshots)
         {
             QuarantinedItems.Add(s);
         }
 
-        int activeCount = snapshots.Count(s => !s.IsRestored);
+        int activeCount = all.Count(s => !s.IsRestored);
         QuarantineCountText.Text = $"{activeCount} program{(activeCount != 1 ? "s" : "")} quarantined in vault";
 
-        if (QuarantineGrid.SelectedItem == null && QuarantinedItems.Count > 0)
+        if (QuarantinedItems.Count > 0)
         {
-            QuarantineGrid.SelectedIndex = 0;
+            if (QuarantineGrid.SelectedItem == null || !QuarantinedItems.Contains((QuarantineSnapshot)QuarantineGrid.SelectedItem))
+            {
+                QuarantineGrid.SelectedIndex = 0;
+            }
         }
-        else if (QuarantinedItems.Count == 0)
+        else
         {
+            QuarantineGrid.SelectedItem = null;
             ClearQuarantineDetails();
         }
+    }
+
+    private void OnQuarantineShowRestoredChanged(object sender, RoutedEventArgs e)
+    {
+        RefreshQuarantineVault();
     }
 
     private void ClearQuarantineDetails()
     {
         QuarantineDetailNameText.Text = "No programs quarantined";
-        QuarantineDetailReasonText.Text = "The Quarantine Vault is currently empty. To quarantine a suspicious program, right-click any connection or program and select '4-Stage Quarantine', or click 'Quarantine New File...'.";
+        QuarantineDetailReasonText.Text = "The Quarantine Vault is currently empty. To quarantine a suspicious program, right-click any connection or program and select '5-Stage Quarantine', or click 'Quarantine New File...'.";
         QuarantineDetailPathText.Text = "-";
         QuarantineDetailTimestampText.Text = "-";
         QuarantineDetailIdText.Text = "-";
@@ -1612,6 +1631,17 @@ public partial class MainWindow : Window
         QuarantineStage3Text.Text = "No services disabled";
         QuarantineStage4Text.Text = "No auto-start entries disabled";
         QuarantineStage5Text.Text = "No quarantine firewall blocks active";
+
+        if (QuarantineRestoreButton != null)
+        {
+            QuarantineRestoreButton.IsEnabled = false;
+            QuarantineRestoreButton.Content = "🔄 Restore Program (Un-Quarantine)";
+        }
+        if (QuarantineDetailRestoreButton != null)
+        {
+            QuarantineDetailRestoreButton.IsEnabled = false;
+            QuarantineDetailRestoreButton.Content = "🔄 Restore Program";
+        }
     }
 
     private void OnQuarantineGridSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1630,12 +1660,34 @@ public partial class MainWindow : Window
                 QuarantineStatusBadgeText.Text = "RESTORED";
                 QuarantineStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0x00, 0xE6, 0x76));
                 QuarantineStatusBadgeText.Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0xFF, 0x88));
+
+                if (QuarantineRestoreButton != null)
+                {
+                    QuarantineRestoreButton.IsEnabled = false;
+                    QuarantineRestoreButton.Content = "✔ Already Restored";
+                }
+                if (QuarantineDetailRestoreButton != null)
+                {
+                    QuarantineDetailRestoreButton.IsEnabled = false;
+                    QuarantineDetailRestoreButton.Content = "✔ Restored";
+                }
             }
             else
             {
                 QuarantineStatusBadgeText.Text = "QUARANTINED";
                 QuarantineStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6));
                 QuarantineStatusBadgeText.Foreground = (Brush)FindResource("Magenta");
+
+                if (QuarantineRestoreButton != null)
+                {
+                    QuarantineRestoreButton.IsEnabled = true;
+                    QuarantineRestoreButton.Content = "🔄 Restore Program (Un-Quarantine)";
+                }
+                if (QuarantineDetailRestoreButton != null)
+                {
+                    QuarantineDetailRestoreButton.IsEnabled = true;
+                    QuarantineDetailRestoreButton.Content = "🔄 Restore Program";
+                }
             }
 
             QuarantineStage1Text.Text = $"{snap.TerminatedPids.Count} process instance(s) killed | {snap.ClosedSocketsCount} network socket(s) terminated";
@@ -1664,6 +1716,12 @@ public partial class MainWindow : Window
     {
         if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap)
         {
+            if (snap.IsRestored)
+            {
+                Info($"\"{snap.ProgramName}\" has already been restored from quarantine.\n\nExecution lockout, firewall rules, and startup entries are already back to normal.");
+                return;
+            }
+
             await PromptAndRestoreQuarantineAsync(snap.ExecutablePath, snap.ProgramName);
             RefreshQuarantineVault();
         }
@@ -1716,11 +1774,20 @@ public partial class MainWindow : Window
     {
         if (QuarantineGrid.SelectedItem is QuarantineSnapshot snap)
         {
-            if (Confirm($"Remove \"{snap.ProgramName}\" from the Quarantine Vault history?\n\nNote: If this program is currently quarantined, removing the record does not un-quarantine it. Use 'Restore Program' instead if you want to restore execution and network access.", "Remove Snapshot"))
+            string msg = snap.IsRestored
+                ? $"Remove the history record for \"{snap.ProgramName}\" from the Quarantine Vault?"
+                : $"Remove \"{snap.ProgramName}\" from the Quarantine Vault?\n\n⚠️ Warning: This program is currently quarantined. If you remove this record without restoring first, execution lockout and firewall blocks will remain in place.\n\nTo restore execution and network access, click 'Cancel' and select 'Restore Program' instead.\n\nDo you want to permanently delete this snapshot record?";
+
+            if (Confirm(msg, "Remove Vault Record"))
             {
                 _quarantineVault.DeleteSnapshot(snap.Id);
                 RefreshQuarantineVault();
+                StatusText.Text = $"Removed vault record for {snap.ProgramName}";
             }
+        }
+        else
+        {
+            Info("Please select an item in the Quarantine Vault to remove.");
         }
     }
 
@@ -6647,6 +6714,27 @@ public partial class MainWindow : Window
         AiVirusTotalButton.Content = LocalizationManager.T("AiVirusTotal");
         AiCopyReportButton.Content = LocalizationManager.T("AiCopyJson");
 
+        // Context Menus
+        if (ConnectionMenuQuarantine != null) ConnectionMenuQuarantine.Header = LocalizationManager.T("MenuQuarantine");
+        if (ProgramMenuQuarantine != null) ProgramMenuQuarantine.Header = LocalizationManager.T("MenuQuarantine");
+
+        // Quarantine Vault
+        if (QuarantineShowRestoredCheck != null) QuarantineShowRestoredCheck.Content = LocalizationManager.T("QuarantineShowRestored");
+        if (QuarantineRestoreButton != null)
+        {
+            if (QuarantineGrid?.SelectedItem is QuarantineSnapshot snap && snap.IsRestored)
+            {
+                QuarantineRestoreButton.Content = "✔ Already Restored";
+            }
+            else
+            {
+                QuarantineRestoreButton.Content = LocalizationManager.T("QuarantineRestore");
+            }
+        }
+        if (QuarantineBrowseButton != null) QuarantineBrowseButton.Content = LocalizationManager.T("QuarantineBrowse");
+        if (QuarantineRemoveVaultButton != null) QuarantineRemoveVaultButton.Content = LocalizationManager.T("QuarantineRemoveVault");
+        if (QuarantinePanicButton != null) QuarantinePanicButton.Content = LocalizationManager.T("QuarantinePanicRestore");
+
         if (_currentAiReport != null)
         {
             DisplayAiReport(_currentAiReport);
@@ -6969,19 +7057,8 @@ public partial class MainWindow : Window
             Info("No executable path available to quarantine.");
             return;
         }
-        if (Confirm($"Execute 4-Stage Active Defense Quarantine on '{Path.GetFileName(path)}'?\n\nThis will terminate active sockets, stop dedicated services, disable auto-start, and block in Windows Firewall.\n(100% reversible with 1-click restore).", "Confirm 4-Stage Quarantine"))
-        {
-            var (success, msg, snapshot) = await _quarantineManager.QuarantineAsync(path, "Quarantined via Spectra AI");
-            if (success)
-            {
-                StatusText.Text = $"Program quarantined successfully: {Path.GetFileName(path)} (Vault ID: {snapshot?.Id})";
-                await RefreshAiHistoryAsync();
-            }
-            else
-            {
-                Warn($"Quarantine aborted: {msg}", "Quarantine Guard");
-            }
-        }
+        await PromptAndQuarantineAsync(path, Path.GetFileName(path), "Quarantined via Spectra AI");
+        await RefreshAiHistoryAsync();
     }
 
     private void OnAiVirusTotalClick(object sender, RoutedEventArgs e)

@@ -4,10 +4,11 @@ public enum QuarantineStage
 {
     PreCheck = 0,
     Stage1ProcessAndSockets = 1,
-    Stage2WindowsService = 2,
-    Stage3AutoStart = 3,
-    Stage4FirewallBlock = 4,
-    Complete = 5,
+    Stage2ExecutionLockout = 2,
+    Stage3WindowsService = 3,
+    Stage4AutoStart = 4,
+    Stage5FirewallBlock = 5,
+    Complete = 6,
 }
 
 public sealed record QuarantineServiceRecord(
@@ -53,8 +54,14 @@ public sealed class QuarantineSnapshot
         }
     }
 
-    public string StatusDisplay => IsRestored ? "Restored" : "Quarantined (Active)";
-    public string ExecutionLockDisplay => ExecutionLockoutApplied ? "⛔ Locked (IFEO)" : (IsRestored ? "Allowed" : "Not Set");
-    public string FirewallDisplay => FirewallRulesApplied ? "🧱 In + Out Block" : (IsRestored ? "Restored" : "None");
+    public string StatusDisplay => IsRestored
+        ? $"Restored ({RestoredAtUtc?.ToLocalTime().ToString("MM/dd HH:mm")})"
+        : "Quarantined (Active)";
+    public string ExecutionLockDisplay => ExecutionLockoutApplied
+        ? (IsRestored ? "✔ Restored" : "⛔ Locked (IFEO)")
+        : (IsRestored ? "✔ Allowed" : "Not Set");
+    public string FirewallDisplay => FirewallRulesApplied
+        ? (IsRestored ? "✔ Restored" : "🧱 In + Out Block")
+        : (IsRestored ? "✔ Restored" : "None");
     public string QuarantinedAtDisplay => QuarantinedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }

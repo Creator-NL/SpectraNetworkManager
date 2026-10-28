@@ -190,7 +190,7 @@
                                 <Separator/>
                                 <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
                                 <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
-                                <MenuItem Header="🛡️ 4-Stage Quarantine Program..." Click="OnQuarantineConnectionProgram" Foreground="{StaticResource Magenta}"/>
+                                <MenuItem x:Name="ConnectionMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineConnectionProgram" Foreground="{StaticResource Magenta}"/>
                                 <Separator/>
                                 <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                                 <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyConnectionSha256"/>
@@ -415,7 +415,7 @@
                         <Separator/>
                         <MenuItem Header="Block..." Click="OnBlockProgram"/>
                         <MenuItem Header="Allow" Click="OnAllowProgram"/>
-                        <MenuItem Header="🛡️ 4-Stage Quarantine Program..." Click="OnQuarantineProgram" Foreground="{StaticResource Magenta}"/>
+                        <MenuItem x:Name="ProgramMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineProgram" Foreground="{StaticResource Magenta}"/>
                         <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreProgramQuarantine" Foreground="{StaticResource MenuBlue}"/>
                         <Separator/>
                         <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckProgramVirusTotal" Foreground="{StaticResource MenuBlue}"/>
@@ -1080,21 +1080,22 @@
 
             <!-- Description -->
             <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
-                       Text="Active Defense Quarantine Vault. Neutralized programs are safely isolated across multiple layers: process &amp; network socket termination, kernel-level execution lockout (IFEO), Windows Service disabling, auto-start removal, and bidirectional Windows Firewall blocks. 100% reversible with 1-click restore."/>
+                       Text="Active Defense Quarantine Vault. Neutralized programs are safely isolated across 5 defense layers: process &amp; network socket termination, kernel-level execution lockout (IFEO), Windows Service disabling, auto-start neutralization, and bidirectional Windows Firewall blocks. 100% reversible with 1-click restore."/>
 
             <!-- Toolbar & Controls -->
             <DockPanel Grid.Row="1" Margin="0,0,0,10">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
-                    <Button Content="🔄 Refresh Vault" Padding="12,3" Margin="0,0,8,0" Click="OnRefreshQuarantineVault"/>
-                    <Button Content="🔄 Restore Program (Un-Quarantine)" Padding="12,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverses all quarantine stages and completely restores the selected program"/>
-                    <Button Content="🛡️ Quarantine New File..." Padding="12,3" Margin="0,0,8,0" Click="OnQuarantineBrowseFile" ToolTip="Browse for an executable to quarantine immediately"/>
-                    <Button Content="🔍 Investigate with AI" Padding="12,3" Margin="0,0,8,0" Click="OnInvestigateQuarantineAi" ToolTip="Analyze the quarantined executable with Spectra AI"/>
-                    <Button Content="🗑️ Remove from Vault" Padding="12,3" Margin="0,0,8,0" Click="OnDeleteQuarantineSnapshot" ToolTip="Removes this record from the vault history"/>
+                    <Button x:Name="QuarantineRefreshButton" Content="🔄 Refresh Vault" Padding="12,3" Margin="0,0,8,0" Click="OnRefreshQuarantineVault"/>
+                    <Button x:Name="QuarantineRestoreButton" Content="🔄 Restore Program (Un-Quarantine)" Padding="12,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverses all 5 quarantine stages and completely restores the selected program"/>
+                    <Button x:Name="QuarantineBrowseButton" Content="🛡️ Quarantine New File..." Padding="12,3" Margin="0,0,8,0" Click="OnQuarantineBrowseFile" ToolTip="Browse for an executable to quarantine immediately"/>
+                    <Button x:Name="QuarantineAiButton" Content="🔍 Investigate with AI" Padding="12,3" Margin="0,0,8,0" Click="OnInvestigateQuarantineAi" ToolTip="Analyze the quarantined executable with Spectra AI"/>
+                    <Button x:Name="QuarantineRemoveVaultButton" Content="🗑️ Remove from Vault" Padding="12,3" Margin="0,0,8,0" Click="OnDeleteQuarantineSnapshot" ToolTip="Removes this record from the vault history"/>
+                    <CheckBox x:Name="QuarantineShowRestoredCheck" Content="Show Restored History" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{StaticResource Muted}" Checked="OnQuarantineShowRestoredChanged" Unchecked="OnQuarantineShowRestoredChanged" ToolTip="Toggle between active quarantined programs only and full vault history"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" DockPanel.Dock="Right">
                     <TextBlock x:Name="QuarantineCountText" Text="0 programs quarantined" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,10,0"/>
-                    <Button Content="PANIC: Restore All Quarantined" Padding="12,3" Foreground="{StaticResource Magenta}" Click="OnPanicRestoreAllQuarantine" ToolTip="Immediately un-quarantine all programs and restore original system state"/>
+                    <Button x:Name="QuarantinePanicButton" Content="PANIC: Restore All Quarantined" Padding="12,3" Foreground="{StaticResource Magenta}" Click="OnPanicRestoreAllQuarantine" ToolTip="Immediately un-quarantine all programs and restore original system state"/>
                 </StackPanel>
             </DockPanel>
 
@@ -1163,9 +1164,10 @@
                             </Border>
 
                             <WrapPanel Margin="0,0,0,6">
-                                <Button Content="🔄 Restore Program" Margin="0,0,6,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverse all quarantine actions for this program"/>
+                                <Button x:Name="QuarantineDetailRestoreButton" Content="🔄 Restore Program" Margin="0,0,6,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnRestoreQuarantineFromVault" ToolTip="Reverse all 5 quarantine stages for this program"/>
                                 <Button Content="🔍 Investigate (AI)" Margin="0,0,6,4" Click="OnInvestigateQuarantineAi" ToolTip="Run Spectra AI Threat Intelligence on this executable"/>
                                 <Button Content="📁 Open Folder" Margin="0,0,6,4" Click="OnOpenQuarantineFolder" ToolTip="Open the directory containing this executable"/>
+                                <Button Content="🗑️ Remove from Vault" Margin="0,0,6,4" Click="OnDeleteQuarantineSnapshot" ToolTip="Removes this record from the vault history"/>
                             </WrapPanel>
                         </StackPanel>
 
@@ -1941,7 +1943,7 @@
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                                 <Button x:Name="AiAllowButton" Content="🛡️ Allow Program" Padding="10,4" Margin="0,0,8,0" Click="OnAiAllowProgramClick" ToolTip="Add permanent Allow rule for this program."/>
                                 <Button x:Name="AiBlockButton" Content="🚫 Block Outbound" Padding="10,4" Margin="0,0,8,0" Foreground="{StaticResource Magenta}" Click="OnAiBlockProgramClick" ToolTip="Add permanent Block rule for this program."/>
-                                <Button x:Name="AiQuarantineButton" Content="⚠️ 4-Stage Quarantine" Padding="10,4" Margin="0,0,8,0" Foreground="{StaticResource Amber}" Click="OnAiQuarantineProgramClick" ToolTip="Execute reversible 4-stage quarantine on this process."/>
+                                <Button x:Name="AiQuarantineButton" Content="⚠️ 5-Stage Quarantine" Padding="10,4" Margin="0,0,8,0" Foreground="{StaticResource Amber}" Click="OnAiQuarantineProgramClick" ToolTip="Execute reversible 5-stage active defense quarantine on this process."/>
                                 <Button x:Name="AiVirusTotalButton" Content="🌐 VirusTotal" Padding="10,4" Margin="0,0,8,0" Click="OnAiVirusTotalClick" ToolTip="Look up SHA-256 hash on VirusTotal."/>
                                 <Button x:Name="AiCopyReportButton" Content="📋 Copy JSON" Padding="10,4" Click="OnAiCopyReportClick" ToolTip="Copy complete JSON investigation report to clipboard."/>
                             </StackPanel>

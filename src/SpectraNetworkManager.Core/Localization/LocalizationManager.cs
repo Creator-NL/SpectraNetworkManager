@@ -94,7 +94,7 @@ public static class LocalizationManager
         ["AiClearHistory"] = "Clear History",
         ["AiActionAllow"] = "🛡️ Allow Program",
         ["AiActionBlock"] = "🚫 Block Outbound",
-        ["AiActionQuarantine"] = "⚠️ 4-Stage Quarantine",
+        ["AiActionQuarantine"] = "⚠️ 5-Stage Quarantine",
         ["AiCopyJson"] = "📋 Copy JSON Report",
         ["AiVirusTotal"] = "🌐 Search VirusTotal",
 
@@ -108,9 +108,16 @@ public static class LocalizationManager
 
         // Context Menu
         ["MenuInvestigateAi"] = "✨ Investigate with Spectra AI",
-        ["MenuQuarantine"] = "🛡️ 4-Stage Quarantine Program...",
+        ["MenuQuarantine"] = "🛡️ 5-Stage Quarantine Program...",
         ["MenuCheckVirusTotal"] = "🛡️ Check File Hash on VirusTotal",
         ["MenuCheckAbuseIpDb"] = "🚨 Check Remote IP on AbuseIPDB",
+
+        // Quarantine Vault
+        ["QuarantineShowRestored"] = "Show Restored History",
+        ["QuarantineRestore"] = "🔄 Restore Program (Un-Quarantine)",
+        ["QuarantineBrowse"] = "🛡️ Quarantine New File...",
+        ["QuarantineRemoveVault"] = "🗑️ Remove from Vault",
+        ["QuarantinePanicRestore"] = "PANIC: Restore All Quarantined",
 
         // TV & Mobile
         ["TvMobileTitle"] = "Smart TV & GSM Mobile Defense Hub",
@@ -165,7 +172,7 @@ public static class LocalizationManager
         ["AiClearHistory"] = "Geschiedenis Wissen",
         ["AiActionAllow"] = "🛡️ Programma Toestaan",
         ["AiActionBlock"] = "🚫 Uitgaand Blokkeren",
-        ["AiActionQuarantine"] = "⚠️ 4-Staps Quarantaine",
+        ["AiActionQuarantine"] = "⚠️ 5-Staps Quarantaine",
         ["AiCopyJson"] = "📋 Kopieer JSON Rapport",
         ["AiVirusTotal"] = "🌐 Zoek op VirusTotal",
 
@@ -179,9 +186,16 @@ public static class LocalizationManager
 
         // Context Menu
         ["MenuInvestigateAi"] = "✨ Analyseer met Spectra AI",
-        ["MenuQuarantine"] = "🛡️ 4-Staps Quarantaine Programma...",
+        ["MenuQuarantine"] = "🛡️ 5-Staps Quarantaine Programma...",
         ["MenuCheckVirusTotal"] = "🛡️ Controleer File Hash op VirusTotal",
         ["MenuCheckAbuseIpDb"] = "🚨 Controleer IP op AbuseIPDB",
+
+        // Quarantine Vault
+        ["QuarantineShowRestored"] = "Herstelde Geschiedenis Tonen",
+        ["QuarantineRestore"] = "🔄 Programma Herstellen (Uit Quarantaine)",
+        ["QuarantineBrowse"] = "🛡️ Nieuw Bestand In Quarantaine...",
+        ["QuarantineRemoveVault"] = "🗑️ Verwijderen uit Kluis",
+        ["QuarantinePanicRestore"] = "PANIEK: Herstel Alle Quarantaine",
 
         // TV & Mobile
         ["TvMobileTitle"] = "Smart TV & GSM Mobiele Beveiligingshub",

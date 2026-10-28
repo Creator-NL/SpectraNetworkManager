@@ -51,7 +51,7 @@ public sealed record InvestigationReport
         RecommendedAction.Allow => "🛡️ Safe to Allow",
         RecommendedAction.Monitor => "👁️ Continue Monitoring",
         RecommendedAction.BlockFirewall => "🚫 Block Outbound Traffic",
-        RecommendedAction.Quarantine => "⚠️ 4-Stage Quarantine",
+        RecommendedAction.Quarantine => "⚠️ 5-Stage Quarantine",
         _ => "Investigate Further"
     };
 }

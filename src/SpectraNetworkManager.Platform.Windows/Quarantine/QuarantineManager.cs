@@ -29,11 +29,12 @@ public sealed class QuarantineManager
     }
 
     /// <summary>
-    /// Executes the 4-Stage Quarantine on the specified executable path.
+    /// Executes the 5-Stage Active Defense Quarantine on the specified executable path.
     /// Stage 1: Tears down active network sockets & kills running processes.
-    /// Stage 2: Identifies dedicated Windows services, stops them, and disables them.
-    /// Stage 3: Disables Registry, Startup Folder, and Task Scheduler auto-start entries.
-    /// Stage 4: Creates Inbound/Outbound Windows Firewall block rules and records in RuleStore.
+    /// Stage 2: Enforces kernel-level execution lockout via Windows IFEO debugger redirection (program cannot start).
+    /// Stage 3: Identifies dedicated Windows services, stops them, and disables them.
+    /// Stage 4: Disables Registry, Startup Folder, and Task Scheduler auto-start entries.
+    /// Stage 5: Creates Inbound/Outbound Windows Firewall block rules and records in RuleStore.
     /// Full snapshot is preserved in quarantine-vault.json for 100% reversible rollback.
     /// </summary>
     public async Task<(bool Success, string Message, QuarantineSnapshot? Snapshot)> QuarantineAsync(
@@ -74,19 +75,7 @@ public sealed class QuarantineManager
             QuarantinedAtUtc = DateTimeOffset.UtcNow,
         };
 
-        // --- STAGE 1: Network Sockets & Running Processes ---
-        try
-        {
-            if (SetExecutionLockout(programName, true))
-            {
-                snapshot.ExecutionLockoutApplied = true;
-            }
-        }
-        catch (Exception ex)
-        {
-            RotatingFileLogger.LogWarn($"Quarantine Stage 1 Execution Lockout error: {ex.Message}");
-        }
-
+        // --- STAGE 1: Process & Socket Termination ---
         try
         {
             snapshot.ClosedSocketsCount = _terminator.TerminateConnectionsForProgram(cleanPath);
@@ -122,7 +111,20 @@ public sealed class QuarantineManager
             RotatingFileLogger.LogWarn($"Quarantine Stage 1 Process kill error: {ex.Message}");
         }
 
-        // --- STAGE 2: Windows Services ---
+        // --- STAGE 2: Kernel-Level Execution Lockout (IFEO) ---
+        try
+        {
+            if (SetExecutionLockout(programName, true))
+            {
+                snapshot.ExecutionLockoutApplied = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Quarantine Stage 2 Execution Lockout error: {ex.Message}");
+        }
+
+        // --- STAGE 3: Windows Services ---
         try
         {
             var services = WindowsServiceManager.GetServicesForProcess(0, programName);
@@ -156,7 +158,7 @@ public sealed class QuarantineManager
             RotatingFileLogger.LogWarn($"Quarantine Stage 2 Service error: {ex.Message}");
         }
 
-        // --- STAGE 3: Auto-Start Entries ---
+        // --- STAGE 4: Auto-Start Entries ---
         try
         {
             var allStartup = StartupManager.GetAllEntries();
@@ -176,10 +178,10 @@ public sealed class QuarantineManager
         }
         catch (Exception ex)
         {
-            RotatingFileLogger.LogWarn($"Quarantine Stage 3 Startup error: {ex.Message}");
+            RotatingFileLogger.LogWarn($"Quarantine Stage 4 Startup error: {ex.Message}");
         }
 
-        // --- STAGE 4: Windows Firewall Block & RuleStore ---
+        // --- STAGE 5: Windows Firewall Block & RuleStore ---
         try
         {
             var existingRule = _rules.Find(cleanPath);
@@ -192,7 +194,7 @@ public sealed class QuarantineManager
         }
         catch (Exception ex)
         {
-            RotatingFileLogger.LogWarn($"Quarantine Stage 4 Firewall error: {ex.Message}");
+            RotatingFileLogger.LogWarn($"Quarantine Stage 5 Firewall error: {ex.Message}");
         }
 
         _vault.SaveSnapshot(snapshot);
@@ -201,10 +203,12 @@ public sealed class QuarantineManager
     }
 
     /// <summary>
-    /// Restores a previously quarantined program, reversing all 4 stages:
-    /// - Re-enables disabled auto-start items.
-    /// - Restores original Windows service start types and restarts services if they were running.
-    /// - Removes quarantine firewall block rules and restores previous rule standing.
+    /// Restores a previously quarantined program, reversing all 5 stages:
+    /// - Stage 1: Removes kernel-level execution lockout (IFEO) allowing program to run again.
+    /// - Stage 2: Removes quarantine firewall block rules and restores previous rule standing.
+    /// - Stage 3: Re-enables disabled auto-start items.
+    /// - Stage 4: Restores original Windows service start types and restarts services if they were running.
+    /// - Stage 5: Marks snapshot restored in Quarantine Vault.
     /// </summary>
     public async Task<(bool Success, string Message)> RestoreAsync(string snapshotId)
     {
@@ -215,7 +219,7 @@ public sealed class QuarantineManager
         if (snapshot.IsRestored)
             return (false, $"Program '{snapshot.ProgramName}' is already restored.");
 
-        // 0. Remove Execution Lockout (IFEO)
+        // Stage 1: Remove Execution Lockout (IFEO)
         try
         {
             SetExecutionLockout(snapshot.ProgramName, false);
@@ -225,7 +229,7 @@ public sealed class QuarantineManager
             RotatingFileLogger.LogWarn($"Quarantine Restore Execution Lockout error: {ex.Message}");
         }
 
-        // 1. Restore Firewall & RuleStore
+        // Stage 2: Restore Firewall & RuleStore
         try
         {
             if (snapshot.PreviousRuleAction == null)
