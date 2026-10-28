@@ -236,14 +236,15 @@ public sealed class WindowsFirewallEnforcer
 
     // ---- DNS server for other devices on the home network ---------------------------------
 
-    private const int ProfilesDomainAndPrivate = 3;     // never on "Public" networks (cafes, hotels)
+    private const int ProfilesDomainAndPrivate = 3;     // Domain (1) | Private (2)
+    private const int ProfilesAll = 7;                  // Domain (1) | Private (2) | Public (4)
 
     /// <summary>
     /// Lets other devices on your LOCAL network (not the internet) send DNS queries and access the Mobile Companion:
     /// inbound TCP and UDP on the DNS port (53) and TCP on the mobile companion port (8765),
-    /// only from the local subnet, only on Private and Domain networks.
+    /// only from the local subnet. By default restricted to Private and Domain networks, unless allowOnPublic is true.
     /// </summary>
-    public void AllowInboundDns(string exePath, int port, int mobileCompanionPort = 8765)
+    public void AllowInboundDns(string exePath, int port, int mobileCompanionPort = 8765, bool allowOnPublic = false)
     {
         dynamic policy = Create("HNetCfg.FWPolicy2");
         RemoveInboundDns(exePath);
@@ -269,7 +270,7 @@ public sealed class WindowsFirewallEnforcer
             rule.Protocol = protocol;
             rule.LocalPorts = targetPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
             rule.RemoteAddresses = "LocalSubnet";
-            rule.Profiles = ProfilesDomainAndPrivate;
+            rule.Profiles = allowOnPublic ? ProfilesAll : ProfilesDomainAndPrivate;
             rule.Grouping = Group;
             rule.Enabled = true;
             policy.Rules.Add(rule);

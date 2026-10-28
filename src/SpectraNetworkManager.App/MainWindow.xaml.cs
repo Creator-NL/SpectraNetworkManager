@@ -16,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using SpectraNetworkManager.Core;
 using SpectraNetworkManager.Core.Ai;
+using SpectraNetworkManager.Core.Audit;
 using SpectraNetworkManager.Core.BrowserGuard;
 using SpectraNetworkManager.Core.Devices;
 using SpectraNetworkManager.Core.Ipc;
@@ -70,7 +71,7 @@ public partial class MainWindow : Window
     private readonly EtwDnsClientMonitor _dnsEtw = new();
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
-    private bool _trayBalloonShown;
+    private static readonly OncePerRunGate TrayHintGate = new();
     private int _trafficHours = 1;
     private readonly AppSettingsStore _appSettings = new();
     private readonly UpdateChecker _updateChecker = new();
@@ -105,6 +106,7 @@ public partial class MainWindow : Window
     public ObservableCollection<PacketRow> CapturedPackets { get; } = new();
     public ICollectionView CapturedPacketsView { get; }
     public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
+    public ObservableCollection<DnsRow> TvLanActivityRows { get; } = new();
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
     public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
@@ -242,6 +244,10 @@ public partial class MainWindow : Window
             ApplyLocalization();
             _ = RefreshAiHistoryAsync();
             _ = CheckOllamaStatusAsync();
+            _ = Task.Run(async () =>
+            {
+                try { await QosRateLimiter.ReapplySavedLimitsAsync(); } catch { }
+            });
 
             await TickAsync();
             _timer.Start();
@@ -291,6 +297,11 @@ public partial class MainWindow : Window
                         {
                             DnsRows.Insert(0, row);
                             while (DnsRows.Count > 1000) DnsRows.RemoveAt(DnsRows.Count - 1);
+                            if (IsLanClient(row.Client))
+                            {
+                                TvLanActivityRows.Insert(0, row);
+                                while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                            }
                         }
                         finally
                         {
@@ -348,6 +359,8 @@ public partial class MainWindow : Window
             if (StrictActive && _isAdmin && _tickCount % 2 == 0) _ = PollBlockedAsync();
             RefreshDnsUi();
             UpdateLiveBandwidth();
+            if (AiTab.IsChecked == true) SyncAiProcessCombo();
+            if (TvMobileTab.IsChecked == true && _tickCount % 3 == 0) RefreshTvMobileUi();
         }
         catch (Exception ex)
         {
@@ -2888,16 +2901,27 @@ public partial class MainWindow : Window
         return settings.Validate(out error);
     }
 
-    private async Task StartDnsAsync()
+    private async Task StartDnsAsync(DnsSettings? explicitSettings = null)
     {
         if (_dnsBusy || _sink.IsRunning) return;
         _dnsBusy = true;
         try
         {
-            if (!TryReadDnsSettings(out var settings, out string error))
+            DnsSettings settings;
+            if (explicitSettings != null)
             {
-                Info(error);
-                return;
+                settings = explicitSettings;
+                DnsListenBox.Text = settings.ListenAddress;
+                DnsPortBox.Text = settings.Port.ToString(CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                if (!TryReadDnsSettings(out var parsed, out string error))
+                {
+                    Info(error);
+                    return;
+                }
+                settings = parsed;
             }
 
             await _sink.ApplySettingsAsync(settings);
@@ -4067,7 +4091,13 @@ public partial class MainWindow : Window
             {
                 RecordDomainResolution(recent[i].Domain, recent[i].Detail);
                 string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
-                DnsRows.Insert(0, DnsRow.From(recent[i], caller));
+                var row = DnsRow.From(recent[i], caller);
+                DnsRows.Insert(0, row);
+                if (IsLanClient(row.Client))
+                {
+                    TvLanActivityRows.Insert(0, row);
+                    while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                }
             }
             while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
         }
@@ -4474,13 +4504,10 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             Hide();
-            if (!_trayBalloonShown && _trayIcon != null)
+            // Hint appears at most once per program start, and only if the user has not turned it off.
+            if (_trayIcon != null && _appSettings.Settings.TrayHintEnabled && TrayHintGate.TryPass())
             {
-                _trayBalloonShown = true;
-                if (_appSettings.Settings.NotificationSoundEnabled)
-                {
-                    _trayIcon.ShowBalloonTip(3000, "SpectraNetworkManager", "SpectraNetworkManager is minimized to your system tray.", System.Windows.Forms.ToolTipIcon.Info);
-                }
+                _trayIcon.ShowBalloonTip(3000, "SpectraNetworkManager", "SpectraNetworkManager is still running in your system tray. Right-click the tray icon to exit.", System.Windows.Forms.ToolTipIcon.Info);
             }
             return;
         }
@@ -4531,6 +4558,17 @@ public partial class MainWindow : Window
                 });
             };
             menu.Items.Add(_traySoundItem);
+
+            var trayHintItem = new System.Windows.Forms.ToolStripMenuItem("Show tray hint when closing")
+            {
+                Checked = _appSettings.Settings.TrayHintEnabled,
+                CheckOnClick = true
+            };
+            trayHintItem.CheckedChanged += (_, _) =>
+            {
+                Dispatcher.Invoke(() => _appSettings.Save(_appSettings.Settings with { TrayHintEnabled = trayHintItem.Checked }));
+            };
+            menu.Items.Add(trayHintItem);
             menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
             var pauseDns = new System.Windows.Forms.ToolStripMenuItem("Pause DNS Blocking");
@@ -5634,6 +5672,8 @@ public partial class MainWindow : Window
             InspectorDeviceDescText.Text = $"{dev.DeviceDescription}  ·  Vendor: {dev.Vendor}";
             InspectorDeviceIpText.Text = dev.IpString;
             InspectorDeviceMacText.Text = !string.IsNullOrEmpty(dev.MacAddress) ? dev.MacAddress : "(No MAC / Virtual)";
+            InspectorDeviceHostText.Text = !string.IsNullOrEmpty(dev.Hostname) ? dev.Hostname : "(None resolved)";
+            InspectorDeviceReasonText.Text = !string.IsNullOrEmpty(dev.DeviceDescription) ? dev.DeviceDescription : dev.KindDisplay;
 
             SelectedDevicePorts.Clear();
             foreach (var port in dev.OpenPorts)
@@ -5650,6 +5690,8 @@ public partial class MainWindow : Window
             InspectorDeviceDescText.Text = "";
             InspectorDeviceIpText.Text = "-";
             InspectorDeviceMacText.Text = "-";
+            InspectorDeviceHostText.Text = "-";
+            InspectorDeviceReasonText.Text = "-";
             SelectedDevicePorts.Clear();
         }
     }
@@ -6219,6 +6261,27 @@ public partial class MainWindow : Window
             }
         };
 
+        _mobileServer.RemoteContactReceived += (remoteIp, path) =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                var row = new DnsRow(
+                    DateTime.Now.ToString("HH:mm:ss"),
+                    remoteIp,
+                    $"Mobile Companion ({path})",
+                    "HTTP",
+                    "✅ CONTACT",
+                    "Remote device reached companion page",
+                    0,
+                    false,
+                    false,
+                    null!);
+                TvLanActivityRows.Insert(0, row);
+                while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                if (TvSubTabDiagnostics?.IsChecked == true) RefreshTvDiagnosticsUi();
+            });
+        };
+
         RefreshBrowserGuardUi();
     }
 
@@ -6226,32 +6289,9 @@ public partial class MainWindow : Window
     {
         TvMobileManager.EnsureDefaultGroups(_sink.Settings);
 
-        // Check LAN DNS listening status and firewall
-        string exe = Environment.ProcessPath ?? "";
-        bool hasFirewall = _enforcer.HasInboundDns(exe);
-        bool isLanListening = _sink.Settings.ListenAddress == "0.0.0.0";
-        var localIp = GetLocalActiveIp();
-        string localIpStr = localIp?.ToString() ?? "192.168.1.X";
-
-        if (isLanListening && _sink.IsRunning && hasFirewall)
-        {
-            TvLanStatusBanner.BorderBrush = (Brush)FindResource("Cyan");
-            TvLanStatusTitle.Text = "🟢 LAN DNS SINKHOLE ACTIVE: ";
-            TvLanStatusTitle.Foreground = (Brush)FindResource("Cyan");
-            TvLanStatusSub.Text = $"Listening on 0.0.0.0:{_sink.Settings.Port} • PC IP: {localIpStr} • Firewall OPEN";
-            TvLanStatusDesc.Text = $"All devices on your Wi-Fi/LAN can reach Spectra. Set device Wi-Fi DNS to: {localIpStr}";
-            TvEnableLanBtn.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            TvLanStatusBanner.BorderBrush = (Brush)FindResource("Amber");
-            TvLanStatusTitle.Text = "🟡 LAN DNS RESTRICTED (LOCALHOST ONLY): ";
-            TvLanStatusTitle.Foreground = (Brush)FindResource("Amber");
-            TvLanStatusSub.Text = !isLanListening ? "Restricted to 127.0.0.1 (Localhost)" : (!hasFirewall ? "Windows Firewall Rule Missing" : "DNS Server Not Running");
-            TvLanStatusDesc.Text = "Smart TVs and phones cannot connect yet. Click the button to enable LAN listening on 0.0.0.0 and open Windows Firewall.";
-            TvEnableLanBtn.Visibility = Visibility.Visible;
-            TvEnableLanBtn.Content = "🛡️ Enable LAN Protection (0.0.0.0 & Firewall)";
-        }
+        // LAN protection banner + toggle button (state comes from what is really bound, not from settings)
+        ApplyLanBanner();
+        QueueLanProbeIfStale();
 
         // Detect Gateway IP
         IPAddress? gatewayIp = null;
@@ -6319,7 +6359,7 @@ public partial class MainWindow : Window
         bool gatewayForwardingDetected = false;
         if (gatewayIp != null)
         {
-            int gwQueryCount = DnsRows.Count(r => r.Client.Contains(gatewayIp.ToString()));
+            int gwQueryCount = DnsRows.Count(r => DnsClientMatch.IsSameClient(r.Client, gatewayIp.ToString()));
             if (gwQueryCount > 5)
             {
                 gatewayForwardingDetected = true;
@@ -6332,6 +6372,7 @@ public partial class MainWindow : Window
             }
         }
 
+        string? selectedDeviceIp = (TvMobileGrid.SelectedItem as TvMobileDeviceRow)?.IpString;
         TvMobileDevices.Clear();
         int directCount = 0;
         int gwCount = 0;
@@ -6343,7 +6384,7 @@ public partial class MainWindow : Window
             string ipStr = dev.IpString;
 
             // Query stats for this device IP
-            var matchingQueries = DnsRows.Where(r => r.Client.Contains(ipStr)).ToList();
+            var matchingQueries = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, ipStr)).ToList();
             int totalQ = matchingQueries.Count;
             int blockedQ = matchingQueries.Count(q => q.IsBlocked);
             DateTime? lastSeen = matchingQueries.Count > 0 ? matchingQueries.Max(q => q.Entry.Time).UtcDateTime : null;
@@ -6372,6 +6413,566 @@ public partial class MainWindow : Window
         TvDirectProtectedCount.Text = directCount.ToString();
         TvGatewayRoutedCount.Text = gwCount.ToString();
         TvBypassingCount.Text = bypassCount.ToString();
+
+        if (selectedDeviceIp != null)
+        {
+            var again = TvMobileDevices.FirstOrDefault(r => r.IpString == selectedDeviceIp);
+            if (again != null) TvMobileGrid.SelectedItem = again;
+        }
+    }
+
+    // ---- LAN protection state, toggle and background probe -----------------------------------
+
+    private bool _lanBusy;
+    private bool _lanFirewallOpen;
+    private IReadOnlyList<NetworkProfileInfo> _lanNetworks = Array.Empty<NetworkProfileInfo>();
+    private DateTime _lanProbeUtc = DateTime.MinValue;
+    private bool _lanProbeRunning;
+
+    /// <summary>Firewall and network-profile checks are slow COM calls, so they run in the background and are cached.</summary>
+    private void QueueLanProbeIfStale(bool force = false)
+    {
+        if (_lanProbeRunning) return;
+        if (!force && (DateTime.UtcNow - _lanProbeUtc).TotalSeconds < 10) return;
+
+        _lanProbeRunning = true;
+        string exe = Environment.ProcessPath ?? "";
+        _ = Task.Run(() =>
+        {
+            bool fw = false;
+            IReadOnlyList<NetworkProfileInfo> nets = Array.Empty<NetworkProfileInfo>();
+            try { fw = _enforcer.HasInboundDns(exe); } catch { /* keep false */ }
+            try { nets = NetworkProfileInspector.GetConnectedNetworks(); } catch { /* keep empty */ }
+            return (fw, nets);
+        }).ContinueWith(t =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                _lanProbeRunning = false;
+                _lanProbeUtc = DateTime.UtcNow;
+                if (t.IsCompletedSuccessfully)
+                {
+                    _lanFirewallOpen = t.Result.fw;
+                    _lanNetworks = t.Result.nets;
+                }
+                ApplyLanBanner();
+            });
+        }, TaskScheduler.Default);
+    }
+
+    private void ApplyLanBanner()
+    {
+        string pcIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        var endpoint = _sink.IsRunning ? _sink.LocalEndPoint : null;
+        var status = LanProtectionEvaluator.Evaluate(endpoint, _lanFirewallOpen, _mobileServer?.IsRunning == true, _lanNetworks, pcIp);
+
+        Brush cyan = (Brush)FindResource("Cyan");
+        Brush amber = (Brush)FindResource("Amber");
+        Brush muted = (Brush)FindResource("Muted");
+
+        string warnings = status.Warnings.Count > 0 ? "\n⚠ " + string.Join("\n⚠ ", status.Warnings) : "";
+        string companion = _mobileServer is { IsRunning: true }
+            ? $"\nCompanion page: http://{pcIp}:{_mobileServer.Port}/ ({_mobileServer.BindScope})" +
+              (_mobileServer.LastRemoteContactUtc is { } seen
+                  ? $" • last phone contact {(int)(DateTime.UtcNow - seen).TotalSeconds}s ago from {_mobileServer.LastRemoteContactIp}"
+                  : " • no phone has connected yet")
+            : "";
+
+        TvLanStatusSub.Text = endpoint != null ? $"DNS on {endpoint} • PC IP {pcIp}" : "DNS server stopped";
+        TvLanStatusDesc.Text = status.Detail + warnings + (status.Level == LanProtectionLevel.Active ? companion : "");
+
+        if (_lanBusy)
+        {
+            TvEnableLanBtn.Content = "⏳ Applying...";
+            TvEnableLanBtn.IsEnabled = false;
+            return;
+        }
+
+        TvEnableLanBtn.IsEnabled = true;
+        TvEnableLanBtn.Visibility = Visibility.Visible;
+        switch (status.Level)
+        {
+            case LanProtectionLevel.Active:
+                TvLanStatusBanner.BorderBrush = cyan;
+                TvLanStatusTitle.Text = "🟢 LAN PROTECTION ON: ";
+                TvLanStatusTitle.Foreground = cyan;
+                TvEnableLanBtn.Content = "🟢 LAN PROTECTION: ON  (click to turn off)";
+                TvEnableLanBtn.Background = new SolidColorBrush(Color.FromArgb(0x44, 0x00, 0xE5, 0xFF));
+                TvEnableLanBtn.BorderBrush = cyan;
+                TvEnableLanBtn.Foreground = cyan;
+                TvEnableLanBtn.ToolTip = "Other devices can use Spectra as their DNS server. Click to go back to this-PC-only.";
+                break;
+            case LanProtectionLevel.Partial:
+                TvLanStatusBanner.BorderBrush = amber;
+                TvLanStatusTitle.Text = "🟠 LAN PROTECTION PARTIAL: ";
+                TvLanStatusTitle.Foreground = amber;
+                TvEnableLanBtn.Content = "🛠 Repair LAN Protection (firewall)";
+                TvEnableLanBtn.Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x21, 0x40));
+                TvEnableLanBtn.BorderBrush = amber;
+                TvEnableLanBtn.Foreground = amber;
+                TvEnableLanBtn.ToolTip = "Re-creates the Windows Firewall rules for DNS (port 53) and the companion page (port 8765).";
+                break;
+            default:
+                TvLanStatusBanner.BorderBrush = amber;
+                TvLanStatusTitle.Text = "⚪ LAN PROTECTION OFF: ";
+                TvLanStatusTitle.Foreground = amber;
+                TvEnableLanBtn.Content = "🛡️ LAN PROTECTION: OFF  (click to turn on)";
+                TvEnableLanBtn.Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x21, 0x40));
+                TvEnableLanBtn.BorderBrush = amber;
+                TvEnableLanBtn.Foreground = amber;
+                TvEnableLanBtn.ToolTip = "Lets phones, TVs and consoles on your network use Spectra as DNS server (opens Windows Firewall for your local network only).";
+                break;
+        }
+
+        TvLanStatusSub.Foreground = muted;
+    }
+
+    private static bool IsLanClient(string? client)
+    {
+        if (string.IsNullOrWhiteSpace(client)) return false;
+        if (client.StartsWith("127.", StringComparison.Ordinal) ||
+            client.StartsWith("::1", StringComparison.Ordinal) ||
+            client.StartsWith("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
+
+    private void OnTvSubTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || TvDevicesSubPanel == null || TvInvestigationSubPanel == null) return;
+        if (TvSubTabDiagnostics.IsChecked == true)
+        {
+            TvDevicesSubPanel.Visibility = Visibility.Collapsed;
+            TvInvestigationSubPanel.Visibility = Visibility.Visible;
+            RefreshTvDiagnosticsUi();
+        }
+        else
+        {
+            TvDevicesSubPanel.Visibility = Visibility.Visible;
+            TvInvestigationSubPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void RefreshTvDiagnosticsUi()
+    {
+        if (!IsLoaded || InvDnsStateBadge == null) return;
+
+        string pcIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        var ep = _sink.IsRunning ? _sink.LocalEndPoint : null;
+
+        Brush cyan = (Brush)FindResource("Cyan");
+        Brush amber = (Brush)FindResource("Amber");
+        Brush text = (Brush)FindResource("Text");
+        Brush muted = (Brush)FindResource("Muted");
+
+        // 1. DNS Server
+        if (_sink.IsRunning && ep != null)
+        {
+            if (ep.Address.Equals(IPAddress.Any))
+            {
+                InvDnsStateBadge.Text = "ACTIVE (0.0.0.0)";
+                InvDnsStateBadge.Foreground = cyan;
+                InvDnsEndpointText.Text = ep.ToString();
+                InvDnsDetailText.Text = $"Listening on all LAN interfaces. Ready for {pcIp}";
+            }
+            else
+            {
+                InvDnsStateBadge.Text = "LOCALHOST ONLY";
+                InvDnsStateBadge.Foreground = amber;
+                InvDnsEndpointText.Text = ep.ToString();
+                InvDnsDetailText.Text = "Restricted to 127.0.0.1. LAN protection is OFF.";
+            }
+        }
+        else
+        {
+            InvDnsStateBadge.Text = "STOPPED";
+            InvDnsStateBadge.Foreground = amber;
+            InvDnsEndpointText.Text = "Offline";
+            InvDnsDetailText.Text = "DNS server is not running. Click Start DNS.";
+        }
+
+        // 2. Firewall
+        if (_lanFirewallOpen)
+        {
+            InvFwStateBadge.Text = "OPEN";
+            InvFwStateBadge.Foreground = cyan;
+            InvFwTitleText.Text = "LocalSubnet Inbound Allowed";
+            InvFwDetailText.Text = $"Port {_sink.Settings.Port} UDP/TCP & Port {_mobileServer?.Port ?? 8765} TCP open";
+        }
+        else
+        {
+            InvFwStateBadge.Text = "MISSING";
+            InvFwStateBadge.Foreground = amber;
+            InvFwTitleText.Text = "Firewall Rule Missing";
+            InvFwDetailText.Text = "Click 'Enable LAN Protection' to open inbound ports";
+        }
+
+        // 3. Network Profile
+        var publicNet = _lanNetworks.FirstOrDefault(n => n.Category == NetworkCategoryKind.Public);
+        if (publicNet != null)
+        {
+            InvNetStateBadge.Text = "PUBLIC (WARNING)";
+            InvNetStateBadge.Foreground = amber;
+            InvNetTitleText.Text = "Public Network Location";
+            InvNetDetailText.Text = $"'{publicNet.Name}' is marked Public by Windows";
+            InvFixNetBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            InvNetStateBadge.Text = "PRIVATE (OK)";
+            InvNetStateBadge.Foreground = cyan;
+            InvNetTitleText.Text = "Private / Domain Network";
+            InvNetDetailText.Text = _lanNetworks.Count > 0 ? string.Join(", ", _lanNetworks.Select(n => n.Name)) : "Connected network";
+            InvFixNetBtn.Visibility = Visibility.Collapsed;
+        }
+
+        // 4. Phone Reachability & Companion
+        if (_mobileServer is { IsRunning: true })
+        {
+            InvCompanionStateBadge.Text = "RUNNING";
+            InvCompanionStateBadge.Foreground = cyan;
+            InvCompanionUrlText.Text = $"http://{pcIp}:{_mobileServer.Port}/";
+            if (_mobileServer.LastRemoteContactUtc is { } seen)
+            {
+                int secAgo = Math.Max(0, (int)(DateTime.UtcNow - seen).TotalSeconds);
+                InvLastContactText.Text = $"Contact {secAgo}s ago from {_mobileServer.LastRemoteContactIp} ({_mobileServer.RemoteRequestCount} hits)";
+                InvLastContactText.Foreground = cyan;
+            }
+            else
+            {
+                InvLastContactText.Text = "Waiting for first phone / TV hit on /api/ping";
+                InvLastContactText.Foreground = text;
+            }
+        }
+        else
+        {
+            InvCompanionStateBadge.Text = "STOPPED";
+            InvCompanionStateBadge.Foreground = muted;
+            InvCompanionUrlText.Text = "Not running";
+            InvLastContactText.Text = "Click Launch Companion & QR to start";
+            InvLastContactText.Foreground = muted;
+        }
+    }
+
+    private async void OnInvRunDnsSelfTest(object sender, RoutedEventArgs e)
+    {
+        var localIp = GetLocalActiveIp();
+        if (localIp == null)
+        {
+            InvSelfTestResultText.Text = "❌ No active LAN IPv4 address detected on this PC.";
+            return;
+        }
+
+        InvSelfTestResultText.Text = $"⏳ Sending UDP DNS probe to {localIp}:{_sink.Settings.Port}...";
+        try
+        {
+            var ep = new IPEndPoint(localIp, _sink.Settings.Port);
+            var res = await DnsSelfTest.RunAsync(ep, "example.com", timeout: TimeSpan.FromSeconds(2));
+            if (res.Ok)
+            {
+                InvSelfTestResultText.Text = $"✅ DNS Self-Test PASSED! Answer received from {ep} ({string.Join(" ", res.Lines)})";
+            }
+            else
+            {
+                InvSelfTestResultText.Text = $"❌ DNS Self-Test FAILED on {ep}: {string.Join(" ", res.Lines)}. LAN Protection must be ON.";
+            }
+        }
+        catch (Exception ex)
+        {
+            InvSelfTestResultText.Text = $"❌ DNS Self-Test Error: {ex.Message}";
+        }
+    }
+
+    private void OnInvCopyPhonePingUrl(object sender, RoutedEventArgs e)
+    {
+        var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        int port = _mobileServer?.Port ?? 8765;
+        string url = $"http://{localIp}:{port}/api/ping";
+        try { System.Windows.Clipboard.SetText(url); } catch { }
+        Info($"📱 Phone Connectivity Link Copied!\n\n{url}\n\nOpen this link in Safari or Chrome on your phone while connected to your home Wi-Fi.\n\n• If your phone can reach this PC, you will instantly see:\n  {{\"ok\":true, \"app\":\"SpectraNetworkManager\"}}\n\n• If the page fails to load on your phone:\n  Your router has Guest Wi-Fi / Client Isolation enabled, or Windows Firewall is blocking inbound port {port}.");
+    }
+
+    private void OnInvCopyReport(object sender, RoutedEventArgs e)
+    {
+        var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        var sb = new StringBuilder();
+        sb.AppendLine("=== SPECTRA NETWORK MANAGER v2.0 - TV & MOBILE DIAGNOSTIC REPORT ===");
+        sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"PC LAN IP: {localIp}");
+        sb.AppendLine($"DNS Sinkhole Endpoint: {(_sink.IsRunning ? _sink.LocalEndPoint?.ToString() : "Stopped")}");
+        sb.AppendLine($"Firewall Allowed: {_lanFirewallOpen}");
+        sb.AppendLine($"Network Profiles: {string.Join(", ", _lanNetworks.Select(n => $"{n.Name} ({n.Category})"))}");
+        sb.AppendLine($"Mobile Companion Server: {(_mobileServer?.IsRunning == true ? $"Port {_mobileServer.Port} ({_mobileServer.BindScope})" : "Stopped")}");
+        sb.AppendLine($"Last Remote Companion Contact: {(_mobileServer?.LastRemoteContactUtc.HasValue == true ? _mobileServer.LastRemoteContactUtc.Value.ToString("s") : "None")} from {_mobileServer?.LastRemoteContactIp}");
+        sb.AppendLine($"Companion Remote Hits: {_mobileServer?.RemoteRequestCount ?? 0}");
+        sb.AppendLine($"Known Discovered Devices: {TvMobileDevices.Count}");
+        sb.AppendLine($"LAN Queries Recorded: {TvLanActivityRows.Count}");
+        try { System.Windows.Clipboard.SetText(sb.ToString()); } catch { }
+        Info("Diagnostic report copied to clipboard!");
+    }
+
+    private void OnInvRefreshStatus(object sender, RoutedEventArgs e)
+    {
+        QueueLanProbeIfStale(force: true);
+        RefreshTvMobileUi();
+        RefreshTvDiagnosticsUi();
+    }
+
+    private void OnInvFixNetworkProfile(object sender, RoutedEventArgs e)
+    {
+        if (Confirm("Switch connected Public network(s) to Private?\n\nThis configures Windows Network Location to Private so that Windows Firewall permits local subnet DNS and companion traffic.", "Set Network to Private"))
+        {
+            int count = NetworkProfileInspector.SetPublicNetworksToPrivate(out string err);
+            if (count > 0)
+            {
+                QueueLanProbeIfStale(force: true);
+                RefreshTvMobileUi();
+                RefreshTvDiagnosticsUi();
+                Info($"Successfully changed {count} network connection(s) to Private!");
+            }
+            else
+            {
+                Info($"Could not change network profile automatically: {err}\n\nYou can also change it in Windows Settings > Network & Internet > Ethernet/Wi-Fi > Network Profile > Private.");
+            }
+        }
+    }
+
+    private void OnInvClearLanFeed(object sender, RoutedEventArgs e)
+    {
+        TvLanActivityRows.Clear();
+    }
+
+    // ---- System Audit & Stored Data Maintenance -----------------------------------------------
+
+    private void OnSystemAuditClick(object sender, RoutedEventArgs e)
+    {
+        var dlg = new AuditWindow(
+            auditProvider: () =>
+            {
+                string dataDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "SpectraNetworkManager");
+                long historyBytes = 0;
+                string p1 = Path.Combine(dataDir, "dns-history.db");
+                string p2 = Path.Combine(dataDir, "network-history.db");
+                try { if (File.Exists(p1)) historyBytes += new FileInfo(p1).Length; } catch { }
+                try { if (File.Exists(p2)) historyBytes += new FileInfo(p2).Length; } catch { }
+
+                bool anyPublic = _lanNetworks.Any(n => n.Category == NetworkCategoryKind.Public);
+
+                var input = new AuditInput(
+                    IsAdmin: _isAdmin,
+                    DnsRunning: _sink.IsRunning,
+                    DnsListenAddress: _sink.Settings.ListenAddress,
+                    DnsPort: _sink.Settings.Port,
+                    BlockBrowserDoh: _sink.Settings.BlockBrowserDoh,
+                    SystemDnsSwitched: _dnsSwitch.IsActive,
+                    LanFirewallOpen: _lanFirewallOpen,
+                    AnyPublicNetwork: anyPublic,
+                    StrictActive: StrictActive,
+                    PendingAskProgramsCount: _askQueue.Count,
+                    QuarantinedCount: QuarantinedItems.Count,
+                    StoredHistoryBytes: historyBytes);
+
+                return SystemAuditService.RunAudit(input);
+            },
+            fixHandler: async finding =>
+            {
+                switch (finding.Id)
+                {
+                    case "dns-running":
+                        await StartDnsAsync();
+                        break;
+                    case "doh-block":
+                        _sink.Settings.BlockBrowserDoh = true;
+                        BlockDohBox.IsChecked = true;
+                        _sink.SaveSettingsOnly(_sink.Settings);
+                        break;
+                    case "lan-protection":
+                        await EnableLanDnsProtectionAsync();
+                        break;
+                    case "history-size":
+                        OnCleanStoredDataClick(this, new RoutedEventArgs());
+                        break;
+                    case "admin-elevation":
+                        OnSwitchElevationClick(this, new RoutedEventArgs());
+                        break;
+                }
+            })
+        {
+            Owner = this
+        };
+
+        if (dlg.ShowDialog() == true && !string.IsNullOrEmpty(dlg.SelectedTargetTab))
+        {
+            switch (dlg.SelectedTargetTab)
+            {
+                case "Dns": DnsTab.IsChecked = true; break;
+                case "TvMobile": TvMobileTab.IsChecked = true; break;
+                case "Strict": StrictTab.IsChecked = true; break;
+                case "Programs": ProgramsTab.IsChecked = true; break;
+                case "Quarantine": QuarantineTab.IsChecked = true; break;
+            }
+        }
+    }
+
+    private void OnCleanStoredDataClick(object sender, RoutedEventArgs e)
+    {
+        string dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SpectraNetworkManager");
+
+        var dlg = new CleanDataWindow(dataDir) { Owner = this };
+        if (dlg.ShowDialog() == true && dlg.SelectedOptions is { } opt)
+        {
+            try
+            {
+                int cleanedCount = 0;
+                long freedBytes = 0;
+
+                // 1. DNS History
+                if (opt.CleanDnsHistory)
+                {
+                    string p = Path.Combine(dataDir, "dns-history.db");
+                    if (File.Exists(p))
+                    {
+                        freedBytes += new FileInfo(p).Length;
+                        _sink.Activity.Reset();
+                        DnsRows.Clear();
+                        TvLanActivityRows.Clear();
+                        try { File.Delete(p); } catch { }
+                        cleanedCount++;
+                    }
+                }
+
+                // 2. Network History
+                if (opt.CleanNetworkHistory)
+                {
+                    string p = Path.Combine(dataDir, "network-history.db");
+                    if (File.Exists(p))
+                    {
+                        freedBytes += new FileInfo(p).Length;
+                        ConnectionHistory.Clear();
+                        TopTalkers.Clear();
+                        try { File.Delete(p); } catch { }
+                        cleanedCount++;
+                    }
+                }
+
+                // 3. AI Investigation Cache
+                if (opt.CleanAiHistory)
+                {
+                    string p = Path.Combine(dataDir, "ai-investigations.db");
+                    if (File.Exists(p))
+                    {
+                        freedBytes += new FileInfo(p).Length;
+                        AiHistory.Clear();
+                        try { File.Delete(p); } catch { }
+                        cleanedCount++;
+                    }
+                }
+
+                // 4. Temporary logs
+                if (opt.CleanLogs)
+                {
+                    if (Directory.Exists(dataDir))
+                    {
+                        foreach (var f in Directory.GetFiles(dataDir, "*.log", SearchOption.TopDirectoryOnly))
+                        {
+                            try
+                            {
+                                freedBytes += new FileInfo(f).Length;
+                                File.Delete(f);
+                                cleanedCount++;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // 5. Custom Rules (if opted in)
+                if (opt.CleanCustomRules)
+                {
+                    _sink.Settings.CustomBlock.Clear();
+                    _sink.Settings.CustomAllow.Clear();
+                    _sink.Settings.ClientGroups.Clear();
+                    _sink.SaveSettingsOnly(_sink.Settings);
+                    cleanedCount++;
+                }
+
+                // 6. Quarantine (if opted in)
+                if (opt.CleanQuarantine)
+                {
+                    foreach (var snap in _quarantineVault.GetAll())
+                    {
+                        _quarantineVault.DeleteSnapshot(snap.Id);
+                    }
+                    RefreshQuarantineVault();
+                    cleanedCount++;
+                }
+
+                string freedMb = (freedBytes / (1024.0 * 1024)).ToString("F1");
+                Info($"🧹 Stored Data Cleaned Successfully!\n\n• Purged {cleanedCount} storage items.\n• Reclaimed approximately {freedMb} MB of disk space.\n• UI memory views refreshed.");
+            }
+            catch (Exception ex)
+            {
+                Error("Failed to clean stored data", ex);
+            }
+        }
+    }
+
+    // ---- Outbound QoS Bandwidth Rate Limiter --------------------------------------------------
+
+    private async void OnSetConnectionUploadLimit(object sender, RoutedEventArgs e)
+    {
+        if (ConnectionsGrid.SelectedItem is ConnectionRow row && !string.IsNullOrEmpty(row.Path))
+        {
+            await PromptAndApplyQosLimitAsync(row.Path);
+        }
+    }
+
+    private async void OnSetProgramUploadLimit(object sender, RoutedEventArgs e)
+    {
+        if (ProgramsGrid.SelectedItem is ProgramRow row && !string.IsNullOrEmpty(row.Path))
+        {
+            await PromptAndApplyQosLimitAsync(row.Path);
+        }
+    }
+
+    private async Task PromptAndApplyQosLimitAsync(string exePath)
+    {
+        if (!_isAdmin)
+        {
+            Info("Managing network speed limits requires Administrator privileges to configure Windows NetQoS policies.");
+            return;
+        }
+
+        var store = QosRateLimiter.LoadStore();
+        var existing = store.FirstOrDefault(x => string.Equals(x.ExePath, exePath, StringComparison.OrdinalIgnoreCase));
+        long currentRate = existing?.ThrottleRateBitsPerSec ?? 0;
+
+        var dlg = new QosSpeedDialog(exePath, currentRate) { Owner = this };
+        if (dlg.ShowDialog() == true)
+        {
+            long newRate = dlg.SelectedBitsPerSec;
+            try
+            {
+                if (newRate <= 0)
+                {
+                    await QosRateLimiter.RemoveLimitAsync(exePath);
+                    Info($"Upload speed limit removed for {Path.GetFileName(exePath)}. Traffic is now unrestricted.");
+                }
+                else
+                {
+                    await QosRateLimiter.SetLimitAsync(exePath, newRate);
+                    string disp = newRate >= 1_000_000 ? $"{newRate / 1_000_000.0:F1} Mbps" : $"{newRate / 1_000.0:F0} Kbps";
+                    Info($"⚡ Upload speed for {Path.GetFileName(exePath)} throttled to maximum {disp} via Windows NetQoS.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Error("Failed to apply QoS speed limit", ex);
+            }
+        }
     }
 
     private bool _isUpdatingGuardUi;
@@ -6416,7 +7017,25 @@ public partial class MainWindow : Window
 
     private async void OnEnableLanProtectionClick(object sender, RoutedEventArgs e)
     {
-        await EnableLanDnsProtectionAsync();
+        string pcIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        var endpoint = _sink.IsRunning ? _sink.LocalEndPoint : null;
+        var status = LanProtectionEvaluator.Evaluate(endpoint, _lanFirewallOpen, _mobileServer?.IsRunning == true, _lanNetworks, pcIp);
+
+        if (status.Level == LanProtectionLevel.Active)
+        {
+            if (Confirm(
+                "Spectra LAN Protection is currently ACTIVE.\n\n" +
+                "Smart TVs, phones and consoles on your local network are routing DNS through Spectra.\n\n" +
+                "Do you want to turn LAN Protection OFF and restrict Spectra to this PC only (127.0.0.1)?",
+                "Turn Off LAN Protection"))
+            {
+                await DisableLanDnsProtectionAsync();
+            }
+        }
+        else
+        {
+            await EnableLanDnsProtectionAsync();
+        }
     }
 
     private async Task EnableLanDnsProtectionAsync()
@@ -6427,41 +7046,99 @@ public partial class MainWindow : Window
             return;
         }
 
+        _lanBusy = true;
+        ApplyLanBanner();
         try
         {
-            _sink.Settings.ListenAddress = "0.0.0.0";
+            LanProtectionPlanner.ApplyEnabled(_sink.Settings);
+            DnsListenBox.Text = _sink.Settings.ListenAddress;
             _sink.SaveSettingsOnly(_sink.Settings);
 
+            bool anyPublic = _lanNetworks.Any(n => n.Category == NetworkCategoryKind.Public);
             string exe = Environment.ProcessPath ?? "";
-            _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765);
+            _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: anyPublic);
+            _lanFirewallOpen = true;
 
             if (_sink.IsRunning)
             {
                 _sink.Stop();
-                await StartDnsAsync();
             }
+            await StartDnsAsync(_sink.Settings);
 
             if (_mobileServer != null && !_mobileServer.IsRunning)
             {
                 try { _mobileServer.Start(); } catch { }
             }
 
+            QueueLanProbeIfStale(force: true);
             RefreshTvMobileUi();
 
             var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+            string publicNote = anyPublic
+                ? "\n\n⚠️ NOTE: Windows classifies your active network as 'Public'. Inbound firewall rules have been opened for your local subnet, but for best reliability consider switching the network profile to 'Private' in Windows settings."
+                : "";
+
             Info(
                 $"🛡️ LAN Protection is now ACTIVE!\n\n" +
                 $"• DNS Listen Address: 0.0.0.0 (Port {_sink.Settings.Port})\n" +
-                $"• Windows Firewall: Inbound DNS (Port {_sink.Settings.Port} UDP/TCP) and Mobile Companion (Port 8765 TCP) are OPEN.\n" +
+                $"• Windows Firewall: Inbound DNS (Port {_sink.Settings.Port} UDP/TCP) and Mobile Companion (Port {_mobileServer?.Port ?? 8765} TCP) are OPEN for your local subnet.\n" +
                 $"• Your PC LAN IP: {localIp}\n\n" +
                 $"To protect your Smart TV or Phone:\n" +
-                $"1. Set the device Wi-Fi DNS server to: {localIp}\n" +
-                $"2. On Android phones: Turn OFF 'Private DNS' in Wi-Fi settings.\n\n" +
-                $"Spectra is now actively ready to receive and filter all DNS traffic from your network!");
+                $"1. Set the device Wi-Fi/Ethernet DNS server to: {localIp}\n" +
+                $"2. Leave DNS 2 (Alternative DNS) EMPTY (or set it also to {localIp})\n" +
+                $"3. On Android phones: Turn OFF 'Private DNS' in Wi-Fi settings.\n\n" +
+                $"Spectra is now actively ready to receive and filter all DNS traffic from your network!{publicNote}");
         }
         catch (Exception ex)
         {
             Error("Failed to enable LAN DNS protection", ex);
+        }
+        finally
+        {
+            _lanBusy = false;
+            ApplyLanBanner();
+        }
+    }
+
+    private async Task DisableLanDnsProtectionAsync()
+    {
+        if (!_isAdmin)
+        {
+            Info("Disabling LAN Protection requires Administrator privileges to remove Windows Firewall rules.");
+            return;
+        }
+
+        _lanBusy = true;
+        ApplyLanBanner();
+        try
+        {
+            LanProtectionPlanner.ApplyDisabled(_sink.Settings);
+            DnsListenBox.Text = _sink.Settings.ListenAddress;
+            _sink.SaveSettingsOnly(_sink.Settings);
+
+            string exe = Environment.ProcessPath ?? "";
+            _enforcer.RemoveInboundDns(exe);
+            _lanFirewallOpen = false;
+
+            if (_sink.IsRunning)
+            {
+                _sink.Stop();
+            }
+            await StartDnsAsync(_sink.Settings);
+
+            QueueLanProbeIfStale(force: true);
+            RefreshTvMobileUi();
+
+            Info("⚪ LAN Protection is now OFF.\n\nSpectra DNS is now restricted to this PC only (127.0.0.1). Other devices on your network will no longer be able to resolve DNS through this PC.");
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to disable LAN DNS protection", ex);
+        }
+        finally
+        {
+            _lanBusy = false;
+            ApplyLanBanner();
         }
     }
 
@@ -6893,6 +7570,72 @@ public partial class MainWindow : Window
         if (_currentAiReport != null)
         {
             DisplayAiReport(_currentAiReport);
+        }
+    }
+
+    private void SyncAiProcessCombo()
+    {
+        if (AiProcessCombo.IsDropDownOpen) return;
+
+        var currentItems = new Dictionary<int, ComboBoxItem>();
+        foreach (var obj in AiProcessCombo.Items)
+        {
+            if (obj is ComboBoxItem item && item.Tag is ValueTuple<int, string?> (int pid, _))
+            {
+                currentItems[pid] = item;
+            }
+        }
+
+        var liveRows = new Dictionary<int, (string Program, string? Path)>();
+        foreach (var r in Rows)
+        {
+            if (r.Pid > 0 && !liveRows.ContainsKey(r.Pid))
+            {
+                liveRows[r.Pid] = (r.Program, r.Path);
+            }
+        }
+
+        int currentSelectedPid = -1;
+        if (AiProcessCombo.SelectedItem is ComboBoxItem sel && sel.Tag is ValueTuple<int, string?> (int spid, _))
+        {
+            currentSelectedPid = spid;
+        }
+
+        var (addPids, removePids) = ItemSyncPlanner.Plan(currentItems.Keys, liveRows.Keys, currentSelectedPid);
+
+        if (addPids.Count == 0 && removePids.Count == 0) return;
+
+        foreach (int pid in removePids)
+        {
+            if (currentItems.TryGetValue(pid, out var item))
+            {
+                AiProcessCombo.Items.Remove(item);
+            }
+        }
+
+        foreach (int pid in addPids)
+        {
+            if (liveRows.TryGetValue(pid, out var info))
+            {
+                var item = new ComboBoxItem
+                {
+                    Content = $"{info.Program} (PID {pid})",
+                    Tag = (pid, info.Path)
+                };
+                AiProcessCombo.Items.Add(item);
+            }
+        }
+
+        if (AiProcessCombo.SelectedItem == null && AiProcessCombo.Items.Count > 0)
+        {
+            if (currentSelectedPid > 0 && currentItems.TryGetValue(currentSelectedPid, out var stillThere))
+            {
+                AiProcessCombo.SelectedItem = stillThere;
+            }
+            else
+            {
+                AiProcessCombo.SelectedIndex = 0;
+            }
         }
     }
 

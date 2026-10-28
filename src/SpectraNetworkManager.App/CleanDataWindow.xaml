@@ -1,0 +1,111 @@
+<Window x:Class="SpectraNetworkManager.Ui.CleanDataWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spectra Stored Data &amp; Privacy Maintenance" Width="560" Height="540" MinWidth="500" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Icon="app.ico"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="🧹 CLEAN STORED DATA &amp; PRIVACY" FontSize="16" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}"/>
+                <TextBlock Text="  //  maintenance" FontSize="11" Foreground="{StaticResource Magenta}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+            </StackPanel>
+            <TextBlock Text="Reclaim disk space and erase historical query and socket logs. Select items to purge below."
+                       FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <!-- Checklist -->
+        <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="6" Padding="14">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="STORED LOGS &amp; HISTORIES (RECOMMENDED)" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,0,0,8" FontFamily="Bahnschrift"/>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                        <DockPanel LastChildFill="True">
+                            <TextBlock x:Name="DnsHistorySizeText" DockPanel.Dock="Right" Text="0 MB" FontWeight="Bold" Foreground="{StaticResource Amber}" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="CleanDnsHistoryCheck" IsChecked="True" VerticalAlignment="Center">
+                                <StackPanel Margin="6,0,0,0">
+                                    <TextBlock Text="DNS Query History (dns-history.db)" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="Local database of all captured domain lookups and blocklist hits." FontSize="10" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                        <DockPanel LastChildFill="True">
+                            <TextBlock x:Name="NetworkHistorySizeText" DockPanel.Dock="Right" Text="0 MB" FontWeight="Bold" Foreground="{StaticResource Amber}" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="CleanNetworkHistoryCheck" IsChecked="True" VerticalAlignment="Center">
+                                <StackPanel Margin="6,0,0,0">
+                                    <TextBlock Text="Network Traffic &amp; Socket History (network-history.db)" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="Long-term per-process bandwidth samples and remote IP connection logs." FontSize="10" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                        <DockPanel LastChildFill="True">
+                            <TextBlock x:Name="AiHistorySizeText" DockPanel.Dock="Right" Text="0 MB" FontWeight="Bold" Foreground="{StaticResource Amber}" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="CleanAiHistoryCheck" IsChecked="True" VerticalAlignment="Center">
+                                <StackPanel Margin="6,0,0,0">
+                                    <TextBlock Text="Spectra AI Threat Investigation Cache" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="Cached AI threat assessments, VirusTotal reports, and heuristic summaries." FontSize="10" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,14">
+                        <DockPanel LastChildFill="True">
+                            <TextBlock x:Name="LogFilesSizeText" DockPanel.Dock="Right" Text="0 MB" FontWeight="Bold" Foreground="{StaticResource Amber}" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="CleanLogsCheck" IsChecked="True" VerticalAlignment="Center">
+                                <StackPanel Margin="6,0,0,0">
+                                    <TextBlock Text="Temporary Logs &amp; Update Download Caches" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="Application logs, temporary installer files, and crash dumps." FontSize="10" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </DockPanel>
+                    </Border>
+
+                    <TextBlock Text="RULES &amp; VAULT (PRESERVED BY DEFAULT)" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Magenta}" Margin="0,0,0,8" FontFamily="Bahnschrift"/>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                        <CheckBox x:Name="CleanCustomRulesCheck" IsChecked="False" VerticalAlignment="Center">
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Custom DNS Rules &amp; Client Groups" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource Text}"/>
+                                <TextBlock Text="⚠️ Warning: Erases all custom block/allow rules and TV/mobile group assignments." FontSize="10" Foreground="{StaticResource Amber}"/>
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+
+                    <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <CheckBox x:Name="CleanQuarantineCheck" IsChecked="False" VerticalAlignment="Center">
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Quarantine Vault Contents" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource Text}"/>
+                                <TextBlock Text="⚠️ Warning: Permanently deletes all files currently held in the Quarantine Vault." FontSize="10" Foreground="{StaticResource Magenta}"/>
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Footer -->
+        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="True">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <Button Content="🧹 Clean Selected Data" Click="OnExecuteCleanClick" Padding="14,5" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,8,0"/>
+                <Button Content="Cancel" Click="OnCancelClick" Padding="12,5" Foreground="{StaticResource Text}"/>
+            </StackPanel>
+            <TextBlock x:Name="CleanStatusText" Text="Select data stores to clean." VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
+    </Grid>
+</Window>

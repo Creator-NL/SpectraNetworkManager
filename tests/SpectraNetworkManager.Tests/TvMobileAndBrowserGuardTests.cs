@@ -163,4 +163,70 @@ public class TvMobileAndBrowserGuardTests
             if (File.Exists(tempConfig)) File.Delete(tempConfig);
         }
     }
+
+    [Fact]
+    public void LanProtectionPlanner_EnablesAndDisablesCorrectly()
+    {
+        var settings = new DnsSettings { ListenAddress = "127.0.0.1", RestrictClientsToLocalNetwork = false };
+        LanProtectionPlanner.ApplyEnabled(settings);
+        Assert.Equal("0.0.0.0", settings.ListenAddress);
+        Assert.True(settings.RestrictClientsToLocalNetwork);
+
+        LanProtectionPlanner.ApplyDisabled(settings);
+        Assert.Equal("127.0.0.1", settings.ListenAddress);
+    }
+
+    [Fact]
+    public void LanProtectionEvaluator_ReportsStatesAccurately()
+    {
+        // 1. Stopped
+        var stopped = LanProtectionEvaluator.Evaluate(null, false, false, null, "192.168.1.10");
+        Assert.Equal(LanProtectionLevel.Off, stopped.Level);
+
+        // 2. Localhost only
+        var local = LanProtectionEvaluator.Evaluate(new IPEndPoint(IPAddress.Loopback, 53), true, true, null, "192.168.1.10");
+        Assert.Equal(LanProtectionLevel.Off, local.Level);
+
+        // 3. Partial (firewall missing)
+        var partial = LanProtectionEvaluator.Evaluate(new IPEndPoint(IPAddress.Any, 53), false, true, null, "192.168.1.10");
+        Assert.Equal(LanProtectionLevel.Partial, partial.Level);
+
+        // 4. Active with Public network warning
+        var nets = new[] { new NetworkProfileInfo("Ethernet", NetworkCategoryKind.Public) };
+        var active = LanProtectionEvaluator.Evaluate(new IPEndPoint(IPAddress.Any, 53), true, true, nets, "192.168.1.10");
+        Assert.Equal(LanProtectionLevel.Active, active.Level);
+        Assert.Contains(active.Warnings, w => w.Contains("Public"));
+    }
+
+    [Fact]
+    public void DnsClientMatch_MatchesExactAndPort()
+    {
+        Assert.True(DnsClientMatch.IsSameClient("192.168.1.55", "192.168.1.55"));
+        Assert.True(DnsClientMatch.IsSameClient("192.168.1.55:5353", "192.168.1.55"));
+        Assert.False(DnsClientMatch.IsSameClient("192.168.1.5", "192.168.1.55"));
+        Assert.False(DnsClientMatch.IsSameClient(null, "192.168.1.55"));
+        Assert.False(DnsClientMatch.IsSameClient("192.168.1.55", null));
+    }
+
+    [Fact]
+    public void OncePerRunGate_PassesOnceOnly()
+    {
+        var gate = new OncePerRunGate();
+        Assert.True(gate.TryPass());
+        Assert.False(gate.TryPass());
+        Assert.False(gate.TryPass());
+    }
+
+    [Fact]
+    public void ItemSyncPlanner_PlansAddAndRemovePreservingProtectedKey()
+    {
+        var current = new[] { 100, 200, 300 };
+        var live = new[] { 200, 400 };
+        int protectedKey = 100; // PID 100 is dead in live, but is protected because it's selected
+
+        var (add, remove) = ItemSyncPlanner.Plan(current, live, protectedKey);
+
+        Assert.Equal(new[] { 400 }, add);
+        Assert.Equal(new[] { 300 }, remove); // 100 is NOT removed because it is protected
+    }
 }

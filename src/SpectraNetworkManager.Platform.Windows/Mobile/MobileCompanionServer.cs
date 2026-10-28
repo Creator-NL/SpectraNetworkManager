@@ -61,27 +61,58 @@ public sealed class MobileCompanionServer : IDisposable
         return token;
     }
 
+    /// <summary>"all interfaces" when reachable from the LAN, "this PC only" when the wildcard bind was refused.</summary>
+    public string BindScope { get; private set; } = "not started";
+
+    /// <summary>Why the server could not listen on the LAN (empty when everything is fine).</summary>
+    public string LastBindError { get; private set; } = "";
+
+    /// <summary>UTC time of the most recent request from any device other than this PC (null = none yet).</summary>
+    public DateTime? LastRemoteContactUtc { get; private set; }
+
+    /// <summary>IP address of the most recent request from a device other than this PC.</summary>
+    public string LastRemoteContactIp { get; private set; } = "";
+
+    /// <summary>Number of requests received from other devices since the server started.</summary>
+    public long RemoteRequestCount => Interlocked.Read(ref _remoteRequestCount);
+
+    /// <summary>Fires when a remote LAN device connects to the companion server.</summary>
+    public event Action<string, string>? RemoteContactReceived;
+
+    private long _remoteRequestCount;
+
     public void Start()
     {
         if (_listener.IsListening) return;
 
+        LastBindError = "";
         try
         {
             _listener.Prefixes.Clear();
             _listener.Prefixes.Add($"http://*:{Port}/");
             _listener.Start();
+            BindScope = "all interfaces";
         }
-        catch (HttpListenerException)
+        catch (HttpListenerException ex)
         {
+            LastBindError = ex.Message;
+
             // If wildcard http://*:8765 requires admin URL reservation, fall back to localhost/local prefix
             _listener.Prefixes.Clear();
             _listener.Prefixes.Add($"http://+:{Port}/");
-            try { _listener.Start(); }
-            catch
+            try
             {
+                _listener.Start();
+                BindScope = "all interfaces";
+                LastBindError = "";
+            }
+            catch (HttpListenerException ex2)
+            {
+                LastBindError = ex2.Message;
                 _listener.Prefixes.Clear();
                 _listener.Prefixes.Add($"http://localhost:{Port}/");
                 _listener.Start();
+                BindScope = "this PC only";
             }
         }
 
@@ -127,6 +158,23 @@ public sealed class MobileCompanionServer : IDisposable
             res.Headers.Add("Cache-Control", "no-store, no-cache, must-revalidate");
 
             string path = req.Url?.AbsolutePath ?? "/";
+
+            // Remember contact from other devices (phones/TVs) so the PC can show whether they reach us at all.
+            var remote = req.RemoteEndPoint?.Address;
+            if (remote is not null && !IPAddress.IsLoopback(remote))
+            {
+                LastRemoteContactUtc = DateTime.UtcNow;
+                LastRemoteContactIp = remote.ToString();
+                Interlocked.Increment(ref _remoteRequestCount);
+                RemoteContactReceived?.Invoke(LastRemoteContactIp, path);
+            }
+
+            // Unauthenticated connectivity check: "can my phone reach this PC at all?"
+            if (path == "/api/ping")
+            {
+                await WriteJsonAsync(res, new { ok = true, app = "SpectraNetworkManager", server = Environment.MachineName });
+                return;
+            }
 
             // Check pairing query token
             string? pairQuery = req.QueryString["token"];
@@ -368,6 +416,8 @@ public sealed class MobileCompanionServer : IDisposable
               <span class="${(l.isBlocked || l.IsBlocked) ? 'blocked' : 'allowed'}">${(l.isBlocked || l.IsBlocked) ? '🚫 Block' : '🛡️ OK'}</span>
             </div>
           `).join('');
+        } else {
+          list.innerHTML = '<div style="color: var(--muted); font-size: 0.85rem; padding: 8px;">No DNS activity yet. On your phone set the Wi-Fi DNS to this PC and leave DNS 2 empty.</div>';
         }
       } catch (e) {}
     }

@@ -78,6 +78,127 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--safe"; RunOnceId: "SpectraNetw
 Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--uninstall"; RunOnceId: "SpectraNetworkManagerEngineUninstall"; StatusMsg: "Stopping and unregistering SpectraNetworkManager Engine service..."; Flags: runhidden
 
 [Code]
+var
+  UpgradePage: TInputOptionWizardPage;
+  HasExistingInstall: Boolean;
+  PrevInstallDir: String;
+  PrevVersion: String;
+
+function DetectExistingInstallation(): Boolean;
+var
+  KeyName: String;
+begin
+  KeyName := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{8B849E72-5202-4A73-A340-96A125EFA5F8}_is1';
+  Result := False;
+  PrevInstallDir := '';
+  PrevVersion := '';
+
+  // Check 64-bit and 32-bit registry in HKLM and HKCU
+  if RegQueryStringValue(HKLM64, KeyName, 'InstallLocation', PrevInstallDir) or
+     RegQueryStringValue(HKLM, KeyName, 'InstallLocation', PrevInstallDir) or
+     RegQueryStringValue(HKCU64, KeyName, 'InstallLocation', PrevInstallDir) or
+     RegQueryStringValue(HKCU, KeyName, 'InstallLocation', PrevInstallDir) then
+  begin
+    if (PrevInstallDir <> '') and DirExists(PrevInstallDir) then
+      Result := True;
+  end;
+
+  if not Result then
+  begin
+    if RegQueryStringValue(HKLM64, KeyName, 'Inno Setup: App Path', PrevInstallDir) or
+       RegQueryStringValue(HKLM, KeyName, 'Inno Setup: App Path', PrevInstallDir) then
+    begin
+      if (PrevInstallDir <> '') and DirExists(PrevInstallDir) then
+        Result := True;
+    end;
+  end;
+
+  if not Result then
+  begin
+    // Check default program files path
+    if FileExists(ExpandConstant('{autopf}\SpectraNetworkManager\SpectraNetworkManager.exe')) then
+    begin
+      PrevInstallDir := ExpandConstant('{autopf}\SpectraNetworkManager');
+      Result := True;
+    end;
+  end;
+
+  if Result then
+  begin
+    if not (RegQueryStringValue(HKLM64, KeyName, 'DisplayVersion', PrevVersion) or
+            RegQueryStringValue(HKLM, KeyName, 'DisplayVersion', PrevVersion)) then
+      PrevVersion := 'existing';
+  end;
+end;
+
+procedure InitializeWizard;
+var
+  InfoText: String;
+begin
+  HasExistingInstall := DetectExistingInstallation();
+
+  if HasExistingInstall then
+    InfoText := 'SpectraNetworkManager detected version ' + PrevVersion + ' already installed at:' + #13#10 + PrevInstallDir + #13#10#13#10 + 'Please choose an installation method:'
+  else
+    InfoText := 'Please choose an installation method:';
+
+  UpgradePage := CreateInputOptionPage(
+    wpLicense,
+    'Existing Installation Detected',
+    'Choose how you would like to proceed with the installation',
+    InfoText,
+    True, False);
+
+  UpgradePage.Add('⚡ Easy Upgrade (Recommended)' + #13#10 + '   Automatically upgrade using your existing folder and settings with one click.');
+  UpgradePage.Add('🛠️ Custom Install' + #13#10 + '   Customize installation directory, shortcuts, and review all setup steps.');
+  UpgradePage.SelectedValueIndex := 0;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if not HasExistingInstall then
+  begin
+    if (UpgradePage <> nil) and (PageID = UpgradePage.ID) then
+      Result := True;
+  end
+  else
+  begin
+    // If existing install detected and user chose Easy Upgrade, skip directory and tasks pages
+    if (UpgradePage <> nil) and (UpgradePage.SelectedValueIndex = 0) then
+    begin
+      if (PageID = wpSelectDir) or (PageID = wpSelectTasks) then
+        Result := True;
+    end;
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (UpgradePage <> nil) and (CurPageID = UpgradePage.ID) then
+  begin
+    if (UpgradePage.SelectedValueIndex = 0) and (PrevInstallDir <> '') then
+    begin
+      WizardForm.DirEdit.Text := PrevInstallDir;
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    // Safely stop background engine and GUI if running to avoid locked file errors
+    Exec('net.exe', 'stop SpectraNetworkManager.Engine', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM SpectraNetworkManager.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM SpectraNetworkManager.Engine.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM SpectraNetworkManager.BrowserHost.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 // After file removal, prompt user whether to clean up data in ProgramData
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

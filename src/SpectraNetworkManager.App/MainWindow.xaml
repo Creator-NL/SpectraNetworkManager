@@ -41,6 +41,10 @@
                 </Border>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="SystemAuditButton" Content="🩺 Audit System" Margin="0,0,8,0" Padding="10,4" FontWeight="SemiBold"
+                        Foreground="{StaticResource Cyan}" Click="OnSystemAuditClick" ToolTip="Audit all security settings, rules, and configurations with 1-click repairs"/>
+                <Button x:Name="CleanDataButton" Content="🧹 Clean Stored Data" Margin="0,0,8,0" Padding="10,4"
+                        Click="OnCleanStoredDataClick" ToolTip="Clean DNS history, network history, and temporary logs while preserving custom rules"/>
                 <Button x:Name="SwitchElevationButton" Content="Restart in Normal Mode" Margin="0,0,10,0" Click="OnSwitchElevationClick"
                         ToolTip="Restart SpectraNetworkManager in standard user mode without Administrator privileges."/>
                 <Button x:Name="UpdateBadge" Content="Update Available" Visibility="Collapsed" Margin="0,0,10,0"
@@ -191,6 +195,7 @@
                                 <MenuItem Header="Block Program..." Click="OnBlockConnectionProgram"/>
                                 <MenuItem Header="Allow Program" Click="OnAllowConnectionProgram"/>
                                 <MenuItem x:Name="ConnectionMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineConnectionProgram" Foreground="{StaticResource Magenta}"/>
+                                <MenuItem Header="⚡ Limit Upload Speed..." Click="OnSetConnectionUploadLimit" Foreground="{StaticResource Cyan}"/>
                                 <Separator/>
                                 <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckConnectionVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                                 <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyConnectionSha256"/>
@@ -417,6 +422,7 @@
                         <MenuItem Header="Allow" Click="OnAllowProgram"/>
                         <MenuItem x:Name="ProgramMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineProgram" Foreground="{StaticResource Magenta}"/>
                         <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreProgramQuarantine" Foreground="{StaticResource MenuBlue}"/>
+                        <MenuItem Header="⚡ Limit Upload Speed..." Click="OnSetProgramUploadLimit" Foreground="{StaticResource Cyan}"/>
                         <Separator/>
                         <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckProgramVirusTotal" Foreground="{StaticResource MenuBlue}"/>
                         <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyProgramSha256"/>
@@ -672,14 +678,14 @@
 
                     <TextBlock Text="Profile:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
                     <ComboBox x:Name="ScannerProfileCombo" Width="195" VerticalAlignment="Center" Margin="0,0,14,0" SelectedIndex="0">
-                        <ComboBoxItem Content="Top 20 Ports (Fastest)"/>
-                        <ComboBoxItem Content="Top 100 Ports (Recommended)"/>
-                        <ComboBoxItem Content="Passive Discovery (Instant)"/>
-                        <ComboBoxItem Content="Local Machine (All Sockets)"/>
+                        <ComboBoxItem Content="Top 20 Ports (Fastest)" ToolTip="Probes the top 20 most common network ports (HTTP, HTTPS, DNS, SSH, SMB, RDP, etc.) in ~2-5 seconds"/>
+                        <ComboBoxItem Content="Top 100 Ports (Recommended)" ToolTip="Recommended: Audits 100 common service, database, and streaming ports across active LAN hosts"/>
+                        <ComboBoxItem Content="Passive Discovery (Instant)" ToolTip="Instant snapshot reading ARP tables and routing without transmitting active TCP packets"/>
+                        <ComboBoxItem Content="Local Machine (All Sockets)" ToolTip="Audits all local listening TCP and UDP sockets directly from the Windows OS kernel"/>
                     </ComboBox>
 
-                    <Button x:Name="StartScanButton" Content="▶ Start Scan" Padding="14,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnStartScan"/>
-                    <Button x:Name="StopScanButton" Content="⏹ Stop" Padding="12,3" Margin="0,0,8,0" IsEnabled="False" Click="OnStopScan"/>
+                    <Button x:Name="StartScanButton" Content="▶ Start Scan" Padding="14,3" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnStartScan" ToolTip="Begin scanning the target subnet for responsive hosts and open ports"/>
+                    <Button x:Name="StopScanButton" Content="⏹ Stop" Padding="12,3" Margin="0,0,8,0" IsEnabled="False" Click="OnStopScan" ToolTip="Abort the active port scan"/>
                     <Button x:Name="PassiveDiscoverButton" Content="⚡ Passive (Instant)" Padding="12,3" Margin="0,0,14,0" Click="OnPassiveDiscovery" ToolTip="Instant neighbor &amp; ARP discovery without sending network packets"/>
 
                     <ProgressBar x:Name="ScannerProgressBar" Width="120" Height="14" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="Collapsed" Minimum="0" Maximum="100"/>
@@ -803,12 +809,36 @@
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="DEVICE TYPE" Binding="{Binding KindDisplay, Mode=OneWay}" Width="170"/>
-                        <DataGridTextColumn Header="IP ADDRESS" Binding="{Binding IpString, Mode=OneWay}" Width="130"/>
-                        <DataGridTextColumn Header="HOSTNAME" Binding="{Binding Hostname, Mode=OneWay}" Width="170"/>
-                        <DataGridTextColumn Header="MAC ADDRESS" Binding="{Binding MacString, Mode=OneWay}" Width="140"/>
-                        <DataGridTextColumn Header="VENDOR" Binding="{Binding Vendor, Mode=OneWay}" Width="170"/>
-                        <DataGridTextColumn Header="OPEN PORTS" Binding="{Binding OpenPortsSummary, Mode=OneWay}" Width="*"/>
+                        <DataGridTextColumn Binding="{Binding KindDisplay, Mode=OneWay}" Width="170">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="DEVICE TYPE" ToolTip="Hardware and OS classification based on MAC OUI vendor, hostname signatures, and service heuristics"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding IpString, Mode=OneWay}" Width="130">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="IP ADDRESS" ToolTip="IPv4 address of the discovered device"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding Hostname, Mode=OneWay}" Width="170">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="HOSTNAME" ToolTip="Host name resolved via Reverse DNS (PTR), mDNS, or NetBIOS"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding MacString, Mode=OneWay}" Width="140">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="MAC ADDRESS" ToolTip="Physical MAC hardware address from the ARP table"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding Vendor, Mode=OneWay}" Width="170">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="VENDOR" ToolTip="Hardware manufacturer name resolved from IEEE OUI database"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding OpenPortsSummary, Mode=OneWay}" Width="*">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="OPEN PORTS" ToolTip="Active TCP/UDP listening services discovered during the scan"/>
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
                     </DataGrid.Columns>
                 </DataGrid>
 
@@ -832,17 +862,29 @@
 
                             <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,6">
                                 <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,4">
                                         <TextBlock Text="IP Address:" FontSize="10" Foreground="{StaticResource Muted}"/>
                                         <TextBlock x:Name="InspectorDeviceIpText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1">
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,4">
                                         <TextBlock Text="MAC / OUI:" FontSize="10" Foreground="{StaticResource Muted}"/>
                                         <TextBlock x:Name="InspectorDeviceMacText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="0">
+                                        <TextBlock Text="Resolved Hostname:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorDeviceHostText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1">
+                                        <TextBlock Text="Classification Reason:" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                        <TextBlock x:Name="InspectorDeviceReasonText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Amber}" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -859,10 +901,26 @@
                         <GroupBox Header="OPEN PORTS &amp; SERVICES" Foreground="{StaticResource Magenta}" BorderBrush="{StaticResource Line}">
                             <DataGrid x:Name="DevicePortsGrid" ItemsSource="{Binding SelectedDevicePorts}" Margin="4" AutoGenerateColumns="False" SelectionMode="Single">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="PORT" Binding="{Binding Port, Mode=OneWay}" Width="55"/>
-                                    <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="55"/>
-                                    <DataGridTextColumn Header="SERVICE" Binding="{Binding ServiceName, Mode=OneWay}" Width="120"/>
-                                    <DataGridTextColumn Header="DETAILS / BANNER" Binding="{Binding Banner, Mode=OneWay}" Width="*"/>
+                                    <DataGridTextColumn Binding="{Binding Port, Mode=OneWay}" Width="55">
+                                        <DataGridTextColumn.Header>
+                                            <TextBlock Text="PORT" ToolTip="TCP/UDP port number"/>
+                                        </DataGridTextColumn.Header>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Binding="{Binding Protocol, Mode=OneWay}" Width="55">
+                                        <DataGridTextColumn.Header>
+                                            <TextBlock Text="PROTO" ToolTip="Transport protocol (TCP/UDP)"/>
+                                        </DataGridTextColumn.Header>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Binding="{Binding ServiceName, Mode=OneWay}" Width="120">
+                                        <DataGridTextColumn.Header>
+                                            <TextBlock Text="SERVICE" ToolTip="Known application layer protocol (HTTP, DNS, SSH, etc.)"/>
+                                        </DataGridTextColumn.Header>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Binding="{Binding Banner, Mode=OneWay}" Width="*">
+                                        <DataGridTextColumn.Header>
+                                            <TextBlock Text="DETAILS / BANNER" ToolTip="Service response or handshake banner captured from the listening port"/>
+                                        </DataGridTextColumn.Header>
+                                    </DataGridTextColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
                         </GroupBox>
@@ -1669,13 +1727,20 @@
         <Grid x:Name="TvMobilePanel" Grid.Row="3" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Metrics & Action Toolbar -->
+            <!-- Top Sub-Navigation & Action Toolbar -->
             <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <RadioButton x:Name="TvSubTabDevices" Content="📱 Connected Devices" GroupName="tvSubView" IsChecked="True"
+                                 Margin="0,0,16,0" VerticalAlignment="Center" FontWeight="SemiBold" Checked="OnTvSubTabChanged"
+                                 ToolTip="View detected Smart TVs, mobile phones, and their protection status"/>
+                    <RadioButton x:Name="TvSubTabDiagnostics" Content="🔍 Investigation &amp; Diagnostics" GroupName="tvSubView"
+                                 Margin="0,0,16,0" VerticalAlignment="Center" FontWeight="SemiBold" Checked="OnTvSubTabChanged"
+                                 ToolTip="Diagnostics hub, LAN DNS self-test, live traffic feed, and troubleshooting why 0 queries appear"/>
+                </StackPanel>
+
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="📺 Shield All Smart TVs" Click="OnShieldAllSmartTvs" Margin="0,0,8,0" Padding="10,4"
                             Foreground="{StaticResource Cyan}" ToolTip="Apply vendor ACR viewing telemetry blocklists to all Smart TVs"/>
@@ -1687,8 +1752,19 @@
                             ToolTip="Step-by-step DNS onboarding instructions for Samsung, LG, Roku, Apple TV, and Android"/>
                     <Button Content="🔄 Refresh Devices" Click="OnRefreshTvMobileDevices" Padding="10,4"/>
                 </StackPanel>
+            </DockPanel>
 
-                <WrapPanel VerticalAlignment="Center">
+            <!-- Sub-Tab 1: Connected Devices View -->
+            <Grid x:Name="TvDevicesSubPanel" Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Metrics WrapPanel -->
+                <WrapPanel Grid.Row="0" VerticalAlignment="Center" Margin="0,0,0,10">
                     <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Total Devices: " FontSize="11" Foreground="{StaticResource Muted}"/>
@@ -1714,96 +1790,261 @@
                         </StackPanel>
                     </Border>
                 </WrapPanel>
-            </DockPanel>
 
-            <!-- Banners Area -->
-            <StackPanel Grid.Row="1" Margin="0,0,0,10">
-                <!-- LAN DNS Protection Status & 1-Click Activation Banner -->
-                <Border x:Name="TvLanStatusBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
-                        CornerRadius="4" Padding="12,8" Margin="0,0,0,6">
+                <!-- Banners Area -->
+                <StackPanel Grid.Row="1" Margin="0,0,0,10">
+                    <!-- LAN DNS Protection Status & 1-Click Activation Banner -->
+                    <Border x:Name="TvLanStatusBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                            CornerRadius="4" Padding="12,8" Margin="0,0,0,6">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="TvEnableLanBtn" Content="🛡️ Enable LAN Protection (0.0.0.0 &amp; Firewall)" Click="OnEnableLanProtectionClick"
+                                        Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Padding="12,5" Margin="8,0,0,0"/>
+                            </StackPanel>
+                            <StackPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="TvLanStatusTitle" Text="🌐 LAN SINKHOLE STATUS: " FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                    <TextBlock x:Name="TvLanStatusSub" Text="Checking..." FontSize="12" Foreground="{StaticResource Text}"/>
+                                </StackPanel>
+                                <TextBlock x:Name="TvLanStatusDesc" Text="Smart TVs and phones require Spectra to listen on 0.0.0.0 and allow inbound port 53."
+                                           FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Router Forwarding Notice Banner -->
+                    <Border x:Name="TvGatewayNoticeBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
+                            CornerRadius="4" Padding="12,8" Visibility="Collapsed">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="How to Fix..." Click="OnShowDnsSetupGuide" Padding="8,3" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🟡 ROUTER DNS FORWARDING DETECTED" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
+                                    <TextBlock x:Name="TvGatewayNoticeText" Text=" (Gateway: 192.168.1.1)" FontSize="12" Foreground="{StaticResource Muted}"/>
+                                </StackPanel>
+                                <TextBlock Text="Your router forwards DNS queries on behalf of LAN devices. Global blocklists work, but per-device Smart TV &amp; GSM rules require setting Spectra's LAN IP as the DNS server in your device Wi-Fi settings."
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- TV & Mobile Devices DataGrid -->
+                <DataGrid x:Name="TvMobileGrid" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnTvMobileSelectionChanged">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="📺 Apply Smart TV ACR Shield" Click="OnContextShieldTv" Foreground="{StaticResource MenuBlue}"/>
+                            <MenuItem Header="📱 Apply Mobile Ad &amp; Tracker Shield" Click="OnContextShieldMobile" Foreground="{StaticResource Magenta}"/>
+                            <Separator/>
+                            <MenuItem Header="⏸ Pause Protection for this Device (15m)" Click="OnContextPauseDevice"/>
+                            <MenuItem Header="▶ Resume Protection" Click="OnContextResumeDevice"/>
+                            <Separator/>
+                            <MenuItem Header="⚙️ Show DNS Setup Steps for this Device" Click="OnContextShowGuide"/>
+                            <MenuItem Header="🔎 Scan Device Ports..." Click="OnContextScanPorts"/>
+                            <MenuItem Header="📋 Copy IP Address" Click="OnContextCopyIp"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="STATUS" Binding="{Binding ProtectionBadge}" Width="150"/>
+                        <DataGridTextColumn Header="DEVICE TYPE" Binding="{Binding DeviceTypeDisplay}" Width="130"/>
+                        <DataGridTextColumn Header="HOSTNAME / NAME" Binding="{Binding Hostname}" Width="200" Foreground="{StaticResource Cyan}"/>
+                        <DataGridTextColumn Header="IP ADDRESS" Binding="{Binding IpString}" Width="130"/>
+                        <DataGridTextColumn Header="MAC / VENDOR" Binding="{Binding Vendor}" Width="190"/>
+                        <DataGridTextColumn Header="ASSIGNED GROUP" Binding="{Binding AssignedGroup}" Width="140"/>
+                        <DataGridTextColumn Header="TOTAL QUERIES" Binding="{Binding TotalQueries}" Width="110"/>
+                        <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastQueryDisplay}" Width="100"/>
+                        <DataGridTextColumn Header="DETAILS &amp; GUIDANCE" Binding="{Binding ProtectionDesc}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Device Quick Inspector -->
+                <Border x:Name="TvDeviceInspector" Grid.Row="3" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
+                        BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,8" Visibility="Collapsed">
                     <DockPanel LastChildFill="True">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button x:Name="TvEnableLanBtn" Content="🛡️ Enable LAN Protection (0.0.0.0 &amp; Firewall)" Click="OnEnableLanProtectionClick"
-                                    Foreground="{StaticResource Cyan}" FontWeight="SemiBold" Padding="12,5" Margin="8,0,0,0"/>
+                            <Button x:Name="TvInspectorPairBtn" Content="📱 Pair Phone (QR Code)" Click="OnInspectorPairMobileClick" Margin="0,0,8,0" Padding="10,4"
+                                    Foreground="{StaticResource Amber}" ToolTip="Open the QR code pairing window for this phone / mobile device"/>
+                            <Button Content="⚙️ DNS Setup Instructions" Click="OnInspectorShowGuideClick" Margin="0,0,8,0" Padding="10,4"
+                                    ToolTip="View step-by-step Wi-Fi DNS setup steps for this device"/>
+                            <ComboBox x:Name="TvGroupAssignCombo" Width="130" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
+                            <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
                         </StackPanel>
-                        <StackPanel VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="TvLanStatusTitle" Text="🌐 LAN SINKHOLE STATUS: " FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
-                                <TextBlock x:Name="TvLanStatusSub" Text="Checking..." FontSize="12" Foreground="{StaticResource Text}"/>
-                            </StackPanel>
-                            <TextBlock x:Name="TvLanStatusDesc" Text="Smart TVs and phones require Spectra to listen on 0.0.0.0 and allow inbound port 53."
-                                       FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
-                        </StackPanel>
-                    </DockPanel>
-                </Border>
-
-                <!-- Router Forwarding Notice Banner -->
-                <Border x:Name="TvGatewayNoticeBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
-                        CornerRadius="4" Padding="12,8" Visibility="Collapsed">
-                    <DockPanel LastChildFill="True">
-                        <Button DockPanel.Dock="Right" Content="How to Fix..." Click="OnShowDnsSetupGuide" Padding="8,3" VerticalAlignment="Center" Margin="12,0,0,0"/>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="🟡 ROUTER DNS FORWARDING DETECTED" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
-                                <TextBlock x:Name="TvGatewayNoticeText" Text=" (Gateway: 192.168.1.1)" FontSize="12" Foreground="{StaticResource Muted}"/>
+                                <TextBlock x:Name="TvInspectorNameText" Text="Selected Device" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}" Margin="0,0,10,0"/>
+                                <TextBlock x:Name="TvInspectorIpText" Text="192.168.1.X" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <TextBlock Text="Your router forwards DNS queries on behalf of LAN devices. Global blocklists work, but per-device Smart TV &amp; GSM rules require setting Spectra's LAN IP as the DNS server in your device Wi-Fi settings."
-                                       FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                            <TextBlock x:Name="TvInspectorGuidanceText" Text="Guidance information" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
                         </StackPanel>
                     </DockPanel>
                 </Border>
-            </StackPanel>
+            </Grid>
 
-            <!-- TV & Mobile Devices DataGrid -->
-            <DataGrid x:Name="TvMobileGrid" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnTvMobileSelectionChanged">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="📺 Apply Smart TV ACR Shield" Click="OnContextShieldTv" Foreground="{StaticResource MenuBlue}"/>
-                        <MenuItem Header="📱 Apply Mobile Ad &amp; Tracker Shield" Click="OnContextShieldMobile" Foreground="{StaticResource Magenta}"/>
-                        <Separator/>
-                        <MenuItem Header="⏸ Pause Protection for this Device (15m)" Click="OnContextPauseDevice"/>
-                        <MenuItem Header="▶ Resume Protection" Click="OnContextResumeDevice"/>
-                        <Separator/>
-                        <MenuItem Header="⚙️ Show DNS Setup Steps for this Device" Click="OnContextShowGuide"/>
-                        <MenuItem Header="🔎 Scan Device Ports..." Click="OnContextScanPorts"/>
-                        <MenuItem Header="📋 Copy IP Address" Click="OnContextCopyIp"/>
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="STATUS" Binding="{Binding ProtectionBadge}" Width="150"/>
-                    <DataGridTextColumn Header="DEVICE TYPE" Binding="{Binding DeviceTypeDisplay}" Width="130"/>
-                    <DataGridTextColumn Header="HOSTNAME / NAME" Binding="{Binding Hostname}" Width="200" Foreground="{StaticResource Cyan}"/>
-                    <DataGridTextColumn Header="IP ADDRESS" Binding="{Binding IpString}" Width="130"/>
-                    <DataGridTextColumn Header="MAC / VENDOR" Binding="{Binding Vendor}" Width="190"/>
-                    <DataGridTextColumn Header="ASSIGNED GROUP" Binding="{Binding AssignedGroup}" Width="140"/>
-                    <DataGridTextColumn Header="TOTAL QUERIES" Binding="{Binding TotalQueries}" Width="110"/>
-                    <DataGridTextColumn Header="LAST SEEN" Binding="{Binding LastQueryDisplay}" Width="100"/>
-                    <DataGridTextColumn Header="DETAILS &amp; GUIDANCE" Binding="{Binding ProtectionDesc}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
+            <!-- Sub-Tab 2: Dedicated Investigation & Diagnostics Panel -->
+            <Grid x:Name="TvInvestigationSubPanel" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
 
-            <!-- Device Quick Inspector -->
-            <Border x:Name="TvDeviceInspector" Grid.Row="3" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
-                    BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,8" Visibility="Collapsed">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="TvInspectorPairBtn" Content="📱 Pair Phone (QR Code)" Click="OnInspectorPairMobileClick" Margin="0,0,8,0" Padding="10,4"
-                                Foreground="{StaticResource Amber}" ToolTip="Open the QR code pairing window for this phone / mobile device"/>
-                        <Button Content="⚙️ DNS Setup Instructions" Click="OnInspectorShowGuideClick" Margin="0,0,8,0" Padding="10,4"
-                                ToolTip="View step-by-step Wi-Fi DNS setup steps for this device"/>
-                        <ComboBox x:Name="TvGroupAssignCombo" Width="130" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                        <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
-                        <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
-                    </StackPanel>
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="TvInspectorNameText" Text="Selected Device" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}" Margin="0,0,10,0"/>
-                            <TextBlock x:Name="TvInspectorIpText" Text="192.168.1.X" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                <!-- Row 0: Live Health & Setup Checklist Cards -->
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Card 1: DNS Server Status -->
+                    <Border Grid.Column="0" Margin="0,0,6,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock Text="1. DNS SINKHOLE" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <TextBlock x:Name="InvDnsStateBadge" DockPanel.Dock="Right" Text="CHECKING..." FontSize="10" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+                            </DockPanel>
+                            <TextBlock x:Name="InvDnsEndpointText" Text="0.0.0.0:53" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,4,0,2"/>
+                            <TextBlock x:Name="InvDnsDetailText" Text="Wildcard bind active" FontSize="11" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
-                        <TextBlock x:Name="TvInspectorGuidanceText" Text="Guidance information" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
-                    </StackPanel>
-                </DockPanel>
-            </Border>
+                    </Border>
+
+                    <!-- Card 2: Windows Firewall Status -->
+                    <Border Grid.Column="1" Margin="0,0,6,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock Text="2. FIREWALL (PORT 53/8765)" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <TextBlock x:Name="InvFwStateBadge" DockPanel.Dock="Right" Text="CHECKING..." FontSize="10" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+                            </DockPanel>
+                            <TextBlock x:Name="InvFwTitleText" Text="LocalSubnet Allow" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Text}" Margin="0,4,0,2"/>
+                            <TextBlock x:Name="InvFwDetailText" Text="Inbound rules active" FontSize="11" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Card 3: Network Profile (Public / Private) -->
+                    <Border Grid.Column="2" Margin="0,0,6,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock Text="3. NETWORK PROFILE" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <TextBlock x:Name="InvNetStateBadge" DockPanel.Dock="Right" Text="CHECKING..." FontSize="10" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+                            </DockPanel>
+                            <TextBlock x:Name="InvNetTitleText" Text="Private Network" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,4,0,2"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="InvNetDetailText" Text="Ethernet / Cable" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                <Button x:Name="InvFixNetBtn" Content="Fix to Private" Click="OnInvFixNetworkProfile" Visibility="Collapsed" Padding="6,1" FontSize="10" Margin="8,0,0,0" ToolTip="Switch this connection from Public to Private so Windows Firewall allows local device traffic"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Card 4: Mobile Companion & Phone Reachability -->
+                    <Border Grid.Column="3" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock Text="4. PHONE REACHABILITY" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <TextBlock x:Name="InvCompanionStateBadge" DockPanel.Dock="Right" Text="READY" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Magenta}"/>
+                            </DockPanel>
+                            <TextBlock x:Name="InvCompanionUrlText" Text=":8765 (/api/ping)" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Magenta}" Margin="0,4,0,2"/>
+                            <TextBlock x:Name="InvLastContactText" Text="No remote hits yet" FontSize="11" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- Row 1: Interactive Diagnostics Bar -->
+                <Border Grid.Row="1" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,10">
+                    <DockPanel LastChildFill="True">
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                            <Button Content="🧪 Self-Test DNS on LAN IP" Click="OnInvRunDnsSelfTest" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Cyan}"
+                                    ToolTip="Sends a live DNS query to this PC's local LAN IP:53 to verify the socket is bound and responding to network packets"/>
+                            <Button Content="📱 Copy Phone Ping Link" Click="OnInvCopyPhonePingUrl" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Amber}"
+                                    ToolTip="Copies http://[PC-IP]:8765/api/ping to clipboard. Open this on your phone's browser to test connectivity instantly"/>
+                            <Button Content="📋 Copy Diagnostic Report" Click="OnInvCopyReport" Margin="0,0,8,0" Padding="10,3"
+                                    ToolTip="Copies complete network diagnostic details to the clipboard for troubleshooting"/>
+                            <Button Content="🔄 Refresh Status" Click="OnInvRefreshStatus" Padding="10,3"
+                                    ToolTip="Re-probes Windows Firewall, network profiles, and listener state"/>
+                        </StackPanel>
+                        <TextBlock x:Name="InvSelfTestResultText" Text="Ready for diagnostics. Click 'Self-Test DNS on LAN IP' to verify port 53 reachability."
+                                   VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                </Border>
+
+                <!-- Row 2: Split View: Troubleshooting Guide (Left) vs Live LAN Traffic Feed (Right) -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="4*" MinWidth="340"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="6*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Left: Why 0 Queries Guide -->
+                    <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="WHY 0 QUERIES? COMMON CAUSES &amp; FIXES" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Cyan}" Margin="0,0,0,8" FontFamily="Bahnschrift"/>
+
+                                <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="1. Android 'Private DNS' is Active" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Amber}"/>
+                                        <TextBlock Text="Android devices bypass manual Wi-Fi DNS settings if 'Private DNS' (DoT) is enabled. Go to Phone Settings → Network &amp; Internet → Private DNS → Set to OFF."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="2. Secondary DNS (DNS 2) is Configured" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Amber}"/>
+                                        <TextBlock Text="If DNS 2 has 8.8.8.8, 1.1.1.1, or router IP, your phone sends queries to both and prefers whichever answers fastest. Leave DNS 2 BLANK, or set DNS 2 to this PC's IP as well."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="3. Ethernet PC vs Guest Wi-Fi Isolation" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Amber}"/>
+                                        <TextBlock Text="If your PC is on Ethernet cable and your phone is on a Guest Wi-Fi network, many routers enable 'Client Isolation' which blocks guest Wi-Fi devices from talking to wired LAN PCs."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,6">
+                                    <StackPanel>
+                                        <TextBlock Text="4. Cached DNS / Airplane Mode" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Amber}"/>
+                                        <TextBlock Text="Phones cache domain resolutions. Turn Airplane Mode ON for 5 seconds and then OFF to force your phone to flush its internal DNS cache and request fresh queries."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
+                                  ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
+
+                    <!-- Right: Live LAN Traffic Feed -->
+                    <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                        <DockPanel LastChildFill="True">
+                            <DockPanel LastChildFill="False" DockPanel.Dock="Top" Margin="0,0,0,6">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="LIVE LAN TRAFFIC FEED" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Magenta}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text=" (Queries &amp; Pings from LAN devices)" FontSize="11" Foreground="{StaticResource Muted}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Button DockPanel.Dock="Right" Content="Clear Feed" Click="OnInvClearLanFeed" Padding="8,2" FontSize="10"/>
+                            </DockPanel>
+
+                            <DataGrid x:Name="TvLanFeedGrid" ItemsSource="{Binding TvLanActivityRows}" SelectionMode="Single" AutoGenerateColumns="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="TIME" Binding="{Binding Time}" Width="75"/>
+                                    <DataGridTextColumn Header="CLIENT IP" Binding="{Binding Client}" Width="120" Foreground="{StaticResource Cyan}"/>
+                                    <DataGridTextColumn Header="DOMAIN / REQUEST" Binding="{Binding Domain}" Width="190"/>
+                                    <DataGridTextColumn Header="TYPE" Binding="{Binding Type}" Width="70"/>
+                                    <DataGridTextColumn Header="RESULT" Binding="{Binding Result}" Width="110"/>
+                                    <DataGridTextColumn Header="DETAILS" Binding="{Binding Detail}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </Grid>
         </Grid>
 
         <!-- Browser Guard View -->

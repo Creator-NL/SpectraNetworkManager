@@ -10,6 +10,8 @@ public sealed record AppSettings
     public bool AlwaysStartAsAdministrator { get; init; }
     public bool AlwaysOnTop { get; init; }
     public bool NotificationSoundEnabled { get; init; } = true;
+    /// <summary>Show the "minimized to the system tray" hint (at most once per program start).</summary>
+    public bool TrayHintEnabled { get; init; } = true;
     public bool InteractiveToastsEnabled { get; init; } = true;
     public bool CheckForUpdatesOnStartup { get; init; } = true;
     public bool DnsFallbackModeEnabled { get; init; }
