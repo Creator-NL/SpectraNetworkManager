@@ -68,7 +68,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--install"; StatusMsg: "Registering SpectraNetworkManager Engine service..."; Flags: runhidden
 ; 2. Start the Engine service
 Filename: "net.exe"; Parameters: "start SpectraNetworkManager.Engine"; StatusMsg: "Starting SpectraNetworkManager Engine service..."; Flags: runhidden
-; 3. Optionally launch the GUI front-end
+; 3. Configure HTTP.SYS URL reservation for Mobile Companion port 8765
+Filename: "netsh.exe"; Parameters: "http add urlacl url=http://+:8765/ user=Everyone"; Flags: runhidden
+; 4. Optionally launch the GUI front-end
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -76,6 +78,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--safe"; RunOnceId: "SpectraNetworkManagerSafeRevert"; StatusMsg: "Restoring Windows Firewall rules and system DNS settings to defaults..."; Flags: runhidden
 ; 2. Stop and unregister SpectraNetworkManager.Engine service
 Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--uninstall"; RunOnceId: "SpectraNetworkManagerEngineUninstall"; StatusMsg: "Stopping and unregistering SpectraNetworkManager Engine service..."; Flags: runhidden
+; 3. Remove HTTP.SYS URL reservation
+Filename: "netsh.exe"; Parameters: "http delete urlacl url=http://+:8765/"; RunOnceId: "SpectraNetworkManagerUrlAclDelete"; Flags: runhidden
 
 [Code]
 var

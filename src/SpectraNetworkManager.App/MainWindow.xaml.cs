@@ -6282,6 +6282,11 @@ public partial class MainWindow : Window
             });
         };
 
+        if (_sink.Settings.ListenAddress == "0.0.0.0")
+        {
+            try { _mobileServer.Start(); } catch { }
+        }
+
         RefreshBrowserGuardUi();
     }
 
