@@ -264,7 +264,12 @@ public sealed class WindowsFirewallEnforcer
             dynamic rule = Create("HNetCfg.FWRule");
             rule.Name = InboundDnsRuleName(exePath, label);
             rule.Description = "Lets devices on your local network use SpectraNetworkManager DNS and Mobile Companion. Managed by SpectraNetworkManager.";
-            rule.ApplicationName = exePath;
+            // For mobile-companion-tcp (port 8765), .NET HttpListener uses Windows kernel http.sys (System process).
+            // Restricting ApplicationName to the user-mode WPF exe causes Windows Firewall to block all incoming http.sys traffic!
+            if (label != "mobile-companion-tcp")
+            {
+                rule.ApplicationName = exePath;
+            }
             rule.Direction = DirectionIn;
             rule.Action = ActionAllow;
             rule.Protocol = protocol;
@@ -280,18 +285,29 @@ public sealed class WindowsFirewallEnforcer
     public void RemoveInboundDns(string exePath)
     {
         dynamic policy = Create("HNetCfg.FWPolicy2");
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(exePath.ToLowerInvariant()));
+        string shortHash = "#" + Convert.ToHexString(hash, 0, 4).ToLowerInvariant();
+
         var names = new List<string>();
         foreach (dynamic rule in (IEnumerable)policy.Rules)
         {
             if ((string?)rule.Grouping != Group || (int)rule.Action != ActionAllow || (int)rule.Direction != DirectionIn) continue;
-            if (string.Equals((string?)rule.ApplicationName, exePath, StringComparison.OrdinalIgnoreCase)) names.Add((string)rule.Name);
+            string? name = (string?)rule.Name;
+            if (name != null && name.StartsWith("SpectraNetworkManager allow DNS server in", StringComparison.OrdinalIgnoreCase) && name.Contains(shortHash))
+            {
+                names.Add(name);
+            }
+            else if (string.Equals((string?)rule.ApplicationName, exePath, StringComparison.OrdinalIgnoreCase))
+            {
+                names.Add((string)rule.Name);
+            }
         }
         foreach (var name in names) policy.Rules.Remove(name);
     }
 
     /// <summary>True if the inbound DNS rules for this program exist.</summary>
     public bool HasInboundDns(string exePath) =>
-        List().Any(r => r.IsAllow && r.Direction == "in" && string.Equals(r.Program, exePath, StringComparison.OrdinalIgnoreCase));
+        List().Any(r => r.IsAllow && r.Direction == "in" && (string.Equals(r.Program, exePath, StringComparison.OrdinalIgnoreCase) || r.Name.StartsWith("SpectraNetworkManager allow DNS server in", StringComparison.OrdinalIgnoreCase)));
 
     private static string InboundDnsRuleName(string exePath, string label)
     {

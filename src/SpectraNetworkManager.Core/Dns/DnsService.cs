@@ -387,7 +387,7 @@ public sealed class DnsService : IDisposable
     }
 
     /// <summary>A name the current filter blocks (for the self-test), or null when nothing is blocked yet.</summary>
-    internal string? BlockedSample()
+    public string? BlockedSample()
     {
         var filter = _filter;
         foreach (var candidate in new[] { "doubleclick.net", "googleadservices.com", "ads.example.com" })

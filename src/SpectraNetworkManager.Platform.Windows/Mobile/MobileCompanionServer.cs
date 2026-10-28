@@ -152,10 +152,20 @@ public sealed class MobileCompanionServer : IDisposable
             var req = ctx.Request;
             var res = ctx.Response;
 
-            // Security headers
+            // Security and CORS headers
             res.Headers.Add("X-Content-Type-Options", "nosniff");
             res.Headers.Add("X-Frame-Options", "DENY");
             res.Headers.Add("Cache-Control", "no-store, no-cache, must-revalidate");
+            res.Headers.Add("Access-Control-Allow-Origin", "*");
+            res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            res.Headers.Add("Access-Control-Allow-Headers", "*");
+
+            if (string.Equals(req.HttpMethod, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+            {
+                res.StatusCode = 200;
+                res.Close();
+                return;
+            }
 
             string path = req.Url?.AbsolutePath ?? "/";
 
@@ -172,7 +182,14 @@ public sealed class MobileCompanionServer : IDisposable
             // Unauthenticated connectivity check: "can my phone reach this PC at all?"
             if (path == "/api/ping")
             {
-                await WriteJsonAsync(res, new { ok = true, app = "SpectraNetworkManager", server = Environment.MachineName });
+                await WriteJsonAsync(res, new
+                {
+                    ok = true,
+                    app = "SpectraNetworkManager",
+                    server = Environment.MachineName,
+                    clientIp = remote?.ToString() ?? "unknown",
+                    timeUtc = DateTime.UtcNow
+                });
                 return;
             }
 

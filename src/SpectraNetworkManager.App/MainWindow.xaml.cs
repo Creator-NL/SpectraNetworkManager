@@ -3776,7 +3776,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _enforcer.AllowInboundDns(exe, settings.Port, _mobileServer?.Port ?? 8765);
+            _enforcer.AllowInboundDns(exe, settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: true);
             StatusText.Text = $"Local network devices may now use the DNS server on port {settings.Port}.";
         }
         catch (Exception ex)
@@ -5717,7 +5717,7 @@ public partial class MainWindow : Window
                 _sink.Settings.ListenAddress = "0.0.0.0";
                 _sink.SaveSettingsOnly(_sink.Settings);
                 string exe = Environment.ProcessPath ?? "";
-                _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765);
+                _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: true);
                 if (_sink.IsRunning)
                 {
                     _sink.Stop();
@@ -6651,6 +6651,8 @@ public partial class MainWindow : Window
             InvLastContactText.Text = "Click Launch Companion & QR to start";
             InvLastContactText.Foreground = muted;
         }
+
+        CheckAndroidDohBypassHeuristic();
     }
 
     private async void OnInvRunDnsSelfTest(object sender, RoutedEventArgs e)
@@ -6659,27 +6661,80 @@ public partial class MainWindow : Window
         if (localIp == null)
         {
             InvSelfTestResultText.Text = "❌ No active LAN IPv4 address detected on this PC.";
+            InvSelfTestResultText.Foreground = (Brush)FindResource("Magenta");
             return;
         }
 
         InvSelfTestResultText.Text = $"⏳ Sending UDP DNS probe to {localIp}:{_sink.Settings.Port}...";
+        InvSelfTestResultText.Foreground = (Brush)FindResource("Cyan");
         try
         {
             var ep = new IPEndPoint(localIp, _sink.Settings.Port);
-            var res = await DnsSelfTest.RunAsync(ep, "example.com", timeout: TimeSpan.FromSeconds(2));
+            string? sample = _sink.BlockedSample();
+            var res = await DnsSelfTest.RunAsync(ep, sample, timeout: TimeSpan.FromSeconds(2));
             if (res.Ok)
             {
-                InvSelfTestResultText.Text = $"✅ DNS Self-Test PASSED! Answer received from {ep} ({string.Join(" ", res.Lines)})";
+                var summaryLines = res.Lines.Where(l => l.StartsWith("OK", StringComparison.Ordinal) || l.StartsWith("SKIP", StringComparison.Ordinal)).ToList();
+                string details = summaryLines.Count > 0 ? string.Join(" | ", summaryLines) : "DNS responding";
+                InvSelfTestResultText.Text = $"✅ DNS Self-Test PASSED on {ep}! {details}";
+                InvSelfTestResultText.Foreground = (Brush)FindResource("Cyan");
             }
             else
             {
-                InvSelfTestResultText.Text = $"❌ DNS Self-Test FAILED on {ep}: {string.Join(" ", res.Lines)}. LAN Protection must be ON.";
+                InvSelfTestResultText.Text = $"❌ DNS Self-Test FAILED on {ep}: {string.Join(" | ", res.Lines)}";
+                InvSelfTestResultText.Foreground = (Brush)FindResource("Magenta");
             }
         }
         catch (Exception ex)
         {
             InvSelfTestResultText.Text = $"❌ DNS Self-Test Error: {ex.Message}";
+            InvSelfTestResultText.Foreground = (Brush)FindResource("Magenta");
         }
+    }
+
+    private void OnOpenPhoneSetupGuide(object sender, RoutedEventArgs e)
+    {
+        var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+        int port = _mobileServer?.Port ?? 8765;
+        var dlg = new PhoneSetupGuideWindow(localIp, port) { Owner = this };
+        dlg.ShowDialog();
+    }
+
+    private void CheckAndroidDohBypassHeuristic()
+    {
+        if (InvAndroidDohWarningBorder == null) return;
+
+        var lanClients = TvLanActivityRows
+            .Where(r => !string.IsNullOrEmpty(r.Client) && r.Client != "127.0.0.1" && !r.Client.StartsWith("127.", StringComparison.Ordinal))
+            .GroupBy(r => r.Client)
+            .ToList();
+
+        foreach (var grp in lanClients)
+        {
+            var rows = grp.Take(20).ToList();
+            if (rows.Count >= 3)
+            {
+                int googlePings = rows.Count(r =>
+                    string.Equals(r.Domain, "www.google.com", StringComparison.OrdinalIgnoreCase) ||
+                    r.Domain.Contains("connectivitycheck") ||
+                    r.Domain.Contains("clients3.google.com"));
+
+                bool hasRealBrowsing = rows.Any(r =>
+                    !string.Equals(r.Domain, "www.google.com", StringComparison.OrdinalIgnoreCase) &&
+                    !r.Domain.Contains("connectivitycheck") &&
+                    !r.Domain.Contains("clients3.google.com") &&
+                    !r.Domain.EndsWith(".in-addr.arpa", StringComparison.OrdinalIgnoreCase));
+
+                if (!hasRealBrowsing && googlePings >= 3)
+                {
+                    InvAndroidDohWarningBorder.Visibility = Visibility.Visible;
+                    InvAndroidDohWarningText.Text = $"⚠️ Device {grp.Key} is sending connectivity checks (www.google.com), but real browsing is bypassing port 53 via Android 'Private DNS' (DoT port 853). Set Private DNS to OFF on {grp.Key} to protect all apps.";
+                    return;
+                }
+            }
+        }
+
+        InvAndroidDohWarningBorder.Visibility = Visibility.Collapsed;
     }
 
     private void OnInvCopyPhonePingUrl(object sender, RoutedEventArgs e)
@@ -7054,9 +7109,8 @@ public partial class MainWindow : Window
             DnsListenBox.Text = _sink.Settings.ListenAddress;
             _sink.SaveSettingsOnly(_sink.Settings);
 
-            bool anyPublic = _lanNetworks.Any(n => n.Category == NetworkCategoryKind.Public);
             string exe = Environment.ProcessPath ?? "";
-            _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: anyPublic);
+            _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: true);
             _lanFirewallOpen = true;
 
             if (_sink.IsRunning)
@@ -7074,6 +7128,7 @@ public partial class MainWindow : Window
             RefreshTvMobileUi();
 
             var localIp = GetLocalActiveIp()?.ToString() ?? "192.168.1.X";
+            bool anyPublic = _lanNetworks.Any(n => n.Category == NetworkCategoryKind.Public);
             string publicNote = anyPublic
                 ? "\n\n⚠️ NOTE: Windows classifies your active network as 'Public'. Inbound firewall rules have been opened for your local subnet, but for best reliability consider switching the network profile to 'Private' in Windows settings."
                 : "";

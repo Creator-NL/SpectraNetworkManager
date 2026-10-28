@@ -1956,7 +1956,9 @@
                         <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
                             <Button Content="🧪 Self-Test DNS on LAN IP" Click="OnInvRunDnsSelfTest" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Cyan}"
                                     ToolTip="Sends a live DNS query to this PC's local LAN IP:53 to verify the socket is bound and responding to network packets"/>
-                            <Button Content="📱 Copy Phone Ping Link" Click="OnInvCopyPhonePingUrl" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Amber}"
+                            <Button Content="📱 Phone Setup Guide" Click="OnOpenPhoneSetupGuide" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Cyan}"
+                                    ToolTip="Visual step-by-step instructions to configure phone Wi-Fi DNS and disable Android Private DNS / DoT bypass"/>
+                            <Button Content="📋 Copy Phone Ping Link" Click="OnInvCopyPhonePingUrl" Margin="0,0,8,0" Padding="10,3" Foreground="{StaticResource Amber}"
                                     ToolTip="Copies http://[PC-IP]:8765/api/ping to clipboard. Open this on your phone's browser to test connectivity instantly"/>
                             <Button Content="📋 Copy Diagnostic Report" Click="OnInvCopyReport" Margin="0,0,8,0" Padding="10,3"
                                     ToolTip="Copies complete network diagnostic details to the clipboard for troubleshooting"/>
@@ -2030,6 +2032,15 @@
                                 </StackPanel>
                                 <Button DockPanel.Dock="Right" Content="Clear Feed" Click="OnInvClearLanFeed" Padding="8,2" FontSize="10"/>
                             </DockPanel>
+
+                            <!-- Dynamic Android Private DNS / DoT warning banner -->
+                            <Border x:Name="InvAndroidDohWarningBorder" Visibility="Collapsed" Background="#2E1800" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,8" DockPanel.Dock="Top">
+                                <DockPanel LastChildFill="True">
+                                    <Button DockPanel.Dock="Right" Content="📱 Fix on Phone..." Click="OnOpenPhoneSetupGuide" Padding="10,2" FontSize="11" Margin="8,0,0,0" Foreground="{StaticResource Cyan}"/>
+                                    <TextBlock x:Name="InvAndroidDohWarningText" Text="⚠️ Android Device Detected: Private DNS (DoT port 853) is active on your phone, bypassing the sinkhole for browser traffic."
+                                               Foreground="{StaticResource Amber}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                </DockPanel>
+                            </Border>
 
                             <DataGrid x:Name="TvLanFeedGrid" ItemsSource="{Binding TvLanActivityRows}" SelectionMode="Single" AutoGenerateColumns="False">
                                 <DataGrid.Columns>

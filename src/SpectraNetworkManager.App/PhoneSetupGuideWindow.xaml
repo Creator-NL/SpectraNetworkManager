@@ -1,0 +1,175 @@
+<Window x:Class="SpectraNetworkManager.Ui.PhoneSetupGuideWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Phone &amp; Smart TV Setup Guide (Android, iOS &amp; TVs)" Width="640" Height="580" MinWidth="580" MinHeight="500"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Icon="app.ico"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="📱 PHONE &amp; SMART TV CONFIGURATION GUIDE" FontSize="16" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}"/>
+                <TextBlock Text="  //  lan sinkhole" FontSize="11" Foreground="{StaticResource Magenta}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+            </StackPanel>
+            <TextBlock Text="Follow these instructions to connect your smartphone, tablet, or smart TV to this PC's DNS sinkhole."
+                       FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <!-- Content Tabs -->
+        <TabControl Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+            <!-- Tab 1: Android -->
+            <TabItem Header="🤖 Android (Samsung, Xiaomi, Pixel, etc.)">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+                        <!-- Step 1: Private DNS -->
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="⚠️ STEP 1: TURN OFF ANDROID 'PRIVATE DNS' (CRITICAL)" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Amber}"/>
+                                </StackPanel>
+                                <TextBlock Text="Android devices bypass manual Wi-Fi DNS by default using encrypted DoT on port 853 to Google. If left on, only connectivity pings go to your PC while all real browsing bypasses the sinkhole!"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,4"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,5" Margin="0,2,0,0">
+                                    <TextBlock Text="Settings ➔ Connections / Network &amp; Internet ➔ More connection settings ➔ Private DNS ➔ Select 'OFF'"
+                                               FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap" FontFamily="Consolas"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Step 2: Wi-Fi Static DNS -->
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="STEP 2: SET WI-FI DNS TO THIS PC" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="Configure your phone's Wi-Fi connection to use this PC as its primary DNS server:"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,4"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,6" Margin="0,2,0,4">
+                                    <StackPanel>
+                                        <TextBlock Text="1. Go to Settings ➔ Wi-Fi ➔ Tap your connected network (Gear icon)." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="2. Tap Advanced ➔ IP Settings ➔ Change from DHCP to 'Static'." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="3. IP Address: Keep existing (e.g. 192.168.178.74)." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="4. Gateway: Router IP (e.g. 192.168.178.1)." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBlock Text="5. DNS 1: " FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                            <TextBlock x:Name="AndroidDns1Text" Text="192.168.178.203" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                            <TextBlock Text=" (This PC's LAN IP)" FontSize="11" Foreground="{StaticResource Muted}"/>
+                                        </DockPanel>
+                                        <TextBlock Text="6. DNS 2: Leave EMPTY or set to this same PC IP! (Do NOT set 8.8.8.8, or Android will split queries!)"
+                                                   FontSize="11" FontWeight="Bold" Foreground="{StaticResource Amber}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Step 3: Chrome Secure DNS -->
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="STEP 3: DISABLE CHROME APP SECURE DNS (IF USING CHROME)" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="Chrome has its own internal DoH client that bypasses system settings:"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,4"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,5">
+                                    <TextBlock Text="Chrome ➔ Settings (3 dots) ➔ Privacy and security ➔ Use secure DNS ➔ Turn OFF (or 'Use current provider')"
+                                               FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}" TextWrapping="Wrap" FontFamily="Consolas"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Step 4: Airplane Mode Flush -->
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <StackPanel>
+                                <TextBlock Text="STEP 4: FLUSH DNS CACHE" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="Toggle Airplane Mode ON for 3 seconds, then turn it OFF. This flushes the phone's internal DNS cache and forces it to query SpectraNetworkManager immediately."
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 2: iOS -->
+            <TabItem Header="🍎 Apple iOS (iPhone &amp; iPad)">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="CONFIGURE DNS ON IPHONE / IPAD" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="iOS allows manual DNS server overrides without needing static IP addresses:"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,6"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,6">
+                                    <StackPanel>
+                                        <TextBlock Text="1. Open Settings ➔ Wi-Fi." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="2. Tap the blue (i) info icon next to your connected Wi-Fi network." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="3. Scroll down and tap 'Configure DNS'." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="4. Select 'Manual'." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="5. Delete any existing DNS servers listed." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBlock Text="6. Tap 'Add Server' and enter: " FontSize="11" Foreground="{StaticResource Text}"/>
+                                            <TextBlock x:Name="IosDnsText" Text="192.168.178.203" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                        </DockPanel>
+                                        <TextBlock Text="7. Tap 'Save' in the top right corner." FontSize="11" Foreground="{StaticResource Text}"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <StackPanel>
+                                <TextBlock Text="IPHONE PRIVATE WI-FI ADDRESS" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Text}"/>
+                                <TextBlock Text="iOS rotates MAC addresses by default ('Private Wi-Fi Address'). SpectraNetworkManager automatically identifies rotated MACs as Mobile / GSM devices."
+                                           FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 3: Smart TVs -->
+            <TabItem Header="📺 Smart TVs (Samsung, LG, Roku, Sony)">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="POINT SMART TV DNS TO THIS PC" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="Block telemetry tracking and ACR viewing analytics directly at your Smart TV:"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,6"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,6">
+                                    <StackPanel>
+                                        <TextBlock Text="• Samsung Tizen: Settings ➔ General ➔ Network ➔ Network Status ➔ IP Settings ➔ DNS Setting: Enter Manually ➔ Enter PC IP."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                        <TextBlock Text="• LG webOS: Settings ➔ All Settings ➔ Network ➔ Wi-Fi / Ethernet ➔ Edit ➔ Uncheck 'Set Automatically' ➔ Enter PC IP in DNS."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                        <TextBlock Text="• Android TV / Google TV: Settings ➔ Network &amp; Internet ➔ Your Wi-Fi ➔ IP settings: Static ➔ DNS 1: PC IP."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                        <TextBlock Text="• Apple TV: Settings ➔ Network ➔ Wi-Fi ➔ Configure DNS ➔ Manual ➔ Enter PC IP."
+                                                   FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <StackPanel>
+                                <TextBlock Text="ACR TELEMETRY SHIELDS" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Cyan}"/>
+                                <TextBlock Text="Use the '📺 Shield All Smart TVs' button on the TV &amp; Mobile tab to automatically block known vendor ACR viewing tracking domains (Samsung, LG, Roku, Sony)."
+                                           FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- Footer Actions -->
+        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="False">
+            <Button Content="📋 Copy Phone Ping Link" Click="OnCopyPingUrlClick" Padding="12,5" Margin="0,0,8,0"
+                    ToolTip="Copies http://[PC-IP]:8765/api/ping to clipboard to test phone reachability in browser"/>
+            <Button Content="Close" Click="OnCloseClick" DockPanel.Dock="Right" Padding="16,5"/>
+        </DockPanel>
+    </Grid>
+</Window>
