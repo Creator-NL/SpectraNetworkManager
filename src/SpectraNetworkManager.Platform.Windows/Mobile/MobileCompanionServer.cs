@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,20 +15,24 @@ using SpectraNetworkManager.Sinkhole;
 namespace SpectraNetworkManager.Platform.Windows.Mobile;
 
 /// <summary>
-/// Lightweight, hardened HTTP server for the GSM Mobile Companion Dashboard.
+/// Lightweight, hardened TCP HTTP server for the GSM Mobile Companion Dashboard.
+/// Uses standard WinSock sockets (TcpListener) instead of kernel HTTP.SYS, ensuring
+/// zero dependency on HTTP.SYS urlacl registrations and immunity to HTTP 503 errors.
 /// Provides real-time network and TV defense metrics to mobile browsers with one-time pairing.
 /// </summary>
 public sealed class MobileCompanionServer : IDisposable
 {
     private static readonly JsonSerializerOptions CamelCaseOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    private readonly HttpListener _listener = new();
     private readonly ConcurrentDictionary<string, DateTime> _validSessions = new();
     private readonly ConcurrentDictionary<string, DateTime> _pendingPairingTokens = new();
+    private TcpListener? _tcpListener;
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
+    private bool _isRunning;
+    private long _remoteRequestCount;
 
     public int Port { get; }
-    public bool IsRunning => _listener.IsListening;
+    public bool IsRunning => _isRunning && _tcpListener != null;
     public string RequirePin { get; set; } = "";
     public bool AllowMobileRuleChanges { get; set; }
 
@@ -79,254 +84,329 @@ public sealed class MobileCompanionServer : IDisposable
     /// <summary>Fires when a remote LAN device connects to the companion server.</summary>
     public event Action<string, string>? RemoteContactReceived;
 
-    private long _remoteRequestCount;
-
     public void Start()
     {
-        if (_listener.IsListening) return;
+        if (_isRunning) return;
 
         LastBindError = "";
         try
         {
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add($"http://*:{Port}/");
-            _listener.Start();
+            _cts = new CancellationTokenSource();
+            _tcpListener = new TcpListener(IPAddress.Any, Port);
+            _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _tcpListener.Start();
+            _isRunning = true;
             BindScope = "all interfaces";
+            _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));
         }
-        catch (HttpListenerException ex)
+        catch (Exception ex)
         {
             LastBindError = ex.Message;
-
-            // If wildcard http://*:8765 requires admin URL reservation, fall back to localhost/local prefix
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add($"http://+:{Port}/");
-            try
-            {
-                _listener.Start();
-                BindScope = "all interfaces";
-                LastBindError = "";
-            }
-            catch (HttpListenerException ex2)
-            {
-                LastBindError = ex2.Message;
-                _listener.Prefixes.Clear();
-                _listener.Prefixes.Add($"http://localhost:{Port}/");
-                _listener.Start();
-                BindScope = "this PC only";
-            }
+            _isRunning = false;
+            try { _tcpListener?.Stop(); } catch { }
         }
-
-        _cts = new CancellationTokenSource();
-        _listenerTask = Task.Run(() => ListenLoopAsync(_cts.Token));
     }
 
     public void Stop()
     {
-        try
-        {
-            _cts?.Cancel();
-            if (_listener.IsListening) _listener.Stop();
-        }
-        catch { }
+        _isRunning = false;
+        try { _cts?.Cancel(); } catch { }
+        try { _tcpListener?.Stop(); } catch { }
     }
 
     private async Task ListenLoopAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _listener.IsListening)
+        while (!ct.IsCancellationRequested && _isRunning && _tcpListener != null)
         {
             try
             {
-                var context = await _listener.GetContextAsync();
-                _ = Task.Run(() => HandleRequestAsync(context));
+                var client = await _tcpListener.AcceptTcpClientAsync(ct);
+                _ = Task.Run(() => HandleTcpClientAsync(client, ct), ct);
             }
-            catch (HttpListenerException) when (ct.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (ObjectDisposedException) { break; }
+            catch (SocketException) when (ct.IsCancellationRequested) { break; }
             catch { }
         }
     }
 
-    private async Task HandleRequestAsync(HttpListenerContext ctx)
+    private async Task HandleTcpClientAsync(TcpClient client, CancellationToken ct)
     {
         try
         {
-            var req = ctx.Request;
-            var res = ctx.Response;
-
-            // Security and CORS headers
-            res.Headers.Add("X-Content-Type-Options", "nosniff");
-            res.Headers.Add("X-Frame-Options", "DENY");
-            res.Headers.Add("Cache-Control", "no-store, no-cache, must-revalidate");
-            res.Headers.Add("Access-Control-Allow-Origin", "*");
-            res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            res.Headers.Add("Access-Control-Allow-Headers", "*");
-
-            if (string.Equals(req.HttpMethod, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+            using (client)
+            using (var stream = client.GetStream())
             {
-                res.StatusCode = 200;
-                res.Close();
-                return;
-            }
+                client.ReceiveTimeout = 8000;
+                client.SendTimeout = 8000;
 
-            string path = req.Url?.AbsolutePath ?? "/";
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+                string? requestLine = await reader.ReadLineAsync(ct);
+                if (string.IsNullOrWhiteSpace(requestLine)) return;
 
-            // Remember contact from other devices (phones/TVs) so the PC can show whether they reach us at all.
-            var remote = req.RemoteEndPoint?.Address;
-            if (remote is not null && !IPAddress.IsLoopback(remote))
-            {
-                LastRemoteContactUtc = DateTime.UtcNow;
-                LastRemoteContactIp = remote.ToString();
-                Interlocked.Increment(ref _remoteRequestCount);
-                RemoteContactReceived?.Invoke(LastRemoteContactIp, path);
-            }
+                var parts = requestLine.Split(' ', 3);
+                if (parts.Length < 2) return;
 
-            // Unauthenticated connectivity check: "can my phone reach this PC at all?"
-            if (path == "/api/ping")
-            {
-                await WriteJsonAsync(res, new
+                string method = parts[0].ToUpperInvariant();
+                string rawUrl = parts[1];
+
+                var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                string? headerLine;
+                while (!string.IsNullOrEmpty(headerLine = await reader.ReadLineAsync(ct)))
                 {
-                    ok = true,
-                    app = "SpectraNetworkManager",
-                    server = Environment.MachineName,
-                    clientIp = remote?.ToString() ?? "unknown",
-                    timeUtc = DateTime.UtcNow
-                });
-                return;
-            }
+                    int colon = headerLine.IndexOf(':');
+                    if (colon > 0)
+                    {
+                        headers[headerLine[..colon].Trim()] = headerLine[(colon + 1)..].Trim();
+                    }
+                }
 
-            // Check pairing query token
-            string? pairQuery = req.QueryString["token"];
-            if (!string.IsNullOrEmpty(pairQuery) && _pendingPairingTokens.TryGetValue(pairQuery, out var expires) && expires > DateTime.UtcNow)
-            {
-                _pendingPairingTokens.TryRemove(pairQuery, out _);
-                string sessionToken = Guid.NewGuid().ToString("N");
-                _validSessions[sessionToken] = DateTime.UtcNow.AddHours(24);
-                res.Cookies.Add(new Cookie("SpectraSession", sessionToken)
+                string path = rawUrl;
+                string queryString = "";
+                int qIdx = rawUrl.IndexOf('?');
+                if (qIdx >= 0)
                 {
-                    Path = "/",
-                    HttpOnly = true,
-                    Expires = DateTime.Now.AddHours(24)
-                });
-            }
+                    path = rawUrl[..qIdx];
+                    queryString = rawUrl[(qIdx + 1)..];
+                }
 
-            // Authenticate session
-            bool isAuthenticated = false;
-            var cookie = req.Cookies["SpectraSession"];
-            if (cookie != null && _validSessions.TryGetValue(cookie.Value, out var exp) && exp > DateTime.UtcNow)
-            {
-                isAuthenticated = true;
-            }
-
-            if (path == "/")
-            {
-                await ServeSinglePageAppAsync(res, isAuthenticated);
-                return;
-            }
-
-            if (path == "/api/status")
-            {
-                if (!isAuthenticated)
+                string body = "";
+                if (headers.TryGetValue("Content-Length", out var clStr) && int.TryParse(clStr, out int contentLength) && contentLength > 0 && contentLength < 1_000_000)
                 {
-                    res.StatusCode = 401;
-                    await WriteJsonAsync(res, new { error = "Unauthorized. Please scan QR pairing code." });
+                    char[] buf = new char[contentLength];
+                    int totalRead = 0;
+                    while (totalRead < contentLength)
+                    {
+                        int n = await reader.ReadAsync(buf, totalRead, contentLength - totalRead);
+                        if (n <= 0) break;
+                        totalRead += n;
+                    }
+                    body = new string(buf, 0, totalRead);
+                }
+
+                var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+                if (remote is not null && !IPAddress.IsLoopback(remote))
+                {
+                    LastRemoteContactUtc = DateTime.UtcNow;
+                    LastRemoteContactIp = remote.ToString();
+                    Interlocked.Increment(ref _remoteRequestCount);
+                    RemoteContactReceived?.Invoke(LastRemoteContactIp, path);
+                }
+
+                if (method == "OPTIONS")
+                {
+                    await SendResponseAsync(stream, 200, "OK", "text/plain", Array.Empty<byte>());
                     return;
                 }
 
-                var metrics = GetMetrics?.Invoke() ?? (false, 0, 0, 0.0, 0);
-                var devices = GetDevices?.Invoke() ?? Array.Empty<object>();
-
-                await WriteJsonAsync(res, new
+                if (path == "/api/ping")
                 {
-                    serverName = Environment.MachineName,
-                    dnsActive = metrics.IsDnsRunning,
-                    totalQueries = metrics.TotalQueries,
-                    blockedQueries = metrics.BlockedQueries,
-                    blockPercentage = Math.Round(metrics.BlockRate, 1),
-                    activeClients = metrics.ActiveClients,
-                    devices = devices,
-                    allowWrite = AllowMobileRuleChanges
-                });
-                return;
-            }
-
-            if (path == "/api/logs")
-            {
-                if (!isAuthenticated)
-                {
-                    res.StatusCode = 401;
-                    await WriteJsonAsync(res, new { error = "Unauthorized." });
+                    var pingObj = new
+                    {
+                        ok = true,
+                        app = "SpectraNetworkManager",
+                        server = Environment.MachineName,
+                        clientIp = remote?.ToString() ?? "unknown",
+                        timeUtc = DateTime.UtcNow
+                    };
+                    await SendJsonAsync(stream, 200, pingObj);
                     return;
                 }
 
-                var logs = GetRecentQueries?.Invoke() ?? Array.Empty<object>();
-                await WriteJsonAsync(res, logs);
-                return;
-            }
-
-            if (path == "/api/pause" && req.HttpMethod == "POST")
-            {
-                if (!isAuthenticated || !AllowMobileRuleChanges)
+                string? pairQuery = GetQueryParam(queryString, "token");
+                string? newSessionCookie = null;
+                if (!string.IsNullOrEmpty(pairQuery) && _pendingPairingTokens.TryGetValue(pairQuery, out var expires) && expires > DateTime.UtcNow)
                 {
-                    res.StatusCode = 403;
-                    await WriteJsonAsync(res, new { error = "Mobile rule modification disabled on host PC." });
+                    _pendingPairingTokens.TryRemove(pairQuery, out _);
+                    string sessionToken = Guid.NewGuid().ToString("N");
+                    _validSessions[sessionToken] = DateTime.UtcNow.AddHours(24);
+                    newSessionCookie = $"SpectraSession={sessionToken}; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax";
+                }
+
+                bool isAuthenticated = false;
+                if (headers.TryGetValue("Cookie", out var cookieHdr))
+                {
+                    string? sessionCookie = GetCookieValue(cookieHdr, "SpectraSession");
+                    if (!string.IsNullOrEmpty(sessionCookie) && _validSessions.TryGetValue(sessionCookie, out var exp) && exp > DateTime.UtcNow)
+                    {
+                        isAuthenticated = true;
+                    }
+                }
+                if (newSessionCookie != null)
+                {
+                    isAuthenticated = true;
+                }
+
+                if (path == "/")
+                {
+                    string html = GetMobileDashboardHtml(isAuthenticated);
+                    await SendHtmlAsync(stream, 200, html, newSessionCookie);
                     return;
                 }
 
-                using var reader = new StreamReader(req.InputStream, Encoding.UTF8);
-                string body = await reader.ReadToEndAsync();
-                int minutes = 15;
-                try
+                if (path == "/api/status")
                 {
-                    using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("minutes", out var mProp))
-                        minutes = mProp.GetInt32();
-                }
-                catch { }
+                    if (!isAuthenticated)
+                    {
+                        await SendJsonAsync(stream, 401, new { error = "Unauthorized. Please scan QR pairing code." });
+                        return;
+                    }
 
-                PauseDnsAction?.Invoke(minutes);
-                await WriteJsonAsync(res, new { success = true, pausedMinutes = minutes });
-                return;
-            }
+                    var metrics = GetMetrics?.Invoke() ?? (false, 0, 0, 0.0, 0);
+                    var devices = GetDevices?.Invoke() ?? Array.Empty<object>();
 
-            if (path == "/api/resume" && req.HttpMethod == "POST")
-            {
-                if (!isAuthenticated || !AllowMobileRuleChanges)
-                {
-                    res.StatusCode = 403;
-                    await WriteJsonAsync(res, new { error = "Mobile rule modification disabled on host PC." });
+                    await SendJsonAsync(stream, 200, new
+                    {
+                        serverName = Environment.MachineName,
+                        dnsActive = metrics.IsDnsRunning,
+                        totalQueries = metrics.TotalQueries,
+                        blockedQueries = metrics.BlockedQueries,
+                        blockPercentage = Math.Round(metrics.BlockRate, 1),
+                        activeClients = metrics.ActiveClients,
+                        devices = devices,
+                        allowWrite = AllowMobileRuleChanges
+                    });
                     return;
                 }
 
-                ResumeDnsAction?.Invoke();
-                await WriteJsonAsync(res, new { success = true });
-                return;
-            }
+                if (path == "/api/logs")
+                {
+                    if (!isAuthenticated)
+                    {
+                        await SendJsonAsync(stream, 401, new { error = "Unauthorized." });
+                        return;
+                    }
 
-            res.StatusCode = 404;
-            res.Close();
+                    var logs = GetRecentQueries?.Invoke() ?? Array.Empty<object>();
+                    await SendJsonAsync(stream, 200, logs);
+                    return;
+                }
+
+                if (path == "/api/pause" && method == "POST")
+                {
+                    if (!isAuthenticated || !AllowMobileRuleChanges)
+                    {
+                        await SendJsonAsync(stream, 403, new { error = "Mobile rule modification disabled on host PC." });
+                        return;
+                    }
+
+                    int minutes = 15;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("minutes", out var mProp))
+                            minutes = mProp.GetInt32();
+                    }
+                    catch { }
+
+                    PauseDnsAction?.Invoke(minutes);
+                    await SendJsonAsync(stream, 200, new { success = true, pausedMinutes = minutes });
+                    return;
+                }
+
+                if (path == "/api/resume" && method == "POST")
+                {
+                    if (!isAuthenticated || !AllowMobileRuleChanges)
+                    {
+                        await SendJsonAsync(stream, 403, new { error = "Mobile rule modification disabled on host PC." });
+                        return;
+                    }
+
+                    ResumeDnsAction?.Invoke();
+                    await SendJsonAsync(stream, 200, new { success = true });
+                    return;
+                }
+
+                await SendResponseAsync(stream, 404, "Not Found", "text/plain", Encoding.UTF8.GetBytes("Not Found"));
+            }
         }
         catch
         {
-            try { ctx.Response.StatusCode = 500; ctx.Response.Close(); } catch { }
+            // Transient network disconnects or aborts are ignored
         }
     }
 
-    private static async Task WriteJsonAsync(HttpListenerResponse res, object data)
+    private static async Task SendResponseAsync(
+        NetworkStream stream,
+        int statusCode,
+        string statusText,
+        string contentType,
+        byte[] body,
+        string? setCookie = null)
     {
-        res.ContentType = "application/json; charset=utf-8";
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(data, CamelCaseOpts);
-        res.ContentLength64 = bytes.Length;
-        await res.OutputStream.WriteAsync(bytes);
-        res.Close();
+        var sb = new StringBuilder();
+        sb.Append($"HTTP/1.1 {statusCode} {statusText}\r\n");
+        sb.Append($"Content-Type: {contentType}\r\n");
+        sb.Append($"Content-Length: {body.Length}\r\n");
+        sb.Append("Connection: close\r\n");
+        sb.Append("X-Content-Type-Options: nosniff\r\n");
+        sb.Append("X-Frame-Options: DENY\r\n");
+        sb.Append("Cache-Control: no-store, no-cache, must-revalidate\r\n");
+        sb.Append("Access-Control-Allow-Origin: *\r\n");
+        sb.Append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+        sb.Append("Access-Control-Allow-Headers: *\r\n");
+        if (!string.IsNullOrEmpty(setCookie))
+        {
+            sb.Append($"Set-Cookie: {setCookie}\r\n");
+        }
+        sb.Append("\r\n");
+
+        byte[] headerBytes = Encoding.UTF8.GetBytes(sb.ToString());
+        await stream.WriteAsync(headerBytes);
+        if (body.Length > 0)
+        {
+            await stream.WriteAsync(body);
+        }
+        await stream.FlushAsync();
     }
 
-    private static async Task ServeSinglePageAppAsync(HttpListenerResponse res, bool isAuthenticated)
+    private static Task SendJsonAsync(NetworkStream stream, int statusCode, object data)
     {
-        res.ContentType = "text/html; charset=utf-8";
-        string html = GetMobileDashboardHtml(isAuthenticated);
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(data, CamelCaseOpts);
+        string statusText = statusCode switch
+        {
+            200 => "OK",
+            401 => "Unauthorized",
+            403 => "Forbidden",
+            404 => "Not Found",
+            _ => "OK"
+        };
+        return SendResponseAsync(stream, statusCode, statusText, "application/json; charset=utf-8", bytes);
+    }
+
+    private static Task SendHtmlAsync(NetworkStream stream, int statusCode, string html, string? setCookie)
+    {
         byte[] bytes = Encoding.UTF8.GetBytes(html);
-        res.ContentLength64 = bytes.Length;
-        await res.OutputStream.WriteAsync(bytes);
-        res.Close();
+        return SendResponseAsync(stream, statusCode, "OK", "text/html; charset=utf-8", bytes, setCookie);
+    }
+
+    private static string? GetQueryParam(string queryString, string key)
+    {
+        if (string.IsNullOrEmpty(queryString)) return null;
+        var pairs = queryString.Split('&');
+        foreach (var pair in pairs)
+        {
+            var kv = pair.Split('=', 2);
+            if (kv.Length == 2 && string.Equals(Uri.UnescapeDataString(kv[0]), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(kv[1]);
+            }
+        }
+        return null;
+    }
+
+    private static string? GetCookieValue(string cookieHeader, string name)
+    {
+        var cookies = cookieHeader.Split(';');
+        foreach (var c in cookies)
+        {
+            var kv = c.Trim().Split('=', 2);
+            if (kv.Length == 2 && string.Equals(kv[0], name, StringComparison.OrdinalIgnoreCase))
+            {
+                return kv[1];
+            }
+        }
+        return null;
     }
 
     private static string GetMobileDashboardHtml(bool isAuthenticated)
@@ -473,6 +553,5 @@ public sealed class MobileCompanionServer : IDisposable
     public void Dispose()
     {
         Stop();
-        ((IDisposable)_listener).Dispose();
     }
 }

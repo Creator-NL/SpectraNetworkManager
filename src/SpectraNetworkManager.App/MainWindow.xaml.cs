@@ -6658,6 +6658,20 @@ public partial class MainWindow : Window
         }
 
         CheckAndroidDohBypassHeuristic();
+
+        if (TvLanActivityRows.Count == 0 && _sink.IsRunning)
+        {
+            var recentLan = _sink.Activity.Recent(100)
+                .Where(e => IsLanClient(e.Client))
+                .ToList();
+            for (int i = recentLan.Count - 1; i >= 0; i--)
+            {
+                var item = recentLan[i];
+                string caller = ResolveInitiator(item.Domain, item.Client, item.Detail, item.Outcome == DnsOutcome.Blocked);
+                var row = DnsRow.From(item, caller);
+                TvLanActivityRows.Insert(0, row);
+            }
+        }
     }
 
     private async void OnInvRunDnsSelfTest(object sender, RoutedEventArgs e)

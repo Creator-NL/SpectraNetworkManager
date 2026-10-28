@@ -68,8 +68,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\engine\{#MyEngineExeName}"; Parameters: "--install"; StatusMsg: "Registering SpectraNetworkManager Engine service..."; Flags: runhidden
 ; 2. Start the Engine service
 Filename: "net.exe"; Parameters: "start SpectraNetworkManager.Engine"; StatusMsg: "Starting SpectraNetworkManager Engine service..."; Flags: runhidden
-; 3. Configure HTTP.SYS URL reservation for Mobile Companion port 8765
-Filename: "netsh.exe"; Parameters: "http add urlacl url=http://+:8765/ user=Everyone"; Flags: runhidden
+; 3. Clean up any legacy HTTP.SYS reservation so port 8765 is directly handled by Spectra's TCP engine
+Filename: "netsh.exe"; Parameters: "http delete urlacl url=http://+:8765/"; Flags: runhidden
 ; 4. Optionally launch the GUI front-end
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
