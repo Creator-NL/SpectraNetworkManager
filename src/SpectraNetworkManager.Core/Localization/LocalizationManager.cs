@@ -69,7 +69,10 @@ public static class LocalizationManager
         ["TabDns"] = "DNS",
         ["TabBlocks"] = "Firewall blocks",
 
-        // Toolbar toggles
+        // Toolbar toggles & Settings
+        ["SettingsButton"] = "Settings",
+        ["SettingsTitle"] = "⚙️ SETTINGS & PREFERENCES",
+        ["SettingsLanguage"] = "Interface Language / Taal",
         ["AskModeCheck"] = "Ask about new programs",
         ["AlwaysAdminCheck"] = "Always run as admin",
         ["AlwaysOnTopCheck"] = "Always on top",
@@ -147,7 +150,10 @@ public static class LocalizationManager
         ["TabDns"] = "DNS Sinkhole",
         ["TabBlocks"] = "Firewall Blokkeerlijst",
 
-        // Toolbar toggles
+        // Toolbar toggles & Settings
+        ["SettingsButton"] = "Instellingen",
+        ["SettingsTitle"] = "⚙️ INSTELLINGEN & VOORKEUREN",
+        ["SettingsLanguage"] = "Interfacetaal / Language",
         ["AskModeCheck"] = "Vragen over nieuwe programma's",
         ["AlwaysAdminCheck"] = "Altijd als administrator starten",
         ["AlwaysOnTopCheck"] = "Venster altijd op voorgrond",

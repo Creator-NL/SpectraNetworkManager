@@ -53,61 +53,92 @@
             </StackPanel>
         </DockPanel>
 
-        <!-- Toolbar -->
-        <WrapPanel Grid.Row="1" Margin="0,12,0,6">
-            <RadioButton x:Name="ConnectionsTab" Content="Connections" GroupName="view" IsChecked="True"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="ProgramsTab" Content="Programs" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="StartupTab" Content="Startup" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="TrafficTab" Content="Traffic" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="ScannerTab" Content="Port Scanner" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="PacketsTab" Content="Packets" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
-                         ToolTip="Live native packet inspector, TLS SNI &amp; protocol dissector, hex stream viewer, and Wireshark PCAPNG export."/>
-            <RadioButton x:Name="TvMobileTab" Content="TV &amp; Mobile" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
-                         ToolTip="Smart TV ACR viewing telemetry blocker, GSM mobile defense hub, and remote companion pairing."/>
-            <RadioButton x:Name="BrowserGuardTab" Content="Browser Guard" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
-                         ToolTip="Native URL &amp; video blocker, YouTube Shorts blocker, and Manifest V3 browser extension controls."/>
-            <RadioButton x:Name="AiTab" Content="Spectra AI" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
-                         ToolTip="Evidence-based process investigation, threat attribution, and local AI threat assessment."/>
-            <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="QuarantineTab" Content="Quarantine" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
-                         ToolTip="Active Defense Quarantine Vault. Inspect and restore quarantined applications."/>
-            <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="DnsTab" Content="DNS" GroupName="view"
-                         Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
-            <RadioButton x:Name="BlocksTab" Content="Firewall blocks" GroupName="view"
-                         Margin="0,0,28,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+        <!-- Toolbar & Navigation Row -->
+        <DockPanel Grid.Row="1" Margin="0,12,0,6" LastChildFill="True">
+            <!-- Settings Cogwheel (Docked to the Right, directly below Stop DNS) -->
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                <Button x:Name="SettingsButton" Content="⚙️ Settings" Padding="12,5" FontWeight="SemiBold"
+                        Click="OnToggleSettingsPopup" ToolTip="Application settings, language, and preferences"/>
+                <Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=SettingsButton}"
+                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                    <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                            CornerRadius="6" Padding="16,14" Width="280">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.6" Color="#000000"/>
+                        </Border.Effect>
+                        <StackPanel>
+                            <DockPanel LastChildFill="False" Margin="0,0,0,12">
+                                <TextBlock x:Name="SettingsTitleText" Text="⚙️ SETTINGS" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                                <Button DockPanel.Dock="Right" Content="✕" Click="OnCloseSettingsPopup" Padding="6,1" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Muted}"/>
+                            </DockPanel>
 
-            <CheckBox x:Name="AskMode" Content="Ask about new programs" IsChecked="True"
-                      VerticalAlignment="Center" Checked="OnAskModeChanged" Unchecked="OnAskModeChanged"
-                      ToolTip="Shows an Allow / Block question when a program without a decision first reaches the internet. Nothing is blocked until you answer Block."/>
-            <CheckBox x:Name="AlwaysAdminCheck" Content="Always run as admin"
-                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnAlwaysAdminChanged" Unchecked="OnAlwaysAdminChanged"
-                      ToolTip="When checked, SpectraNetworkManager will automatically request Administrator elevation on launch."/>
-            <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"
-                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnAlwaysOnTopChanged" Unchecked="OnAlwaysOnTopChanged"
-                      ToolTip="Keep SpectraNetworkManager window on top of all other windows."/>
-            <CheckBox x:Name="NotificationSoundCheck" Content="Alert sounds"
-                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnNotificationSoundChanged" Unchecked="OnNotificationSoundChanged"
-                      ToolTip="Play alert sounds for network prompts. Uncheck to silence all notification sounds."/>
-            <ComboBox x:Name="LanguageCombo" Width="135" Margin="20,0,0,0" VerticalAlignment="Center"
-                      SelectionChanged="OnLanguageSelectionChanged" ToolTip="Select interface language / Kies interfacetaal">
-                <ComboBoxItem Content="🌐 Auto (System)" Tag="Auto" IsSelected="True"/>
-                <ComboBoxItem Content="🇬🇧 English" Tag="English"/>
-                <ComboBoxItem Content="🇳🇱 Nederlands" Tag="Nederlands"/>
-            </ComboBox>
-        </WrapPanel>
+                            <!-- Language Selector -->
+                            <TextBlock x:Name="SettingsLanguageText" Text="Interface Language / Taal" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="LanguageCombo" Margin="0,0,0,14" SelectionChanged="OnLanguageSelectionChanged" ToolTip="Select interface language / Kies interfacetaal">
+                                <ComboBoxItem Content="🌐 Auto (System)" Tag="Auto" IsSelected="True"/>
+                                <ComboBoxItem Content="🇬🇧 English" Tag="English"/>
+                                <ComboBoxItem Content="🇳🇱 Nederlands" Tag="Nederlands"/>
+                            </ComboBox>
+
+                            <Separator Background="{StaticResource Line}" Margin="0,0,0,12"/>
+
+                            <!-- Preferences Checkboxes -->
+                            <CheckBox x:Name="AskMode" Content="Ask about new programs" IsChecked="True" Margin="0,0,0,10"
+                                      Checked="OnAskModeChanged" Unchecked="OnAskModeChanged"
+                                      ToolTip="Shows an Allow / Block question when a program without a decision first reaches the internet. Nothing is blocked until you answer Block."/>
+
+                            <CheckBox x:Name="AlwaysAdminCheck" Content="Always run as admin" Margin="0,0,0,10"
+                                      Checked="OnAlwaysAdminChanged" Unchecked="OnAlwaysAdminChanged"
+                                      ToolTip="When checked, SpectraNetworkManager will automatically request Administrator elevation on launch."/>
+
+                            <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top" Margin="0,0,0,10"
+                                      Checked="OnAlwaysOnTopChanged" Unchecked="OnAlwaysOnTopChanged"
+                                      ToolTip="Keep SpectraNetworkManager window on top of all other windows."/>
+
+                            <CheckBox x:Name="NotificationSoundCheck" Content="Alert sounds" Margin="0,0,0,4"
+                                      Checked="OnNotificationSoundChanged" Unchecked="OnNotificationSoundChanged"
+                                      ToolTip="Play alert sounds for network prompts. Uncheck to silence all notification sounds."/>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </StackPanel>
+
+            <WrapPanel VerticalAlignment="Center">
+                <RadioButton x:Name="ConnectionsTab" Content="Connections" GroupName="view" IsChecked="True"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="ProgramsTab" Content="Programs" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="StartupTab" Content="Startup" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="TrafficTab" Content="Traffic" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="ScannerTab" Content="Port Scanner" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="PacketsTab" Content="Packets" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                             ToolTip="Live native packet inspector, TLS SNI &amp; protocol dissector, hex stream viewer, and Wireshark PCAPNG export."/>
+                <RadioButton x:Name="TvMobileTab" Content="TV &amp; Mobile" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                             ToolTip="Smart TV ACR viewing telemetry blocker, GSM mobile defense hub, and remote companion pairing."/>
+                <RadioButton x:Name="BrowserGuardTab" Content="Browser Guard" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                             ToolTip="Native URL &amp; video blocker, YouTube Shorts blocker, and Manifest V3 browser extension controls."/>
+                <RadioButton x:Name="AiTab" Content="Spectra AI" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                             ToolTip="Evidence-based process investigation, threat attribution, and local AI threat assessment."/>
+                <RadioButton x:Name="RulesTab" Content="Rules" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="QuarantineTab" Content="Quarantine" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"
+                             ToolTip="Active Defense Quarantine Vault. Inspect and restore quarantined applications."/>
+                <RadioButton x:Name="StrictTab" Content="Strict mode" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="DnsTab" Content="DNS" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+                <RadioButton x:Name="BlocksTab" Content="Firewall blocks" GroupName="view"
+                             Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnViewChanged"/>
+            </WrapPanel>
+        </DockPanel>
 
         <!-- Ask mode: decision bar -->
         <Border x:Name="DecisionBar" Grid.Row="2" Visibility="Collapsed" Margin="0,4,0,10" Padding="14,10"

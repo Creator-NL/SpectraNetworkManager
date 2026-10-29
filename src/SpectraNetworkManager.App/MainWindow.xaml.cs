@@ -7692,6 +7692,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnToggleSettingsPopup(object sender, RoutedEventArgs e)
+    {
+        SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
+    }
+
+    private void OnCloseSettingsPopup(object sender, RoutedEventArgs e)
+    {
+        SettingsPopup.IsOpen = false;
+    }
+
     private void ApplyLocalization()
     {
         // Update tabs
@@ -7710,7 +7720,10 @@ public partial class MainWindow : Window
         DnsTab.Content = LocalizationManager.T("TabDns");
         BlocksTab.Content = LocalizationManager.T("TabBlocks");
 
-        // Update toolbar checkboxes
+        // Update toolbar checkboxes & settings
+        if (SettingsButton != null) SettingsButton.Content = "⚙️ " + LocalizationManager.T("SettingsButton");
+        if (SettingsTitleText != null) SettingsTitleText.Text = LocalizationManager.T("SettingsTitle");
+        if (SettingsLanguageText != null) SettingsLanguageText.Text = LocalizationManager.T("SettingsLanguage");
         AskMode.Content = LocalizationManager.T("AskModeCheck");
         AlwaysAdminCheck.Content = LocalizationManager.T("AlwaysAdminCheck");
         AlwaysOnTopCheck.Content = LocalizationManager.T("AlwaysOnTopCheck");
