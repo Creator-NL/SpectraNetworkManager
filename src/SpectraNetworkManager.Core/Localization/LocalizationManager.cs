@@ -77,6 +77,9 @@ public static class LocalizationManager
         ["AlwaysAdminCheck"] = "Always run as admin",
         ["AlwaysOnTopCheck"] = "Always on top",
         ["AlertSoundsCheck"] = "Alert sounds",
+        ["SettingsMaintenance"] = "Maintenance & Tools",
+        ["SettingsAuditButton"] = "🩺 Audit System & Settings...",
+        ["SettingsCleanButton"] = "🧹 Clean Stored Data...",
 
         // AI Investigation
         ["AiTitle"] = "Spectra AI Threat Intelligence & Investigation",
@@ -158,6 +161,9 @@ public static class LocalizationManager
         ["AlwaysAdminCheck"] = "Altijd als administrator starten",
         ["AlwaysOnTopCheck"] = "Venster altijd op voorgrond",
         ["AlertSoundsCheck"] = "Geluidssignalen",
+        ["SettingsMaintenance"] = "Onderhoud & Beheer",
+        ["SettingsAuditButton"] = "🩺 Systeemaudit & Instellingen...",
+        ["SettingsCleanButton"] = "🧹 Opgeslagen Gegevens Wissen...",
 
         // AI Investigation
         ["AiTitle"] = "Spectra AI Dreigingsanalyse & Procesverificatie",

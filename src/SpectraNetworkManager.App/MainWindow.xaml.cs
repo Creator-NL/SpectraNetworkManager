@@ -6846,6 +6846,7 @@ public partial class MainWindow : Window
 
     private void OnSystemAuditClick(object sender, RoutedEventArgs e)
     {
+        SettingsPopup.IsOpen = false;
         var dlg = new AuditWindow(
             auditProvider: () =>
             {
@@ -6918,6 +6919,7 @@ public partial class MainWindow : Window
 
     private void OnCleanStoredDataClick(object sender, RoutedEventArgs e)
     {
+        SettingsPopup.IsOpen = false;
         string dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SpectraNetworkManager");
@@ -7728,6 +7730,9 @@ public partial class MainWindow : Window
         AlwaysAdminCheck.Content = LocalizationManager.T("AlwaysAdminCheck");
         AlwaysOnTopCheck.Content = LocalizationManager.T("AlwaysOnTopCheck");
         NotificationSoundCheck.Content = LocalizationManager.T("AlertSoundsCheck");
+        if (SettingsMaintenanceText != null) SettingsMaintenanceText.Text = LocalizationManager.T("SettingsMaintenance");
+        if (SystemAuditButton != null) SystemAuditButton.Content = LocalizationManager.T("SettingsAuditButton");
+        if (CleanDataButton != null) CleanDataButton.Content = LocalizationManager.T("SettingsCleanButton");
 
         // Update AI UI elements
         AiSelectProcessLabel.Text = LocalizationManager.T("AiSelectProcess");

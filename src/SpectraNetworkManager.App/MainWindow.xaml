@@ -41,10 +41,6 @@
                 </Border>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button x:Name="SystemAuditButton" Content="🩺 Audit System" Margin="0,0,8,0" Padding="10,4" FontWeight="SemiBold"
-                        Foreground="{StaticResource Cyan}" Click="OnSystemAuditClick" ToolTip="Audit all security settings, rules, and configurations with 1-click repairs"/>
-                <Button x:Name="CleanDataButton" Content="🧹 Clean Stored Data" Margin="0,0,8,0" Padding="10,4"
-                        Click="OnCleanStoredDataClick" ToolTip="Clean DNS history, network history, and temporary logs while preserving custom rules"/>
                 <Button x:Name="SwitchElevationButton" Content="Restart in Normal Mode" Margin="0,0,10,0" Click="OnSwitchElevationClick"
                         ToolTip="Restart SpectraNetworkManager in standard user mode without Administrator privileges."/>
                 <Button x:Name="UpdateBadge" Content="Update Available" Visibility="Collapsed" Margin="0,0,10,0"
@@ -98,6 +94,15 @@
                             <CheckBox x:Name="NotificationSoundCheck" Content="Alert sounds" Margin="0,0,0,4"
                                       Checked="OnNotificationSoundChanged" Unchecked="OnNotificationSoundChanged"
                                       ToolTip="Play alert sounds for network prompts. Uncheck to silence all notification sounds."/>
+
+                            <Separator Background="{StaticResource Line}" Margin="0,12,0,12"/>
+
+                            <!-- Maintenance & Tools -->
+                            <TextBlock x:Name="SettingsMaintenanceText" Text="Maintenance &amp; Tools" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+                            <Button x:Name="SystemAuditButton" Content="🩺 Audit System &amp; Settings..." Margin="0,0,0,8" Padding="10,6" HorizontalContentAlignment="Left"
+                                    Foreground="{StaticResource Cyan}" Click="OnSystemAuditClick" ToolTip="Audit all security settings, rules, and configurations with 1-click repairs"/>
+                            <Button x:Name="CleanDataButton" Content="🧹 Clean Stored Data..." Padding="10,6" HorizontalContentAlignment="Left"
+                                    Click="OnCleanStoredDataClick" ToolTip="Clean DNS history, network history, and temporary logs while preserving custom rules"/>
                         </StackPanel>
                     </Border>
                 </Popup>
