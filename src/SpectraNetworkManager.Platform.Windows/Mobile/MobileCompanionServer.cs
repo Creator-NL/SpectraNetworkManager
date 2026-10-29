@@ -14,6 +14,15 @@ using SpectraNetworkManager.Sinkhole;
 
 namespace SpectraNetworkManager.Platform.Windows.Mobile;
 
+public sealed record CompanionClientInfo(
+    string Ip,
+    string UserAgent,
+    DateTime PairedUtc,
+    DateTime LastContactUtc,
+    long RequestCount,
+    bool IsAuthenticated
+);
+
 /// <summary>
 /// Lightweight, hardened TCP HTTP server for the GSM Mobile Companion Dashboard.
 /// Uses standard WinSock sockets (TcpListener) instead of kernel HTTP.SYS, ensuring
@@ -25,6 +34,7 @@ public sealed class MobileCompanionServer : IDisposable
     private static readonly JsonSerializerOptions CamelCaseOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ConcurrentDictionary<string, DateTime> _validSessions = new();
     private readonly ConcurrentDictionary<string, DateTime> _pendingPairingTokens = new();
+    private readonly ConcurrentDictionary<string, CompanionClientInfo> _connectedClients = new(StringComparer.OrdinalIgnoreCase);
     private TcpListener? _tcpListener;
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
@@ -83,6 +93,16 @@ public sealed class MobileCompanionServer : IDisposable
 
     /// <summary>Fires when a remote LAN device connects to the companion server.</summary>
     public event Action<string, string>? RemoteContactReceived;
+
+    /// <summary>Gets live connection details for a specific LAN client IP (null if no companion contact).</summary>
+    public CompanionClientInfo? GetClientInfo(string ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip)) return null;
+        return _connectedClients.TryGetValue(ip.Trim(), out var info) ? info : null;
+    }
+
+    /// <summary>Gets all active or paired companion clients.</summary>
+    public IReadOnlyList<CompanionClientInfo> GetAllClients() => _connectedClients.Values.ToList();
 
     public void Start()
     {
@@ -184,11 +204,14 @@ public sealed class MobileCompanionServer : IDisposable
                     body = new string(buf, 0, totalRead);
                 }
 
+                string userAgent = headers.TryGetValue("User-Agent", out var ua) ? ua : "Unknown";
+
                 var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+                string? remoteIpStr = remote?.ToString();
                 if (remote is not null && !IPAddress.IsLoopback(remote))
                 {
                     LastRemoteContactUtc = DateTime.UtcNow;
-                    LastRemoteContactIp = remote.ToString();
+                    LastRemoteContactIp = remoteIpStr!;
                     Interlocked.Increment(ref _remoteRequestCount);
                     RemoteContactReceived?.Invoke(LastRemoteContactIp, path);
                 }
@@ -235,6 +258,22 @@ public sealed class MobileCompanionServer : IDisposable
                 if (newSessionCookie != null)
                 {
                     isAuthenticated = true;
+                }
+
+                if (remote is not null && !IPAddress.IsLoopback(remote) && !string.IsNullOrEmpty(remoteIpStr))
+                {
+                    _connectedClients.AddOrUpdate(
+                        remoteIpStr,
+                        ip => new CompanionClientInfo(ip, userAgent, DateTime.UtcNow, DateTime.UtcNow, 1, isAuthenticated),
+                        (ip, old) => new CompanionClientInfo(
+                            ip,
+                            !string.IsNullOrEmpty(userAgent) && userAgent != "Unknown" ? userAgent : old.UserAgent,
+                            old.IsAuthenticated ? old.PairedUtc : (isAuthenticated ? DateTime.UtcNow : old.PairedUtc),
+                            DateTime.UtcNow,
+                            old.RequestCount + 1,
+                            old.IsAuthenticated || isAuthenticated
+                        )
+                    );
                 }
 
                 if (path == "/")

@@ -1859,25 +1859,87 @@
 
                 <!-- Device Quick Inspector -->
                 <Border x:Name="TvDeviceInspector" Grid.Row="3" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
-                        BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,8" Visibility="Collapsed">
-                    <DockPanel LastChildFill="True">
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button x:Name="TvInspectorPairBtn" Content="📱 Pair Phone (QR Code)" Click="OnInspectorPairMobileClick" Margin="0,0,8,0" Padding="10,4"
-                                    Foreground="{StaticResource Amber}" ToolTip="Open the QR code pairing window for this phone / mobile device"/>
-                            <Button Content="⚙️ DNS Setup Instructions" Click="OnInspectorShowGuideClick" Margin="0,0,8,0" Padding="10,4"
-                                    ToolTip="View step-by-step Wi-Fi DNS setup steps for this device"/>
-                            <ComboBox x:Name="TvGroupAssignCombo" Width="130" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
-                            <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
-                        </StackPanel>
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="TvInspectorNameText" Text="Selected Device" FontWeight="Bold" FontSize="13" Foreground="{StaticResource Cyan}" Margin="0,0,10,0"/>
-                                <TextBlock x:Name="TvInspectorIpText" Text="192.168.1.X" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        BorderThickness="1" CornerRadius="4" Margin="0,8,0,0" Padding="12,10" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Row 0: Device Title & Action Toolbar -->
+                        <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,8">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="TvInspectorPairBtn" Content="📱 Pair Phone (QR Code)" Click="OnInspectorPairMobileClick" Margin="0,0,8,0" Padding="10,4"
+                                        Foreground="{StaticResource Amber}" ToolTip="Open the QR code pairing window for this phone / mobile device"/>
+                                <Button x:Name="TvInspectorWebBtn" Content="🌐 Open Companion Page" Click="OnInspectorOpenWebClick" Margin="0,0,8,0" Padding="10,4"
+                                        Foreground="{StaticResource Cyan}" ToolTip="Open this phone's companion dashboard in your default browser"/>
+                                <Button Content="⚙️ DNS Setup Instructions" Click="OnInspectorShowGuideClick" Margin="0,0,8,0" Padding="10,4"
+                                        ToolTip="View step-by-step Wi-Fi DNS setup steps for this device"/>
+                                <ComboBox x:Name="TvGroupAssignCombo" Width="130" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <Button Content="Assign Group" Click="OnAssignGroupClick" Margin="0,0,8,0" Padding="10,3"/>
+                                <Button Content="✕ Close" Click="OnCloseTvInspector" Padding="8,3"/>
                             </StackPanel>
-                            <TextBlock x:Name="TvInspectorGuidanceText" Text="Guidance information" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
-                        </StackPanel>
-                    </DockPanel>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock x:Name="TvInspectorNameText" Text="Selected Device" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Cyan}" Margin="0,0,10,0"/>
+                                    <TextBlock x:Name="TvInspectorIpText" Text="192.168.1.X" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="TvInspectorGuidanceText" Text="Guidance information" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Row 1: Live Status & Metrics Bar -->
+                        <Grid Grid.Row="1" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left Card: Mobile Companion Live Telemetry -->
+                            <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock Text="📱 MOBILE COMPANION STATUS" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                        <TextBlock x:Name="TvInspectorCompanionBadge" DockPanel.Dock="Right" Text="CHECKING..." FontSize="10" FontWeight="Bold" Foreground="{StaticResource Amber}"/>
+                                    </DockPanel>
+                                    <TextBlock x:Name="TvInspectorCompanionDetails" Text="No web companion contact recorded yet." FontSize="11" Foreground="{StaticResource Text}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Right Card: Query Defense Stats -->
+                            <Border Grid.Column="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="6,0,0,0">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock Text="🛡️ DEVICE DNS TRAFFIC &amp; DEFENSE" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                        <TextBlock x:Name="TvInspectorQueryRateBadge" DockPanel.Dock="Right" Text="0% BLOCKED" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                    </DockPanel>
+                                    <TextBlock x:Name="TvInspectorQueryStats" Text="Total Queries: 0  •  Blocked: 0  •  Allowed: 0" FontSize="11" Foreground="{StaticResource Text}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Row 2: Live Query Log for Selected Device -->
+                        <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8">
+                            <StackPanel>
+                                <DockPanel LastChildFill="False" Margin="0,0,0,4">
+                                    <TextBlock Text="⚡ RECENT ACTIVITY FOR THIS DEVICE (Live Stream)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                    <TextBlock x:Name="TvInspectorRecentCountText" DockPanel.Dock="Right" Text="0 queries" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                </DockPanel>
+                                <DataGrid x:Name="TvInspectorRecentGrid" ItemsSource="{Binding TvDeviceRecentQueries}" MaxHeight="130"
+                                          AutoGenerateColumns="False" SelectionMode="Single" IsReadOnly="True"
+                                          HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="TIME" Binding="{Binding Time}" Width="70"/>
+                                        <DataGridTextColumn Header="DOMAIN / REQUEST" Binding="{Binding Domain}" Width="250" Foreground="{StaticResource Cyan}"/>
+                                        <DataGridTextColumn Header="TYPE" Binding="{Binding Type}" Width="60"/>
+                                        <DataGridTextColumn Header="RESULT" Binding="{Binding Result}" Width="100"/>
+                                        <DataGridTextColumn Header="DETAILS" Binding="{Binding Detail}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
                 </Border>
             </Grid>
 

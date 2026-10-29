@@ -107,6 +107,7 @@ public partial class MainWindow : Window
     public ICollectionView CapturedPacketsView { get; }
     public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
     public ObservableCollection<DnsRow> TvLanActivityRows { get; } = new();
+    public ObservableCollection<DnsRow> TvDeviceRecentQueries { get; } = new();
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
     public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
@@ -142,6 +143,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         UpdateHostsBannerUi(_hostsMonitor.GetStatus());
         TvMobileGrid.ItemsSource = TvMobileDevices;
+        TvInspectorRecentGrid.ItemsSource = TvDeviceRecentQueries;
         BrowserGuardGrid.ItemsSource = BrowserGuardRules;
         InitPacketCaptureInterfaces();
         InitTvMobileAndBrowserGuardUi();
@@ -357,10 +359,11 @@ public partial class MainWindow : Window
 
             _tickCount++;
             if (StrictActive && _isAdmin && _tickCount % 2 == 0) _ = PollBlockedAsync();
+            IngestDnsQueries();
             RefreshDnsUi();
             UpdateLiveBandwidth();
             if (AiTab.IsChecked == true) SyncAiProcessCombo();
-            if (TvMobileTab.IsChecked == true && _tickCount % 3 == 0) RefreshTvMobileUi();
+            if (TvMobileTab.IsChecked == true && _tickCount % 2 == 0) RefreshTvMobileUi();
         }
         catch (Exception ex)
         {
@@ -4024,6 +4027,41 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Unconditional DNS query ingestion loop. Pulls new queries from the sinkhole activity ring
+    /// on every 1-second timer tick, keeping DnsRows and TvLanActivityRows continuously fresh
+    /// regardless of which UI tab is currently displayed.
+    /// </summary>
+    private void IngestDnsQueries()
+    {
+        if (!_sink.IsRunning) return;
+        var recent = _sink.Activity.Recent(300);
+        int known = _dnsLastTop is null ? recent.Count : recent.ToList().FindIndex(x => ReferenceEquals(x, _dnsLastTop));
+        if (known < 0) known = recent.Count;
+        _isUpdatingDnsRows = true;
+        try
+        {
+            for (int i = known - 1; i >= 0; i--)
+            {
+                RecordDomainResolution(recent[i].Domain, recent[i].Detail);
+                string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
+                var row = DnsRow.From(recent[i], caller);
+                DnsRows.Insert(0, row);
+                if (IsLanClient(row.Client))
+                {
+                    TvLanActivityRows.Insert(0, row);
+                    while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                }
+            }
+            while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
+        }
+        finally
+        {
+            _isUpdatingDnsRows = false;
+        }
+        if (recent.Count > 0) _dnsLastTop = recent[0];
+    }
+
     // The badge is cheap and always current; the rest only matters while the DNS tab is visible.
     private void RefreshDnsUi()
     {
@@ -4079,33 +4117,6 @@ public partial class MainWindow : Window
         DnsNotes.Text = _sink.FilterInfo is { Notes.Count: > 0 } info ? string.Join("   |   ", info.Notes) : "";
 
         DnsTop.Text = "TOP BLOCKED\n" + FormatTop(stats.TopBlocked) + "\n\nTOP QUERIED\n" + FormatTop(stats.TopQueried) + "\n\nTOP CLIENTS\n" + FormatTop(stats.TopClients);
-
-        // Add only the lines that are new since the last refresh (newest first).
-        var recent = _sink.Activity.Recent(300);
-        int known = _dnsLastTop is null ? recent.Count : recent.ToList().FindIndex(x => ReferenceEquals(x, _dnsLastTop));
-        if (known < 0) known = recent.Count;
-        _isUpdatingDnsRows = true;
-        try
-        {
-            for (int i = known - 1; i >= 0; i--)
-            {
-                RecordDomainResolution(recent[i].Domain, recent[i].Detail);
-                string caller = ResolveInitiator(recent[i].Domain, recent[i].Client, recent[i].Detail, recent[i].Outcome == DnsOutcome.Blocked);
-                var row = DnsRow.From(recent[i], caller);
-                DnsRows.Insert(0, row);
-                if (IsLanClient(row.Client))
-                {
-                    TvLanActivityRows.Insert(0, row);
-                    while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
-                }
-            }
-            while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
-        }
-        finally
-        {
-            _isUpdatingDnsRows = false;
-        }
-        if (recent.Count > 0) _dnsLastTop = recent[0];
     }
 
     private static string FormatTop(IReadOnlyList<KeyValuePair<string, int>> top) =>
@@ -6422,7 +6433,23 @@ public partial class MainWindow : Window
         if (selectedDeviceIp != null)
         {
             var again = TvMobileDevices.FirstOrDefault(r => r.IpString == selectedDeviceIp);
-            if (again != null) TvMobileGrid.SelectedItem = again;
+            if (again != null)
+            {
+                TvMobileGrid.SelectedItem = again;
+                if (TvDeviceInspector.Visibility == Visibility.Visible)
+                {
+                    UpdateTvInspector(again);
+                }
+            }
+        }
+        else if (TvDeviceInspector.Visibility == Visibility.Visible && TvMobileGrid.SelectedItem is TvMobileDeviceRow currentSel)
+        {
+            UpdateTvInspector(currentSel);
+        }
+
+        if (TvSubTabDiagnostics?.IsChecked == true)
+        {
+            RefreshTvDiagnosticsUi();
         }
     }
 
@@ -6913,6 +6940,7 @@ public partial class MainWindow : Window
                         _sink.Activity.Reset();
                         DnsRows.Clear();
                         TvLanActivityRows.Clear();
+                        TvDeviceRecentQueries.Clear();
                         try { File.Delete(p); } catch { }
                         cleanedCount++;
                     }
@@ -7323,17 +7351,104 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
         {
-            TvDeviceInspector.Visibility = Visibility.Visible;
-            TvInspectorNameText.Text = $"{row.Hostname} ({row.DeviceTypeDisplay})";
-            TvInspectorIpText.Text = $"{row.IpString} • {row.Vendor} • {row.ProtectionBadge}";
-            TvInspectorGuidanceText.Text = row.ProtectionDesc;
-            TvGroupAssignCombo.SelectedItem = row.AssignedGroup;
+            UpdateTvInspector(row);
+        }
+    }
+
+    private void UpdateTvInspector(TvMobileDeviceRow row)
+    {
+        if (TvDeviceInspector == null) return;
+        TvDeviceInspector.Visibility = Visibility.Visible;
+        TvInspectorNameText.Text = $"{row.Hostname} ({row.DeviceTypeDisplay})";
+        TvInspectorIpText.Text = $"{row.IpString} • {row.Vendor} • {row.ProtectionBadge}";
+        TvInspectorGuidanceText.Text = row.ProtectionDesc;
+        TvGroupAssignCombo.SelectedItem = row.AssignedGroup;
+
+        Brush cyan = (Brush)FindResource("Cyan");
+        Brush amber = (Brush)FindResource("Amber");
+        Brush magenta = (Brush)FindResource("Magenta");
+        Brush muted = (Brush)FindResource("Muted");
+
+        // 1. Companion telemetry
+        var compInfo = _mobileServer?.GetClientInfo(row.IpString);
+        if (compInfo != null)
+        {
+            TvInspectorCompanionBadge.Text = compInfo.IsAuthenticated
+                ? "🟢 COMPANION ACTIVE & PAIRED"
+                : "🟡 COMPANION CONNECTED (UNPAIRED)";
+            TvInspectorCompanionBadge.Foreground = compInfo.IsAuthenticated ? cyan : amber;
+
+            int secAgo = Math.Max(0, (int)(DateTime.UtcNow - compInfo.LastContactUtc).TotalSeconds);
+            string uaBrief = FormatUserAgent(compInfo.UserAgent);
+            TvInspectorCompanionDetails.Text = $"{uaBrief} • {compInfo.RequestCount} HTTP hits • Active {secAgo}s ago";
+            TvInspectorWebBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            TvInspectorCompanionBadge.Text = "⚪ COMPANION INACTIVE";
+            TvInspectorCompanionBadge.Foreground = muted;
+            TvInspectorCompanionDetails.Text = "No web companion contact recorded yet. Tap 'Pair Phone (QR Code)' to connect.";
+            TvInspectorWebBtn.Visibility = Visibility.Collapsed;
+        }
+
+        // 2. Query stats & defense rate for this specific IP
+        var matchingQueries = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, row.IpString)).ToList();
+        int total = matchingQueries.Count;
+        int blocked = matchingQueries.Count(q => q.IsBlocked);
+        int allowed = total - blocked;
+        double rate = total > 0 ? (100.0 * blocked / total) : 0.0;
+
+        TvInspectorQueryRateBadge.Text = $"{rate:F1}% BLOCKED";
+        TvInspectorQueryRateBadge.Foreground = blocked > 0 ? magenta : cyan;
+        TvInspectorQueryStats.Text = $"Total Queries: {total:N0}  •  Blocked: {blocked:N0}  •  Allowed: {allowed:N0}";
+
+        // 3. Per-device recent activity list
+        TvDeviceRecentQueries.Clear();
+        var topRecent = matchingQueries.Take(15).ToList();
+        foreach (var q in topRecent)
+        {
+            TvDeviceRecentQueries.Add(q);
+        }
+        TvInspectorRecentCountText.Text = $"{topRecent.Count} queries";
+    }
+
+    private static string FormatUserAgent(string? ua)
+    {
+        if (string.IsNullOrWhiteSpace(ua)) return "Mobile Browser";
+        if (ua.Contains("Android", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ua.Contains("Chrome", StringComparison.OrdinalIgnoreCase)) return "Chrome on Android";
+            return "Android Browser";
+        }
+        if (ua.Contains("iPhone", StringComparison.OrdinalIgnoreCase)) return "Safari on iPhone";
+        if (ua.Contains("iPad", StringComparison.OrdinalIgnoreCase)) return "Safari on iPad";
+        if (ua.Contains("Tizen", StringComparison.OrdinalIgnoreCase)) return "Samsung Smart TV";
+        if (ua.Contains("Web0S", StringComparison.OrdinalIgnoreCase) || ua.Contains("webOS", StringComparison.OrdinalIgnoreCase)) return "LG webOS Smart TV";
+        if (ua.Contains("Windows", StringComparison.OrdinalIgnoreCase)) return "Windows Browser";
+        if (ua.Contains("Macintosh", StringComparison.OrdinalIgnoreCase)) return "macOS Safari";
+        return ua.Length > 24 ? ua[..24] + "..." : ua;
+    }
+
+    private void OnInspectorOpenWebClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var localIp = GetLocalActiveIp();
+            string ipStr = localIp?.ToString() ?? "127.0.0.1";
+            int port = _mobileServer?.Port ?? 8765;
+            string url = $"http://{ipStr}:{port}/";
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Error("Failed to open companion URL", ex);
         }
     }
 
     private void OnCloseTvInspector(object sender, RoutedEventArgs e)
     {
         TvDeviceInspector.Visibility = Visibility.Collapsed;
+        TvDeviceRecentQueries.Clear();
     }
 
     private void OnAssignGroupClick(object sender, RoutedEventArgs e)
