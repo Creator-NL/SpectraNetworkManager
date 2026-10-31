@@ -6238,9 +6238,77 @@ public partial class MainWindow : Window
                 int activeClients = TvMobileDevices.Count(r => r.Device != null);
                 return (_sink.IsRunning, stats.Total, stats.Blocked, stats.BlockedPercent, activeClients);
             },
+            GetMetricsForClient = (clientIp) =>
+            {
+                var stats = _sink.Activity.Snapshot();
+                int activeClients = TvMobileDevices.Count(r => r.Device != null);
+
+                long devQueries = 0;
+                long devBlocked = 0;
+                double devBlockRate = 0.0;
+                string devName = "Mobile Device";
+
+                if (!string.IsNullOrEmpty(clientIp))
+                {
+                    var matchedDev = TvMobileDevices.FirstOrDefault(d => DnsClientMatch.IsSameClient(d.IpString, clientIp));
+                    if (matchedDev != null)
+                    {
+                        devName = $"{matchedDev.Hostname} ({matchedDev.DeviceTypeDisplay})";
+                    }
+                    else
+                    {
+                        devName = $"Device {clientIp}";
+                    }
+
+                    var devRows = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, clientIp)).ToList();
+                    devQueries = devRows.Count;
+                    devBlocked = devRows.Count(r => r.IsBlocked);
+                    devBlockRate = devQueries > 0 ? (100.0 * devBlocked / devQueries) : 0.0;
+                }
+
+                return new CompanionMetricsResult(
+                    _sink.IsRunning,
+                    stats.Total,
+                    stats.Blocked,
+                    stats.BlockedPercent,
+                    activeClients,
+                    clientIp ?? "127.0.0.1",
+                    devName,
+                    devQueries,
+                    devBlocked,
+                    devBlockRate
+                );
+            },
             GetRecentQueries = () =>
             {
                 return Dispatcher.Invoke(() => DnsRows.Take(25).Select(r => new { domain = r.Domain, isBlocked = r.IsBlocked }).ToList());
+            },
+            GetRecentQueriesForClient = (clientIp, viewMode) =>
+            {
+                return Dispatcher.Invoke(() =>
+                {
+                    if (string.Equals(viewMode, "network", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(clientIp))
+                    {
+                        return DnsRows.Take(30).Select(r => new
+                        {
+                            domain = r.Domain,
+                            isBlocked = r.IsBlocked,
+                            client = r.Client,
+                            time = r.Time
+                        }).ToList();
+                    }
+
+                    return DnsRows
+                        .Where(r => DnsClientMatch.IsSameClient(r.Client, clientIp))
+                        .Take(30)
+                        .Select(r => new
+                        {
+                            domain = r.Domain,
+                            isBlocked = r.IsBlocked,
+                            client = r.Client,
+                            time = r.Time
+                        }).ToList();
+                });
             },
             GetDevices = () =>
             {
@@ -6289,6 +6357,12 @@ public partial class MainWindow : Window
                     null!);
                 TvLanActivityRows.Insert(0, row);
                 while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+
+                ApplyLanBanner();
+                if (TvMobileGrid.SelectedItem is TvMobileDeviceRow sel)
+                {
+                    UpdateTvInspector(sel);
+                }
                 if (TvSubTabDiagnostics?.IsChecked == true) RefreshTvDiagnosticsUi();
             });
         };
@@ -6774,7 +6848,7 @@ public partial class MainWindow : Window
                 if (!hasRealBrowsing && googlePings >= 3)
                 {
                     InvAndroidDohWarningBorder.Visibility = Visibility.Visible;
-                    InvAndroidDohWarningText.Text = $"⚠️ Device {grp.Key} is sending connectivity checks (www.google.com), but real browsing is bypassing port 53 via Android 'Private DNS' (DoT port 853). Set Private DNS to OFF on {grp.Key} to protect all apps.";
+                    InvAndroidDohWarningText.Text = $"⚠️ Device {grp.Key} is sending connectivity checks (www.google.com), but real browsing is bypassing port 53 via Android 'Private DNS' (DoT port 853) or Chrome 'Secure DNS' (DoH). Ensure Private DNS is OFF and Chrome 'Use secure DNS' is OFF on {grp.Key}.";
                     return;
                 }
             }

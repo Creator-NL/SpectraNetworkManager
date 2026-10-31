@@ -121,23 +121,34 @@ public static class LanProtectionEvaluator
 /// <summary>Decides whether a DNS log client string refers to a given device IP.</summary>
 public static class DnsClientMatch
 {
-    /// <summary>Exact IP match. "192.168.1.7" must not match "192.168.1.70". A trailing ":port" is allowed.</summary>
+    /// <summary>Normalizes an IP string by stripping IPv4-mapped IPv6 prefixes (::ffff:) and port numbers.</summary>
+    public static string NormalizeIp(string? ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip)) return "";
+        string s = ip.Trim();
+        if (s.StartsWith("::ffff:", StringComparison.OrdinalIgnoreCase))
+            s = s[7..];
+
+        int colon = s.LastIndexOf(':');
+        if (colon > 0 && s.IndexOf(':', StringComparison.Ordinal) == colon)
+            s = s[..colon];
+
+        if (System.Net.IPAddress.TryParse(s, out var parsed))
+        {
+            if (parsed.IsIPv4MappedToIPv6) parsed = parsed.MapToIPv4();
+            return parsed.ToString();
+        }
+        return s;
+    }
+
+    /// <summary>Exact IP match. "192.168.1.7" must not match "192.168.1.70". A trailing ":port" or "::ffff:" prefix is normalized.</summary>
     public static bool IsSameClient(string? clientText, string? ip)
     {
         if (string.IsNullOrWhiteSpace(clientText) || string.IsNullOrWhiteSpace(ip)) return false;
 
-        string c = clientText.Trim();
-        string target = ip.Trim();
-        if (string.Equals(c, target, StringComparison.OrdinalIgnoreCase)) return true;
-
-        // IPv4 with port: 192.168.1.7:5353
-        int colon = c.LastIndexOf(':');
-        if (colon > 0 && c.IndexOf(':', StringComparison.Ordinal) == colon)
-        {
-            return string.Equals(c[..colon], target, StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
+        string c = NormalizeIp(clientText);
+        string target = NormalizeIp(ip);
+        return string.Equals(c, target, StringComparison.OrdinalIgnoreCase);
     }
 }
 

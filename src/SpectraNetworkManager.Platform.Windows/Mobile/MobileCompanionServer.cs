@@ -23,6 +23,19 @@ public sealed record CompanionClientInfo(
     bool IsAuthenticated
 );
 
+public sealed record CompanionMetricsResult(
+    bool IsDnsRunning,
+    long TotalQueries,
+    long BlockedQueries,
+    double BlockRate,
+    int ActiveClients,
+    string ClientIp,
+    string DeviceName,
+    long DeviceQueries,
+    long DeviceBlocked,
+    double DeviceBlockRate
+);
+
 /// <summary>
 /// Lightweight, hardened TCP HTTP server for the GSM Mobile Companion Dashboard.
 /// Uses standard WinSock sockets (TcpListener) instead of kernel HTTP.SYS, ensuring
@@ -48,7 +61,9 @@ public sealed class MobileCompanionServer : IDisposable
 
     // Callbacks to Spectra services
     public Func<(bool IsDnsRunning, long TotalQueries, long BlockedQueries, double BlockRate, int ActiveClients)>? GetMetrics { get; set; }
+    public Func<string?, CompanionMetricsResult>? GetMetricsForClient { get; set; }
     public Func<IReadOnlyList<object>>? GetRecentQueries { get; set; }
+    public Func<string?, string?, IReadOnlyList<object>>? GetRecentQueriesForClient { get; set; }
     public Func<IReadOnlyList<object>>? GetDevices { get; set; }
     public Action<int>? PauseDnsAction { get; set; }
     public Action? ResumeDnsAction { get; set; }
@@ -98,7 +113,9 @@ public sealed class MobileCompanionServer : IDisposable
     public CompanionClientInfo? GetClientInfo(string ip)
     {
         if (string.IsNullOrWhiteSpace(ip)) return null;
-        return _connectedClients.TryGetValue(ip.Trim(), out var info) ? info : null;
+        string norm = DnsClientMatch.NormalizeIp(ip);
+        if (string.IsNullOrEmpty(norm)) return null;
+        return _connectedClients.TryGetValue(norm, out var info) ? info : null;
     }
 
     /// <summary>Gets all active or paired companion clients.</summary>
@@ -207,11 +224,14 @@ public sealed class MobileCompanionServer : IDisposable
                 string userAgent = headers.TryGetValue("User-Agent", out var ua) ? ua : "Unknown";
 
                 var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
-                string? remoteIpStr = remote?.ToString();
-                if (remote is not null && !IPAddress.IsLoopback(remote))
+                if (remote != null && remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
+                string remoteIpStr = remote != null ? DnsClientMatch.NormalizeIp(remote.ToString()) : "";
+                bool isLoopback = remote != null && (IPAddress.IsLoopback(remote) || remoteIpStr == "127.0.0.1");
+
+                if (!string.IsNullOrEmpty(remoteIpStr) && !isLoopback)
                 {
                     LastRemoteContactUtc = DateTime.UtcNow;
-                    LastRemoteContactIp = remoteIpStr!;
+                    LastRemoteContactIp = remoteIpStr;
                     Interlocked.Increment(ref _remoteRequestCount);
                     RemoteContactReceived?.Invoke(LastRemoteContactIp, path);
                 }
@@ -229,7 +249,7 @@ public sealed class MobileCompanionServer : IDisposable
                         ok = true,
                         app = "SpectraNetworkManager",
                         server = Environment.MachineName,
-                        clientIp = remote?.ToString() ?? "unknown",
+                        clientIp = remoteIpStr,
                         timeUtc = DateTime.UtcNow
                     };
                     await SendJsonAsync(stream, 200, pingObj);
@@ -260,7 +280,7 @@ public sealed class MobileCompanionServer : IDisposable
                     isAuthenticated = true;
                 }
 
-                if (remote is not null && !IPAddress.IsLoopback(remote) && !string.IsNullOrEmpty(remoteIpStr))
+                if (!string.IsNullOrEmpty(remoteIpStr))
                 {
                     _connectedClients.AddOrUpdate(
                         remoteIpStr,
@@ -291,13 +311,30 @@ public sealed class MobileCompanionServer : IDisposable
                         return;
                     }
 
-                    var metrics = GetMetrics?.Invoke() ?? (false, 0, 0, 0.0, 0);
+                    CompanionMetricsResult metrics;
+                    if (GetMetricsForClient != null)
+                    {
+                        metrics = GetMetricsForClient(remoteIpStr);
+                    }
+                    else
+                    {
+                        var old = GetMetrics?.Invoke() ?? (false, 0, 0, 0.0, 0);
+                        metrics = new CompanionMetricsResult(
+                            old.IsDnsRunning, old.TotalQueries, old.BlockedQueries, old.BlockRate,
+                            old.ActiveClients, remoteIpStr, "Device " + remoteIpStr, 0, 0, 0.0);
+                    }
+
                     var devices = GetDevices?.Invoke() ?? Array.Empty<object>();
 
                     await SendJsonAsync(stream, 200, new
                     {
                         serverName = Environment.MachineName,
                         dnsActive = metrics.IsDnsRunning,
+                        clientIp = metrics.ClientIp,
+                        deviceName = metrics.DeviceName,
+                        deviceQueries = metrics.DeviceQueries,
+                        deviceBlocked = metrics.DeviceBlocked,
+                        deviceBlockPercentage = Math.Round(metrics.DeviceBlockRate, 1),
                         totalQueries = metrics.TotalQueries,
                         blockedQueries = metrics.BlockedQueries,
                         blockPercentage = Math.Round(metrics.BlockRate, 1),
@@ -316,7 +353,17 @@ public sealed class MobileCompanionServer : IDisposable
                         return;
                     }
 
-                    var logs = GetRecentQueries?.Invoke() ?? Array.Empty<object>();
+                    string viewMode = GetQueryParam(queryString, "view") ?? "device";
+                    IReadOnlyList<object> logs;
+                    if (GetRecentQueriesForClient != null)
+                    {
+                        logs = GetRecentQueriesForClient(remoteIpStr, viewMode);
+                    }
+                    else
+                    {
+                        logs = GetRecentQueries?.Invoke() ?? Array.Empty<object>();
+                    }
+
                     await SendJsonAsync(stream, 200, logs);
                     return;
                 }
@@ -456,121 +503,216 @@ public sealed class MobileCompanionServer : IDisposable
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Spectra Mobile Companion</title>
+  <title>Spectra Companion • Mobile Defense Hub</title>
   <style>
     :root {
       --bg: #0B0E14;
       --card: #151B26;
+      --card-hover: #1B2332;
       --cyan: #00E5FF;
       --magenta: #FF2BD6;
       --amber: #FFB000;
       --text: #DCE3F0;
       --muted: #7E8BA3;
       --line: #222C3D;
+      --green: #00FF88;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background: var(--bg); color: var(--text); padding: 16px; min-height: 100vh; }
-    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 16px; }
-    .title { font-size: 1.15rem; font-weight: 700; color: var(--cyan); letter-spacing: 0.5px; }
-    .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
-    .badge-on { background: rgba(0,229,255,0.15); color: var(--cyan); border: 1px solid var(--cyan); }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 12px; }
+    .title { font-size: 1.15rem; font-weight: 800; color: var(--cyan); letter-spacing: 0.5px; }
+    .badge { font-size: 0.72rem; padding: 4px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-on { background: rgba(0,229,255,0.12); color: var(--cyan); border: 1px solid var(--cyan); }
     .badge-off { background: rgba(255,43,214,0.15); color: var(--magenta); border: 1px solid var(--magenta); }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+
+    /* Device Card */
+    .device-banner { background: #111823; border: 1px solid var(--line); border-left: 3px solid var(--cyan); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .device-name { font-weight: 700; font-size: 0.95rem; color: #FFF; display: flex; align-items: center; gap: 6px; }
+    .device-ip { font-size: 0.78rem; color: var(--muted); font-family: monospace; }
+
+    /* View Switcher Tabs */
+    .view-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .view-tab { flex: 1; padding: 10px 6px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 0.82rem; font-weight: 700; text-align: center; cursor: pointer; transition: all 0.2s; user-select: none; }
+    .view-tab.active { background: rgba(0,229,255,0.12); border-color: var(--cyan); color: var(--cyan); }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-    .metric-val { font-size: 1.6rem; font-weight: 800; color: var(--text); margin-top: 4px; }
-    .metric-lbl { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 600; }
-    .section-title { font-size: 0.9rem; font-weight: 700; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; }
-    .btn { display: block; width: 100%; padding: 12px; border-radius: 6px; border: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: center; margin-bottom: 8px; transition: opacity 0.2s; }
+    .metric-val { font-size: 1.5rem; font-weight: 800; color: var(--text); margin-top: 4px; }
+    .metric-lbl { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+    .section-title { font-size: 0.82rem; font-weight: 700; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center; }
+
+    .btn { display: block; width: 100%; padding: 11px; border-radius: 6px; border: none; font-size: 0.9rem; font-weight: 700; cursor: pointer; text-align: center; margin-bottom: 8px; transition: opacity 0.2s; }
     .btn-pause { background: #FF2BD6; color: #fff; }
     .btn-resume { background: #00E5FF; color: #000; }
-    .query-item { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 0.85rem; display: flex; justify-content: space-between; }
-    .query-domain { font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
-    .blocked { color: var(--magenta); }
+
+    .query-item { padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; }
+    .query-domain { font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 68%; }
+    .blocked { color: var(--magenta); font-weight: 700; }
     .allowed { color: var(--cyan); }
-    .auth-banner { background: rgba(255,176,0,0.1); border: 1px solid var(--amber); color: var(--amber); padding: 16px; border-radius: 8px; text-align: center; }
+    .query-client { font-size: 0.7rem; color: var(--muted); font-family: monospace; }
+
+    .hint-box { background: rgba(255,176,0,0.08); border: 1px solid var(--amber); border-radius: 8px; padding: 12px; color: var(--text); font-size: 0.8rem; line-height: 1.4; margin-top: 10px; }
+    .hint-box b { color: var(--amber); }
+
+    .auth-banner { background: rgba(255,176,0,0.1); border: 1px solid var(--amber); color: var(--amber); padding: 18px; border-radius: 8px; text-align: center; }
   </style>
 </head>
 <body>
   <header>
     <div>
       <div class="title">SPECTRA COMPANION</div>
-      <div style="font-size: 0.8rem; color: var(--muted);">Mobile Defense Hub</div>
+      <div style="font-size: 0.75rem; color: var(--muted);">Mobile Defense Hub</div>
     </div>
-    <div id="statusBadge" class="badge badge-on">ONLINE</div>
+    <div id="statusBadge" class="badge badge-on">SHIELD ON</div>
   </header>
 
   {{(isAuthenticated ? """
+  <div class="device-banner">
+    <div>
+      <div class="device-name">📱 <span id="deviceName">Connected Device</span></div>
+      <div class="device-ip" id="deviceIp">Checking IP...</div>
+    </div>
+    <div style="font-size: 0.72rem; color: var(--green); font-weight: 700;">🟢 PAIRED</div>
+  </div>
+
+  <div class="view-tabs">
+    <div class="view-tab active" id="tabDevice" onclick="switchView('device')">📱 THIS PHONE</div>
+    <div class="view-tab" id="tabNetwork" onclick="switchView('network')">🌐 ENTIRE NETWORK</div>
+  </div>
+
   <div class="grid">
     <div class="card">
-      <div class="metric-lbl">Total Queries</div>
-      <div class="metric-val" id="totalQueries">0</div>
+      <div class="metric-lbl" id="lblQueries">QUERIES (THIS PHONE)</div>
+      <div class="metric-val" id="valQueries">0</div>
     </div>
     <div class="card">
-      <div class="metric-lbl">Blocked (ACR / Ads)</div>
-      <div class="metric-val blocked" id="blockedQueries">0</div>
+      <div class="metric-lbl" id="lblBlocked">BLOCKED (ADS / TRACKERS)</div>
+      <div class="metric-val blocked" id="valBlocked">0</div>
     </div>
   </div>
 
-  <div class="card" style="margin-bottom: 16px;">
+  <div class="card" style="margin-bottom: 14px;">
     <div class="section-title">Quick Defense Control</div>
     <button class="btn btn-pause" onclick="pauseSinkhole(15)">⏸ Pause Blocking (15 Mins)</button>
     <button class="btn btn-resume" onclick="resumeSinkhole()">▶ Resume Protection</button>
   </div>
 
   <div class="card">
-    <div class="section-title">Recent Activity</div>
-    <div id="logList" style="max-height: 250px; overflow-y: auto;">
-      <div style="color: var(--muted); font-size: 0.85rem; padding: 8px;">Loading live stream...</div>
+    <div class="section-title">
+      <span id="lblRecentTitle">Recent Activity for this Phone</span>
+      <span style="font-size: 0.72rem; color: var(--muted); font-weight: 400;" id="lblRecentCount">Live stream</span>
+    </div>
+    <div id="logList" style="max-height: 280px; overflow-y: auto;">
+      <div style="color: var(--muted); font-size: 0.82rem; padding: 8px;">Loading live stream...</div>
+    </div>
+    <div id="leakHint" class="hint-box" style="display: none;">
+      <b>💡 Only seeing Google / System queries?</b><br/>
+      If website browsing doesn't appear above, Google Chrome on Android has "Secure DNS" turned on.<br/>
+      <b>Fix in 10 seconds:</b> Open Chrome ➔ <b>Settings</b> ➔ <b>Privacy and security</b> ➔ <b>Use secure DNS</b> ➔ Turn <b>OFF</b>.
     </div>
   </div>
 
   <script>
-    async function refresh() {
-      try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        document.getElementById('totalQueries').innerText = data.totalQueries.toLocaleString();
-        document.getElementById('blockedQueries').innerText = data.blockedQueries.toLocaleString() + ' (' + data.blockPercentage + '%)';
-        const badge = document.getElementById('statusBadge');
-        if (data.dnsActive) {
-          badge.className = 'badge badge-on';
-          badge.innerText = 'SHIELD ON';
-        } else {
-          badge.className = 'badge badge-off';
-          badge.innerText = 'PAUSED';
-        }
-      } catch (e) {}
+    let currentView = 'device';
+    let cachedData = null;
 
+    function switchView(mode) {
+      currentView = mode;
+      document.getElementById('tabDevice').className = 'view-tab' + (mode === 'device' ? ' active' : '');
+      document.getElementById('tabNetwork').className = 'view-tab' + (mode === 'network' ? ' active' : '');
+      if (cachedData) renderData(cachedData);
+      refreshLogs();
+    }
+
+    function renderData(data) {
+      cachedData = data;
+      document.getElementById('deviceName').innerText = data.deviceName || 'Mobile Device';
+      document.getElementById('deviceIp').innerText = data.clientIp || '127.0.0.1';
+
+      const badge = document.getElementById('statusBadge');
+      if (data.dnsActive) {
+        badge.className = 'badge badge-on';
+        badge.innerText = 'SHIELD ON';
+      } else {
+        badge.className = 'badge badge-off';
+        badge.innerText = 'PAUSED';
+      }
+
+      if (currentView === 'device') {
+        document.getElementById('lblQueries').innerText = 'QUERIES (THIS PHONE)';
+        document.getElementById('valQueries').innerText = (data.deviceQueries || 0).toLocaleString();
+        document.getElementById('lblBlocked').innerText = 'BLOCKED (ADS / TRACKERS)';
+        document.getElementById('valBlocked').innerText = (data.deviceBlocked || 0).toLocaleString() + ' (' + (data.deviceBlockPercentage || 0) + '%)';
+        document.getElementById('lblRecentTitle').innerText = 'Recent Activity for this Phone';
+      } else {
+        document.getElementById('lblQueries').innerText = 'TOTAL NETWORK QUERIES';
+        document.getElementById('valQueries').innerText = (data.totalQueries || 0).toLocaleString();
+        document.getElementById('lblBlocked').innerText = 'NETWORK BLOCKED (TOTAL)';
+        document.getElementById('valBlocked').innerText = (data.blockedQueries || 0).toLocaleString() + ' (' + (data.blockPercentage || 0) + '%)';
+        document.getElementById('lblRecentTitle').innerText = 'Recent Activity across all Devices';
+      }
+    }
+
+    async function refreshStatus() {
       try {
-        const logRes = await fetch('/api/logs');
-        const logs = await logRes.json();
-        const list = document.getElementById('logList');
-        if (logs.length > 0) {
-          list.innerHTML = logs.slice(0, 15).map(l => `
-            <div class="query-item">
-              <span class="query-domain">${l.domain || l.Domain || 'Unknown'}</span>
-              <span class="${(l.isBlocked || l.IsBlocked) ? 'blocked' : 'allowed'}">${(l.isBlocked || l.IsBlocked) ? '🚫 Block' : '🛡️ OK'}</span>
-            </div>
-          `).join('');
-        } else {
-          list.innerHTML = '<div style="color: var(--muted); font-size: 0.85rem; padding: 8px;">No DNS activity yet. On your phone set the Wi-Fi DNS to this PC and leave DNS 2 empty.</div>';
+        const res = await fetch('/api/status?view=' + currentView);
+        if (res.ok) {
+          const data = await res.json();
+          renderData(data);
         }
       } catch (e) {}
+    }
+
+    async function refreshLogs() {
+      try {
+        const res = await fetch('/api/logs?view=' + currentView);
+        if (res.ok) {
+          const logs = await res.json();
+          const list = document.getElementById('logList');
+          const hint = document.getElementById('leakHint');
+          if (logs.length > 0) {
+            list.innerHTML = logs.map(l => `
+              <div class="query-item">
+                <div>
+                  <div class="query-domain">${l.domain || l.Domain || 'Unknown'}</div>
+                  ${currentView === 'network' && (l.client || l.Client) ? `<div class="query-client">${l.client || l.Client}</div>` : ''}
+                </div>
+                <span class="${(l.isBlocked || l.IsBlocked) ? 'blocked' : 'allowed'}">${(l.isBlocked || l.IsBlocked) ? '🚫 Block' : '🛡️ OK'}</span>
+              </div>
+            `).join('');
+            if (currentView === 'device') {
+              const onlyGoogle = logs.every(l => (l.domain || l.Domain || '').toLowerCase().includes('google'));
+              if (onlyGoogle && logs.length > 0) hint.style.display = 'block';
+              else hint.style.display = 'none';
+            } else {
+              hint.style.display = 'none';
+            }
+          } else {
+            list.innerHTML = '<div style="color: var(--muted); font-size: 0.82rem; padding: 12px; text-align: center;">No queries recorded yet for this view.</div>';
+            if (currentView === 'device') hint.style.display = 'block';
+          }
+        }
+      } catch (e) {}
+    }
+
+    function refreshAll() {
+      refreshStatus();
+      refreshLogs();
     }
 
     async function pauseSinkhole(mins) {
       if (!confirm('Pause DNS Sinkhole filtering for ' + mins + ' minutes?')) return;
       await fetch('/api/pause', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ minutes: mins }) });
-      refresh();
+      refreshAll();
     }
 
     async function resumeSinkhole() {
       await fetch('/api/resume', { method: 'POST' });
-      refresh();
+      refreshAll();
     }
 
-    setInterval(refresh, 2500);
-    refresh();
+    setInterval(refreshAll, 2500);
+    refreshAll();
   </script>
   """ : """
   <div class="auth-banner">

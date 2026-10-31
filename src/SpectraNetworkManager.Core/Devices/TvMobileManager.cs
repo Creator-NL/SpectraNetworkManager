@@ -171,13 +171,17 @@ public sealed class TvMobileManager
         {
             return "Android Phone / Tablet / Google TV:\n" +
                    "1. Open Settings ➔ Network & Internet ➔ Wi-Fi.\n" +
-                   "2. Tap the Gear icon next to your Wi-Fi network ➔ Modify / Advanced.\n" +
+                   "2. Tap the Gear icon next to your connected Wi-Fi ➔ Modify / Advanced.\n" +
                    "3. Change IP Settings from DHCP to Static (keep current IP & Gateway).\n" +
-                   $"4. Set DNS 1 to: {spectraLanIp}\n\n" +
-                   "5. ⚠️ CRITICAL STEP FOR ANDROID:\n" +
-                   "   Go to Settings ➔ Network & Internet ➔ Private DNS.\n" +
-                   "   Select 'Off' (prevents Android from bypassing Wi-Fi DNS via Google DoT).\n\n" +
-                   "6. Save and reconnect. Telemetry and mobile ads will be filtered automatically!";
+                   $"4. Set DNS 1 to: {spectraLanIp}\n" +
+                   $"   Set DNS 2 to: {spectraLanIp} (or leave empty if Android permits).\n\n" +
+                   "5. ⚠️ CRITICAL STEP 1 (Turn OFF Android Private DNS):\n" +
+                   "   Go to Settings ➔ Network & Internet ➔ Private DNS ➔ Select 'Off'.\n" +
+                   "   (Prevents Android from bypassing Wi-Fi DNS via Google DoT port 853).\n\n" +
+                   "6. ⚠️ CRITICAL STEP 2 (Turn OFF Chrome Secure DNS):\n" +
+                   "   Open Chrome ➔ Settings (3 dots) ➔ Privacy and security ➔ Use secure DNS.\n" +
+                   "   Turn it OFF (prevents Chrome from bypassing port 53 via Google DoH port 443).\n\n" +
+                   "7. Save and reconnect. All web browsing, app tracking, and mobile ads are now sinkholed!";
         }
 
         // Generic guide
@@ -185,8 +189,9 @@ public sealed class TvMobileManager
                "1. Open Wi-Fi / Network Settings on your device.\n" +
                "2. Select your connected Wi-Fi network ➔ Configure IP / DNS.\n" +
                "3. Change DNS Mode to 'Manual' or 'Static'.\n" +
-               $"4. Set DNS Server to: {spectraLanIp}\n" +
-               "5. On Android phones, ensure Settings ➔ Private DNS is set to 'Off'.\n" +
+               $"4. Set DNS 1 to: {spectraLanIp}\n" +
+               $"   Set DNS 2 to: {spectraLanIp} (or leave empty).\n" +
+               "5. On Android phones, ensure Settings ➔ Private DNS is 'Off' and Chrome 'Use secure DNS' is 'Off'.\n" +
                "6. Save and reconnect. Telemetry and ads will be filtered automatically!";
     }
 }
