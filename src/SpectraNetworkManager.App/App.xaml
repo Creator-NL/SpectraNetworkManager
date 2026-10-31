@@ -19,6 +19,7 @@
         <SolidColorBrush x:Key="Muted" Color="#7F8BB0"/>
         <SolidColorBrush x:Key="Selected" Color="#2A1F4D"/>
         <SolidColorBrush x:Key="Amber" Color="#FFB020"/>
+        <SolidColorBrush x:Key="Green" Color="#00E676"/>
 
         <Style TargetType="DataGrid">
             <Setter Property="Background" Value="{StaticResource Panel}"/>

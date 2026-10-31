@@ -1848,6 +1848,31 @@
                         </DockPanel>
                     </Border>
 
+                    <!-- Spectra 3-in-1 Network Hub: Smart Proxy (8888) + L3 Gateway Router + Optional DHCP Server (67) -->
+                    <Border x:Name="TvNetworkHubBanner" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                            CornerRadius="4" Padding="12,7" Margin="0,0,0,6">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="TvCopyProxyBtn" Content="📋 Copy Phone Proxy Info" Click="OnCopyProxyHubInfoClick"
+                                        Foreground="{StaticResource Cyan}" Padding="10,4" Margin="0,0,8,0"
+                                        ToolTip="Copies Wi-Fi Proxy (Port 8888), WPAD URL, and Gateway IP instructions to clipboard"/>
+                                <Button x:Name="TvToggleDhcpBtn" Content="⚪ Built-In DHCP Server: OFF" Click="OnToggleDhcpServerClick"
+                                        Foreground="{StaticResource Muted}" FontWeight="SemiBold" Padding="10,4"
+                                        ToolTip="Optional RFC 2131 LAN DHCP Server (UDP Port 67) — automatically assigns IP, Gateway, DNS &amp; WPAD Proxy to phones/TVs (turn off router DHCP first)"/>
+                            </StackPanel>
+                            <StackPanel VerticalAlignment="Center">
+                                <WrapPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="TvProxyHubBadge" Text="🟢 SMART PROXY HUB: :8888" FontWeight="Bold" FontSize="11.5" Foreground="{StaticResource Green}" Margin="0,0,16,0"/>
+                                    <TextBlock x:Name="TvGatewayHubBadge" Text="🟢 L3 GATEWAY ROUTER: ACTIVE" FontWeight="Bold" FontSize="11.5" Foreground="{StaticResource Cyan}" Margin="0,0,16,0"/>
+                                    <TextBlock x:Name="TvDhcpHubBadge" Text="⚪ DHCP SERVER: STANDBY (.150-.199)" FontWeight="SemiBold" FontSize="11.5" Foreground="{StaticResource Muted}"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TvNetworkHubDesc"
+                                           Text="100% Phone Visibility (Bypasses ISP IPv6 &amp; Chrome DoH): Set Phone Wi-Fi Proxy → Manual → Host: 192.168.178.203, Port: 8888 (or Gateway: 192.168.178.203)."
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
                     <!-- Router Forwarding Notice Banner -->
                     <Border x:Name="TvGatewayNoticeBanner" Background="{StaticResource Panel}" BorderBrush="{StaticResource Amber}" BorderThickness="1"
                             CornerRadius="4" Padding="12,8" Visibility="Collapsed">

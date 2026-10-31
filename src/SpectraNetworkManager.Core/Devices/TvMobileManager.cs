@@ -159,39 +159,41 @@ public sealed class TvMobileManager
 
         if (v.Contains("apple") || v.Contains("iphone") || v.Contains("ipad"))
         {
-            return "Apple iPhone / iPad / Apple TV:\n" +
+            return "Apple iPhone / iPad / Apple TV (Full Hub & DNS Setup):\n" +
                    "1. Open Settings ➔ Wi-Fi ➔ Tap the (i) next to your connected network.\n" +
-                   "2. Tap Configure DNS ➔ Select Manual.\n" +
-                   "3. Delete existing DNS servers, then tap Add Server:\n" +
-                   $"   {spectraLanIp}\n" +
-                   "4. Tap Save. App telemetry & tracking beacons will be sinkholed!";
+                   "2. Tap Configure DNS ➔ Select Manual ➔ Add Server:\n" +
+                   $"   {spectraLanIp} (and delete other DNS servers).\n" +
+                   "3. ⚡ FOR 100% VISIBILITY (Bypasses Router IPv6 & DoH):\n" +
+                   "   Scroll to the bottom of the Wi-Fi screen ➔ Configure Proxy ➔ Manual:\n" +
+                   $"   Server: {spectraLanIp}   |   Port: 8888\n" +
+                   "4. Tap Save. 100% of web & app traffic will now appear live in Spectra!";
         }
 
         if (v.Contains("android") || v.Contains("sony") || v.Contains("google") || v.Contains("mobile") || v.Contains("galaxy") || v.Contains("pixel") || v.Contains("xiaomi"))
         {
-            return "Android Phone / Tablet / Google TV:\n" +
-                   "1. Open Settings ➔ Network & Internet ➔ Wi-Fi.\n" +
-                   "2. Tap the Gear icon next to your connected Wi-Fi ➔ Modify / Advanced.\n" +
-                   "3. Change IP Settings from DHCP to Static (keep current IP & Gateway).\n" +
-                   $"4. Set DNS 1 to: {spectraLanIp}\n" +
-                   $"   Set DNS 2 to: {spectraLanIp} (or leave empty if Android permits).\n\n" +
-                   "5. ⚠️ CRITICAL STEP 1 (Turn OFF Android Private DNS):\n" +
-                   "   Go to Settings ➔ Network & Internet ➔ Private DNS ➔ Select 'Off'.\n" +
-                   "   (Prevents Android from bypassing Wi-Fi DNS via Google DoT port 853).\n\n" +
-                   "6. ⚠️ CRITICAL STEP 2 (Turn OFF Chrome Secure DNS):\n" +
-                   "   Open Chrome ➔ Settings (3 dots) ➔ Privacy and security ➔ Use secure DNS.\n" +
-                   "   Turn it OFF (prevents Chrome from bypassing port 53 via Google DoH port 443).\n\n" +
-                   "7. Save and reconnect. All web browsing, app tracking, and mobile ads are now sinkholed!";
+            return "Android Phone / Tablet (Spectra Smart Proxy + Router Hub):\n" +
+                   "1. Open Settings ➔ Connections / Network ➔ Wi-Fi.\n" +
+                   "2. Tap the Gear icon next to your Wi-Fi ➔ View More / Advanced.\n\n" +
+                   "⚡ METHOD A — SMART PROXY HUB (Recommended — 100% Immune to Router IPv6!):\n" +
+                   "   • Set Proxy to: Manual\n" +
+                   $"   • Proxy host name: {spectraLanIp}\n" +
+                   "   • Proxy port: 8888\n" +
+                   $"   (Or Proxy Auto-Config URL: http://{spectraLanIp}:8888/wpad.dat)\n\n" +
+                   "🌐 METHOD B — FULL ROUTER GATEWAY + DNS:\n" +
+                   "   • Set IP Settings to: Static\n" +
+                   $"   • Set Gateway to: {spectraLanIp}\n" +
+                   $"   • Set DNS 1 & DNS 2 to: {spectraLanIp}\n\n" +
+                   "3. Tap Save. 100% of your phone's browsing & ads will stream live in Spectra!";
         }
 
         // Generic guide
-        return "Universal Smart TV & Mobile Device Setup:\n" +
+        return "Universal Smart TV & Mobile Device Setup (DNS + Smart Proxy Hub):\n" +
                "1. Open Wi-Fi / Network Settings on your device.\n" +
-               "2. Select your connected Wi-Fi network ➔ Configure IP / DNS.\n" +
-               "3. Change DNS Mode to 'Manual' or 'Static'.\n" +
-               $"4. Set DNS 1 to: {spectraLanIp}\n" +
-               $"   Set DNS 2 to: {spectraLanIp} (or leave empty).\n" +
-               "5. On Android phones, ensure Settings ➔ Private DNS is 'Off' and Chrome 'Use secure DNS' is 'Off'.\n" +
-               "6. Save and reconnect. Telemetry and ads will be filtered automatically!";
+               "2. Select your connected Wi-Fi network ➔ Advanced / Configure.\n" +
+               $"3. Set DNS 1 & DNS 2 to: {spectraLanIp}\n" +
+               "4. On Phones/Tablets (to bypass ISP IPv6 & Chrome DoH):\n" +
+               $"   • Set Wi-Fi Proxy to Manual ➔ Host: {spectraLanIp}  |  Port: 8888\n" +
+               $"   • Or set Gateway to: {spectraLanIp}\n" +
+               "5. Save and reconnect. All traffic and ads are filtered and logged live!";
     }
 }

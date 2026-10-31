@@ -240,41 +240,46 @@ public sealed class WindowsFirewallEnforcer
     private const int ProfilesAll = 7;                  // Domain (1) | Private (2) | Public (4)
 
     /// <summary>
-    /// Lets other devices on your LOCAL network (not the internet) send DNS queries and access the Mobile Companion:
-    /// inbound TCP and UDP on the DNS port (53) and TCP on the mobile companion port (8765),
-    /// only from the local subnet. By default restricted to Private and Domain networks, unless allowOnPublic is true.
+    /// Lets other devices on your LOCAL network (not the internet) send DNS queries, connect to the Proxy Hub, DHCP Hub, and access the Mobile Companion:
+    /// inbound TCP and UDP on the DNS port (53), TCP on the mobile companion port (8765), TCP on the Proxy Hub port (8888), and UDP on DHCP port (67).
     /// </summary>
-    public void AllowInboundDns(string exePath, int port, int mobileCompanionPort = 8765, bool allowOnPublic = false)
+    public void AllowInboundDns(string exePath, int port, int mobileCompanionPort = 8765, bool allowOnPublic = false, int proxyHubPort = 8888, int dhcpPort = 67)
     {
         dynamic policy = Create("HNetCfg.FWPolicy2");
         RemoveInboundDns(exePath);
 
-        var ruleSpecs = new List<(int Protocol, string Label, int Port)>
+        var ruleSpecs = new List<(int Protocol, string Label, int Port, string RemoteScope)>
         {
-            (ProtocolUdp, "dns-udp", port),
-            (ProtocolTcp, "dns-tcp", port)
+            (ProtocolUdp, "dns-udp", port, "LocalSubnet"),
+            (ProtocolTcp, "dns-tcp", port, "LocalSubnet")
         };
         if (mobileCompanionPort > 0)
         {
-            ruleSpecs.Add((ProtocolTcp, "mobile-companion-tcp", mobileCompanionPort));
+            ruleSpecs.Add((ProtocolTcp, "mobile-companion-tcp", mobileCompanionPort, "LocalSubnet"));
+        }
+        if (proxyHubPort > 0)
+        {
+            ruleSpecs.Add((ProtocolTcp, "proxy-hub-tcp", proxyHubPort, "LocalSubnet"));
+        }
+        if (dhcpPort > 0)
+        {
+            // DHCP DISCOVER packets originate from 0.0.0.0 before a lease is assigned
+            ruleSpecs.Add((ProtocolUdp, "dhcp-hub-udp", dhcpPort, "*"));
         }
 
-        foreach (var (protocol, label, targetPort) in ruleSpecs)
+        foreach (var (protocol, label, targetPort, remoteScope) in ruleSpecs)
         {
             dynamic rule = Create("HNetCfg.FWRule");
             rule.Name = InboundDnsRuleName(exePath, label);
-            rule.Description = "Lets devices on your local network use SpectraNetworkManager DNS and Mobile Companion. Managed by SpectraNetworkManager.";
-            // For mobile-companion-tcp (port 8765), .NET HttpListener uses Windows kernel http.sys (System process).
-            // Restricting ApplicationName to the user-mode WPF exe causes Windows Firewall to block all incoming http.sys traffic!
-            if (label != "mobile-companion-tcp")
-            {
-                rule.ApplicationName = exePath;
-            }
+            rule.Description = "Lets devices on your local network use SpectraNetworkManager DNS, Proxy Hub, DHCP Hub, and Mobile Companion. Managed by SpectraNetworkManager.";
             rule.Direction = DirectionIn;
             rule.Action = ActionAllow;
             rule.Protocol = protocol;
             rule.LocalPorts = targetPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            rule.RemoteAddresses = "LocalSubnet";
+            if (remoteScope != "*")
+            {
+                rule.RemoteAddresses = remoteScope;
+            }
             rule.Profiles = allowOnPublic ? ProfilesAll : ProfilesDomainAndPrivate;
             rule.Grouping = Group;
             rule.Enabled = true;

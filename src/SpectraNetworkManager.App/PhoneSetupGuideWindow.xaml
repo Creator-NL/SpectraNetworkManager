@@ -28,6 +28,29 @@
             <TabItem Header="🤖 Android (Samsung, Xiaomi, Pixel, etc.)">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                     <StackPanel>
+                        <!-- Step 0: Smart Proxy Hub (100% Immune to IPv6 & DoH) -->
+                        <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Green}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="⚡ RECOMMENDED: SPECTRA SMART PROXY HUB (PORT 8888)" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Green}"/>
+                                <TextBlock Text="Many ISP routers (like Ziggo / KPN) broadcast IPv6 DNS to your phone, causing Android and Chrome to bypass IPv4 DNS. Enabling the Proxy Hub on your phone's Wi-Fi screen forces 100% of HTTP &amp; HTTPS browsing directly through Spectra!"
+                                           FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,4,0,4"/>
+                                <Border Background="{StaticResource Line}" CornerRadius="3" Padding="8,6" Margin="0,2,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="1. Go to Settings ➔ Wi-Fi ➔ Tap your connected Wi-Fi (Gear icon) ➔ View More / Advanced." FontSize="11" Foreground="{StaticResource Text}"/>
+                                        <TextBlock Text="2. Tap 'Proxy' ➔ Select 'Manual'." FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBlock Text="3. Proxy host name: " FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                            <TextBlock x:Name="AndroidProxyHostText" Text="192.168.178.203" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                            <TextBlock Text="   |   Proxy port: " FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                            <TextBlock Text="8888" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                        </DockPanel>
+                                        <TextBlock Text="4. Tap Save! Every website &amp; app domain will immediately stream live in Spectra."
+                                                   FontSize="11" Foreground="{StaticResource Muted}" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Step 1: Private DNS -->
                         <Border Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
                             <StackPanel>

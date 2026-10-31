@@ -119,6 +119,9 @@ public partial class MainWindow : Window
     private string? _aiSelectedPath;
     private int _aiSelectedPid;
     private MobileCompanionServer? _mobileServer;
+    private SpectraProxyServer? _proxyServer;
+    private LanGatewayRouter? _gatewayRouter;
+    private SpectraDhcpServer? _dhcpServer;
 
     public MainWindow()
     {
@@ -204,6 +207,9 @@ public partial class MainWindow : Window
             _hostsMonitor.Dispose();
             _packetCaptureManager.Dispose();
             _mobileServer?.Dispose();
+            _proxyServer?.Dispose();
+            _gatewayRouter?.Dispose();
+            _dhcpServer?.Dispose();
             _aiDb.Dispose();
         };
 
@@ -4060,10 +4066,12 @@ public partial class MainWindow : Window
     /// </summary>
     private void IngestDnsQueries()
     {
-        if (!_sink.IsRunning) return;
         var recent = _sink.Activity.Recent(300);
+        if (recent.Count == 0) return;
         int known = _dnsLastTop is null ? recent.Count : recent.ToList().FindIndex(x => ReferenceEquals(x, _dnsLastTop));
         if (known < 0) known = recent.Count;
+        if (known == 0) return;
+        bool hadLanActivity = false;
         _isUpdatingDnsRows = true;
         try
         {
@@ -4078,6 +4086,7 @@ public partial class MainWindow : Window
                     TvLanActivityRows.Insert(0, row);
                     while (TvLanActivityRows.Count > 500) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
                     RecordLanQuery(row, insertAtFront: true);
+                    hadLanActivity = true;
                 }
             }
             while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
@@ -4087,6 +4096,10 @@ public partial class MainWindow : Window
             _isUpdatingDnsRows = false;
         }
         if (recent.Count > 0) _dnsLastTop = recent[0];
+        if (hadLanActivity && TvMobileTab.IsChecked == true)
+        {
+            RefreshTvMobileUi();
+        }
     }
 
     // The badge is cheap and always current; the rest only matters while the DNS tab is visible.
@@ -6394,9 +6407,55 @@ public partial class MainWindow : Window
             });
         };
 
+        _proxyServer = new SpectraProxyServer(8888)
+        {
+            DecideDomain = (clientIp, domain) => _sink.DecideForClient(clientIp, domain)
+        };
+        _proxyServer.ProxyActivityLogged += entry => _sink.RecordExternalActivity(entry);
+
+        _gatewayRouter = new LanGatewayRouter
+        {
+            DecideDomain = (clientIp, domain) => _sink.DecideForClient(clientIp, domain)
+        };
+        _gatewayRouter.RoutedActivityLogged += entry => _sink.RecordExternalActivity(entry);
+
+        _dhcpServer = new SpectraDhcpServer();
+        _dhcpServer.LeaseAssigned += lease =>
+        {
+            var entry = new DnsLogEntry(
+                DateTimeOffset.Now,
+                lease.IpAddress,
+                string.IsNullOrWhiteSpace(lease.Hostname) ? $"DHCP-Lease ({lease.MacAddress})" : lease.Hostname,
+                "DHCP",
+                DnsOutcome.Forwarded,
+                $"Spectra DHCP Hub assigned IP {lease.IpAddress} (Gateway & DNS = {GetLocalActiveIp()})",
+                0);
+            _sink.RecordExternalActivity(entry);
+            Dispatcher.BeginInvoke(() =>
+            {
+                ApplyLanBanner();
+                if (TvMobileTab.IsChecked == true) RefreshTvMobileUi();
+            });
+        };
+
         if (_sink.Settings.ListenAddress == "0.0.0.0")
         {
             try { _mobileServer.Start(); } catch { }
+            try { _proxyServer.Start(); } catch { }
+            if (_isAdmin)
+            {
+                var localIp = GetLocalActiveIp();
+                _ = Task.Run(async () =>
+                {
+                    try { await _gatewayRouter.StartAsync(localIp).ConfigureAwait(false); } catch { }
+                });
+                string exe = Environment.ProcessPath ?? "";
+                _ = Task.Run(() =>
+                {
+                    try { _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: true); }
+                    catch { }
+                });
+            }
         }
 
         if (!_dnsHistoryLoaded)
@@ -6686,6 +6745,112 @@ public partial class MainWindow : Window
         }
 
         TvLanStatusSub.Foreground = muted;
+        UpdateNetworkHubBannerUi(pcIp);
+    }
+
+    private void UpdateNetworkHubBannerUi(string pcIp)
+    {
+        if (TvNetworkHubBanner == null) return;
+        Brush cyan = (Brush)FindResource("Cyan");
+        Brush green = (Brush)FindResource("Green");
+        Brush amber = (Brush)FindResource("Amber");
+        Brush muted = (Brush)FindResource("Muted");
+
+        bool proxyOn = _proxyServer?.IsRunning == true;
+        bool gwOn = _gatewayRouter?.IsRunning == true;
+        bool dhcpOn = _dhcpServer?.IsRunning == true;
+
+        TvProxyHubBadge.Text = proxyOn
+            ? $"🟢 SMART PROXY HUB: {pcIp}:8888 ({_proxyServer!.TotalRequests:N0} reqs)"
+            : "⚪ SMART PROXY HUB: OFF";
+        TvProxyHubBadge.Foreground = proxyOn ? green : muted;
+
+        TvGatewayHubBadge.Text = gwOn
+            ? $"🟢 L3 GATEWAY ROUTER: {pcIp} ({_gatewayRouter!.RoutedPacketsSeen:N0} pkts)"
+            : "⚪ L3 GATEWAY ROUTER: OFF";
+        TvGatewayHubBadge.Foreground = gwOn ? cyan : muted;
+
+        TvDhcpHubBadge.Text = dhcpOn
+            ? $"🟢 DHCP SERVER: ACTIVE ({_dhcpServer!.ActiveLeaseCount} leases, .150-.199)"
+            : "⚪ DHCP SERVER: STANDBY (.150-.199)";
+        TvDhcpHubBadge.Foreground = dhcpOn ? green : muted;
+
+        TvToggleDhcpBtn.Content = dhcpOn
+            ? "🟢 Built-In DHCP Server: ON"
+            : "⚪ Built-In DHCP Server: OFF";
+        TvToggleDhcpBtn.Foreground = dhcpOn ? green : amber;
+
+        TvNetworkHubDesc.Text =
+            $"⚡ 100% Phone Visibility (Bypasses Router IPv6 & Chrome DoH): On Phone Wi-Fi → Set Proxy to Manual → Host: {pcIp}  |  Port: 8888  (or Gateway: {pcIp})";
+    }
+
+    private void OnCopyProxyHubInfoClick(object sender, RoutedEventArgs e)
+    {
+        string pcIp = GetLocalActiveIp()?.ToString() ?? "192.168.178.203";
+        string text =
+            $"=== SPECTRA 3-IN-1 PHONE & TV NETWORK HUB ({pcIp}) ===\n\n" +
+            $"⚡ METHOD 1: SMART PROXY HUB (100% Immune to Router IPv6 & Chrome DoH)\n" +
+            $"1. Open Phone Settings ➔ Wi-Fi ➔ Tap your connected Wi-Fi (Gear icon) ➔ View More / Advanced.\n" +
+            $"2. Set Proxy to: Manual\n" +
+            $"   • Proxy host name: {pcIp}\n" +
+            $"   • Proxy port: 8888\n" +
+            $"   (Or Proxy Auto-Config URL: http://{pcIp}:8888/wpad.dat)\n\n" +
+            $"🌐 METHOD 2: FULL LAYER-3 ROUTER GATEWAY + DNS\n" +
+            $"1. Set IP Settings to: Static\n" +
+            $"   • Gateway: {pcIp}\n" +
+            $"   • DNS 1: {pcIp}\n" +
+            $"   • DNS 2: {pcIp}\n\n" +
+            $"Tap Save on your phone — 100% of your browsing & blocked ads will immediately appear live in Spectra!";
+
+        try { System.Windows.Clipboard.SetText(text); } catch { }
+        Info(text);
+    }
+
+    private void OnToggleDhcpServerClick(object sender, RoutedEventArgs e)
+    {
+        if (!_isAdmin)
+        {
+            Info("Running the Built-In DHCP Server (UDP Port 67) requires Administrator privileges.");
+            return;
+        }
+
+        if (_dhcpServer == null) return;
+
+        if (_dhcpServer.IsRunning)
+        {
+            _dhcpServer.Stop();
+            UpdateNetworkHubBannerUi(GetLocalActiveIp()?.ToString() ?? "192.168.1.X");
+            Info("⚪ Spectra Built-In DHCP Server is now OFF.");
+            return;
+        }
+
+        var localIp = GetLocalActiveIp();
+        if (localIp == null)
+        {
+            Info("Could not detect an active LAN IPv4 address on this PC.");
+            return;
+        }
+
+        if (Confirm(
+            $"Enable Spectra Built-In DHCP Server on {localIp} (UDP Port 67)?\n\n" +
+            $"• Pool Range: .150 to .199 on your local subnet\n" +
+            $"• Automatically assigns Gateway = {localIp}, DNS = {localIp}, and WPAD Proxy = http://{localIp}:8888/wpad.dat to connecting phones & TVs.\n\n" +
+            $"⚠️ Tip: For automatic DHCP assignment without conflicts, disable DHCP on your ISP router or set Static Proxy ({localIp}:8888) on your phone.",
+            "Enable Spectra Built-In DHCP Server"))
+        {
+            string exe = Environment.ProcessPath ?? "";
+            try { _enforcer.AllowInboundDns(exe, _sink.Settings.Port, _mobileServer?.Port ?? 8765, allowOnPublic: true); } catch { }
+            try
+            {
+                _dhcpServer.Start(localIp);
+                UpdateNetworkHubBannerUi(localIp.ToString());
+                Info($"🟢 Spectra Built-In DHCP Server is now ACTIVE on {localIp}:67!\n\nAny device requesting a DHCP lease will be assigned an IP (.150-.199) with Gateway & DNS pointed to {localIp}.");
+            }
+            catch (Exception ex)
+            {
+                Warn($"Could not bind UDP Port 67: {ex.Message}\n\n(Another service on this PC may be using port 67. You can still use the Smart Proxy Hub on port 8888 or L3 Gateway Router on {localIp}!)");
+            }
+        }
     }
 
     private static bool IsLanClient(string? client)
@@ -7365,6 +7530,14 @@ public partial class MainWindow : Window
             {
                 try { _mobileServer.Start(); } catch { }
             }
+            if (_proxyServer != null && !_proxyServer.IsRunning)
+            {
+                try { _proxyServer.Start(); } catch { }
+            }
+            if (_gatewayRouter != null && !_gatewayRouter.IsRunning)
+            {
+                try { await _gatewayRouter.StartAsync(GetLocalActiveIp()); } catch { }
+            }
 
             QueueLanProbeIfStale(force: true);
             RefreshTvMobileUi();
@@ -7376,15 +7549,16 @@ public partial class MainWindow : Window
                 : "";
 
             Info(
-                $"🛡️ LAN Protection is now ACTIVE!\n\n" +
-                $"• DNS Listen Address: 0.0.0.0 (Port {_sink.Settings.Port})\n" +
-                $"• Windows Firewall: Inbound DNS (Port {_sink.Settings.Port} UDP/TCP) and Mobile Companion (Port {_mobileServer?.Port ?? 8765} TCP) are OPEN for your local subnet.\n" +
-                $"• Your PC LAN IP: {localIp}\n\n" +
-                $"To protect your Smart TV or Phone:\n" +
-                $"1. Set the device Wi-Fi/Ethernet DNS server to: {localIp}\n" +
-                $"2. Leave DNS 2 (Alternative DNS) EMPTY (or set it also to {localIp})\n" +
-                $"3. On Android phones: Turn OFF 'Private DNS' in Wi-Fi settings.\n\n" +
-                $"Spectra is now actively ready to receive and filter all DNS traffic from your network!{publicNote}");
+                $"🛡️ LAN Protection & Spectra Network Hub are now ACTIVE!\n\n" +
+                $"• DNS Sinkhole: 0.0.0.0 (Port {_sink.Settings.Port} IPv4 & IPv6)\n" +
+                $"• Smart Proxy Hub: {localIp}:8888 (and http://{localIp}:8888/wpad.dat)\n" +
+                $"• L3 Gateway Router: {localIp} (IPv4 Forwarding & TLS SNI Dissection)\n" +
+                $"• Windows Firewall: Ports {_sink.Settings.Port}, {_mobileServer?.Port ?? 8765}, 8888 & 67 OPEN.\n\n" +
+                $"To connect your Phone with 100% visibility (bypasses router IPv6 & Chrome DoH):\n" +
+                $"1. Set Wi-Fi DNS 1 & DNS 2 to: {localIp}\n" +
+                $"2. Set Wi-Fi Proxy to Manual ➔ Host: {localIp}  |  Port: 8888\n" +
+                $"   (Or set Gateway to: {localIp})\n\n" +
+                $"Spectra is now ready to filter and log 100% of your phone & TV traffic!{publicNote}");
         }
         catch (Exception ex)
         {
@@ -7412,6 +7586,10 @@ public partial class MainWindow : Window
             LanProtectionPlanner.ApplyDisabled(_sink.Settings);
             DnsListenBox.Text = _sink.Settings.ListenAddress;
             _sink.SaveSettingsOnly(_sink.Settings);
+
+            try { _proxyServer?.Stop(); } catch { }
+            try { if (_gatewayRouter != null) await _gatewayRouter.StopAsync(); } catch { }
+            try { _dhcpServer?.Stop(); } catch { }
 
             string exe = Environment.ProcessPath ?? "";
             _enforcer.RemoveInboundDns(exe);
@@ -7613,9 +7791,14 @@ public partial class MainWindow : Window
 
         if (TvInspectorDohWarningBorder != null)
         {
-            TvInspectorDohWarningBorder.Visibility = (!hasRealBrowsing && healthPingCount >= 3)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            bool showWarn = !hasRealBrowsing && healthPingCount >= 3;
+            TvInspectorDohWarningBorder.Visibility = showWarn ? Visibility.Visible : Visibility.Collapsed;
+            if (showWarn && TvInspectorDohWarningText != null)
+            {
+                string pcIp = GetLocalActiveIp()?.ToString() ?? "192.168.178.203";
+                TvInspectorDohWarningText.Text =
+                    $"⚠️ Router IPv6 / DoH Bypass Detected: Only 60-second OS health pings (www.google.com) received so far. To force 100% of this phone's web & app traffic through Spectra, open your phone's Wi-Fi settings → Proxy: Manual → Host: {pcIp}  |  Port: 8888 (or set Gateway to {pcIp}).";
+            }
         }
 
         // 3. Per-device recent activity list

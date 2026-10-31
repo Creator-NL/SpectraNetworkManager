@@ -439,6 +439,25 @@ public sealed class DnsService : IDisposable
     public Task<IReadOnlyList<DnsLogEntry>> LoadRecentLanHistoryAsync(int limit = 1000, CancellationToken ct = default) =>
         _historyDb.GetRecentLanEntriesAsync(limit, ct);
 
+    /// <summary>Returns the client-group-aware filter decision for a domain.</summary>
+    public FilterDecision DecideForClient(IPAddress clientIp, string domain)
+    {
+        if (IsBlockingPaused)
+            return new FilterDecision(FilterAction.Allowed, "blocking paused");
+
+        if (_server is not null)
+            return _server.DecideForClient(clientIp, domain);
+
+        return Decide(domain);
+    }
+
+    /// <summary>Records an activity entry from the Proxy Hub or L3 Gateway Router into in-memory counters and SQLite history.</summary>
+    public void RecordExternalActivity(DnsLogEntry entry)
+    {
+        Activity.Add(entry);
+        _historyDb.Enqueue(entry, Settings.AnonymizeClientIps, Settings.DoNotStoreDomains);
+    }
+
     /// <summary>Exports query history to CSV.</summary>
     public Task ExportHistoryCsvAsync(TextWriter writer, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default) =>
         _historyDb.ExportCsvAsync(writer, from, to, ct);

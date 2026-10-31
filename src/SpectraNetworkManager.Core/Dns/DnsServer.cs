@@ -94,6 +94,21 @@ public sealed class DnsServer : IDisposable
     /// <summary>Raised for every answered query (on a background thread).</summary>
     public event Action<DnsLogEntry>? Queried;
 
+    /// <summary>Evaluates a domain against the client's assigned group and current pause state.</summary>
+    public FilterDecision DecideForClient(IPAddress clientIp, string domain)
+    {
+        string d = DomainFilter.Normalize(domain);
+        if (d.Length == 0) return FilterDecision.NoMatch;
+
+        bool paused = _isBlockingPaused?.Invoke() == true;
+        var (group, groupFilter, groupBlocking) = _groupManager.GetGroupForClient(clientIp);
+        if (paused || !groupBlocking)
+        {
+            return new FilterDecision(FilterAction.Allowed, paused ? "blocking paused" : $"blocking disabled for {group.Name}");
+        }
+        return groupFilter.Decide(d);
+    }
+
     /// <summary>Binds the sockets and starts answering. Throws a SocketException when the address or port is already in use.</summary>
     public void Start()
     {

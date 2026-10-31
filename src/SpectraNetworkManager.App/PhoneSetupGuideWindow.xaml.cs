@@ -13,6 +13,7 @@ public partial class PhoneSetupGuideWindow : Window
         _port = port;
         InitializeComponent();
 
+        AndroidProxyHostText.Text = _pcIp;
         AndroidDns1Text.Text = _pcIp;
         IosDnsText.Text = _pcIp;
     }

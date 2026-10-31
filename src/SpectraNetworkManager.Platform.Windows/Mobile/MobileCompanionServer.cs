@@ -257,6 +257,25 @@ public sealed class MobileCompanionServer : IDisposable
                     return;
                 }
 
+                if (path.Equals("/wpad.dat", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("/proxy.pac", StringComparison.OrdinalIgnoreCase))
+                {
+                    string hostIp = (client.Client.LocalEndPoint as IPEndPoint)?.Address.MapToIPv4().ToString() ?? "192.168.178.203";
+                    if (headers.TryGetValue("Host", out var hVal) && !string.IsNullOrWhiteSpace(hVal))
+                    {
+                        int cIdx = hVal.IndexOf(':');
+                        hostIp = cIdx > 0 ? hVal[..cIdx] : hVal;
+                    }
+                    string pac = $@"function FindProxyForURL(url, host) {{
+    if (isPlainHostName(host) || shExpMatch(host, ""*.local"") || isInNet(dnsResolve(host), ""10.0.0.0"", ""255.0.0.0"") || isInNet(dnsResolve(host), ""192.168.0.0"", ""255.255.0.0"") || isInNet(dnsResolve(host), ""127.0.0.0"", ""255.0.0.0"")) {{
+        return ""DIRECT"";
+    }}
+    return ""PROXY {hostIp}:8888; DIRECT"";
+}}";
+                    await SendResponseAsync(stream, 200, "OK", "application/x-ns-proxy-autoconfig", Encoding.UTF8.GetBytes(pac));
+                    return;
+                }
+
                 string? pairQuery = GetQueryParam(queryString, "token");
                 string? newSessionCookie = null;
                 if (!string.IsNullOrEmpty(pairQuery) && _pendingPairingTokens.TryGetValue(pairQuery, out var expires) && expires > DateTime.UtcNow)
