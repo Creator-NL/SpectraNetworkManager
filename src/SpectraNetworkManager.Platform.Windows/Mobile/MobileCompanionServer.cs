@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -226,7 +227,7 @@ public sealed class MobileCompanionServer : IDisposable
                 var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
                 if (remote != null && remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
                 string remoteIpStr = remote != null ? DnsClientMatch.NormalizeIp(remote.ToString()) : "";
-                bool isLoopback = remote != null && (IPAddress.IsLoopback(remote) || remoteIpStr == "127.0.0.1");
+                bool isLoopback = IsLocalHostIp(remote, remoteIpStr);
 
                 if (!string.IsNullOrEmpty(remoteIpStr) && !isLoopback)
                 {
@@ -280,7 +281,7 @@ public sealed class MobileCompanionServer : IDisposable
                     isAuthenticated = true;
                 }
 
-                if (!string.IsNullOrEmpty(remoteIpStr))
+                if (!string.IsNullOrEmpty(remoteIpStr) && !isLoopback)
                 {
                     _connectedClients.AddOrUpdate(
                         remoteIpStr,
@@ -729,6 +730,32 @@ public sealed class MobileCompanionServer : IDisposable
 </body>
 </html>
 """;
+    }
+
+    private static bool IsLocalHostIp(IPAddress? addr, string ipStr)
+    {
+        if (addr == null) return true;
+        if (IPAddress.IsLoopback(addr) || ipStr == "127.0.0.1" || ipStr == "::1") return true;
+
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                foreach (var uni in ni.GetIPProperties().UnicastAddresses)
+                {
+                    string localStr = DnsClientMatch.NormalizeIp(uni.Address.ToString());
+                    if (string.Equals(localStr, ipStr, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore interface enumeration errors
+        }
+
+        return false;
     }
 
     public void Dispose()

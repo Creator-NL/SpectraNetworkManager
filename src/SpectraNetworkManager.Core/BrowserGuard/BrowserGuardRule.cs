@@ -24,6 +24,8 @@ public sealed class BrowserGuardRule
 public sealed class BrowserGuardConfig
 {
     public bool ExtensionEnabled { get; set; } = true;
+    public bool BlockYouTubeAds { get; set; } = true;
+    public bool BlockYouTubeAnnotations { get; set; } = true;
     public bool BlockYouTubeShorts { get; set; } = true;
     public bool BlockYouTubeVideoStreams { get; set; }
     public bool BlockSocialVideoFeeds { get; set; }

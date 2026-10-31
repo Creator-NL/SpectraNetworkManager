@@ -108,6 +108,7 @@ public partial class MainWindow : Window
     public ObservableCollection<TvMobileDeviceRow> TvMobileDevices { get; } = new();
     public ObservableCollection<DnsRow> TvLanActivityRows { get; } = new();
     public ObservableCollection<DnsRow> TvDeviceRecentQueries { get; } = new();
+    private readonly Dictionary<string, List<DnsRow>> _lanQueriesByClient = new(StringComparer.OrdinalIgnoreCase);
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
     public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
@@ -3739,16 +3740,41 @@ public partial class MainWindow : Window
         try
         {
             var history = await _sink.LoadRecentHistoryAsync(300);
-            if (history.Count > 0 && DnsRows.Count == 0)
+            var lanHistory = await _sink.LoadRecentLanHistoryAsync(1500);
+
+            await Dispatcher.InvokeAsync(() =>
             {
-                foreach (var item in history)
+                if (history.Count > 0 && DnsRows.Count == 0)
                 {
-                    RecordDomainResolution(item.Domain, item.Detail);
-                    string caller = ResolveInitiator(item.Domain, item.Client, item.Detail, item.Outcome == DnsOutcome.Blocked);
-                    DnsRows.Add(DnsRow.From(item, caller));
+                    foreach (var item in history)
+                    {
+                        RecordDomainResolution(item.Domain, item.Detail);
+                        string caller = ResolveInitiator(item.Domain, item.Client, item.Detail, item.Outcome == DnsOutcome.Blocked);
+                        DnsRows.Add(DnsRow.From(item, caller));
+                    }
+                    _dnsLastTop = history[0];
                 }
-                _dnsLastTop = history[0];
-            }
+
+                if (lanHistory.Count > 0 && _lanQueriesByClient.Count == 0)
+                {
+                    foreach (var item in lanHistory)
+                    {
+                        if (!IsLanClient(item.Client)) continue;
+                        string caller = ResolveInitiator(item.Domain, item.Client, item.Detail, item.Outcome == DnsOutcome.Blocked);
+                        var row = DnsRow.From(item, caller);
+                        if (TvLanActivityRows.Count < 500)
+                        {
+                            TvLanActivityRows.Add(row);
+                        }
+                        RecordLanQuery(row, insertAtFront: false);
+                    }
+
+                    if (TvMobileTab?.IsChecked == true)
+                    {
+                        RefreshTvMobileUi();
+                    }
+                }
+            });
         }
         catch (Exception)
         {
@@ -4050,7 +4076,8 @@ public partial class MainWindow : Window
                 if (IsLanClient(row.Client))
                 {
                     TvLanActivityRows.Insert(0, row);
-                    while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                    while (TvLanActivityRows.Count > 500) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                    RecordLanQuery(row, insertAtFront: true);
                 }
             }
             while (DnsRows.Count > 500) DnsRows.RemoveAt(DnsRows.Count - 1);
@@ -6260,7 +6287,7 @@ public partial class MainWindow : Window
                         devName = $"Device {clientIp}";
                     }
 
-                    var devRows = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, clientIp)).ToList();
+                    var devRows = GetLanQueriesForClient(clientIp);
                     devQueries = devRows.Count;
                     devBlocked = devRows.Count(r => r.IsBlocked);
                     devBlockRate = devQueries > 0 ? (100.0 * devBlocked / devQueries) : 0.0;
@@ -6298,8 +6325,7 @@ public partial class MainWindow : Window
                         }).ToList();
                     }
 
-                    return DnsRows
-                        .Where(r => DnsClientMatch.IsSameClient(r.Client, clientIp))
+                    return GetLanQueriesForClient(clientIp)
                         .Take(30)
                         .Select(r => new
                         {
@@ -6344,6 +6370,7 @@ public partial class MainWindow : Window
         {
             Dispatcher.BeginInvoke(() =>
             {
+                var syntheticEntry = new DnsLogEntry(DateTimeOffset.Now, remoteIp, $"Mobile Companion ({path})", "HTTP", DnsOutcome.Forwarded, "Remote device reached companion page", 0);
                 var row = new DnsRow(
                     DateTime.Now.ToString("HH:mm:ss"),
                     remoteIp,
@@ -6354,9 +6381,9 @@ public partial class MainWindow : Window
                     0,
                     false,
                     false,
-                    null!);
+                    syntheticEntry);
                 TvLanActivityRows.Insert(0, row);
-                while (TvLanActivityRows.Count > 300) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
+                while (TvLanActivityRows.Count > 500) TvLanActivityRows.RemoveAt(TvLanActivityRows.Count - 1);
 
                 ApplyLanBanner();
                 if (TvMobileGrid.SelectedItem is TvMobileDeviceRow sel)
@@ -6372,6 +6399,13 @@ public partial class MainWindow : Window
             try { _mobileServer.Start(); } catch { }
         }
 
+        if (!_dnsHistoryLoaded)
+        {
+            _dnsHistoryLoaded = true;
+            _ = LoadInitialHistoryAsync();
+        }
+
+        TryAutoRegisterBrowserHost();
         RefreshBrowserGuardUi();
     }
 
@@ -6445,11 +6479,32 @@ public partial class MainWindow : Window
             }
         }
 
+        foreach (var clientKey in _lanQueriesByClient.Keys)
+        {
+            if (!knownDevices.ContainsKey(clientKey) && IPAddress.TryParse(clientKey, out var clientIp) && !IPAddress.IsLoopback(clientIp))
+            {
+                string? host = _dns.Request(clientIp);
+                var classification = DeviceClassifier.Classify("", host ?? "", null, false);
+                knownDevices[clientKey] = new DiscoveredDevice
+                {
+                    Ip = clientIp,
+                    MacAddress = "Active DNS Client",
+                    Vendor = classification.Vendor,
+                    Hostname = host ?? "",
+                    Kind = classification.Kind == DeviceKind.Unknown ? DeviceKind.MobileOrTablet : classification.Kind,
+                    DeviceDescription = "Active DNS Client",
+                    IsGateway = false,
+                    FirstSeen = DateTimeOffset.UtcNow,
+                    LastSeen = DateTimeOffset.UtcNow
+                };
+            }
+        }
+
         // Check if queries from gateway IP are seen
         bool gatewayForwardingDetected = false;
         if (gatewayIp != null)
         {
-            int gwQueryCount = DnsRows.Count(r => DnsClientMatch.IsSameClient(r.Client, gatewayIp.ToString()));
+            int gwQueryCount = GetLanQueriesForClient(gatewayIp.ToString()).Count;
             if (gwQueryCount > 5)
             {
                 gatewayForwardingDetected = true;
@@ -6473,11 +6528,11 @@ public partial class MainWindow : Window
             var dev = kvp.Value;
             string ipStr = dev.IpString;
 
-            // Query stats for this device IP
-            var matchingQueries = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, ipStr)).ToList();
+            // Query stats for this device IP from persistent LAN store
+            var matchingQueries = GetLanQueriesForClient(ipStr);
             int totalQ = matchingQueries.Count;
             int blockedQ = matchingQueries.Count(q => q.IsBlocked);
-            DateTime? lastSeen = matchingQueries.Count > 0 ? matchingQueries.Max(q => q.Entry.Time).UtcDateTime : null;
+            DateTime? lastSeen = matchingQueries.Count > 0 ? matchingQueries.Max(q => q.Entry?.Time ?? DateTimeOffset.UtcNow).UtcDateTime : null;
             bool dohAttempt = matchingQueries.Any(q => q.Domain.Contains("cloudflare-dns") || q.Domain.Contains("dns.google") || q.Domain.Contains("quad9"));
 
             var info = DeviceProtectionEvaluator.Evaluate(dev.Ip, gatewayForwardingDetected ? gatewayIp : null, lastSeen, totalQ, blockedQ, dohAttempt);
@@ -6640,6 +6695,46 @@ public partial class MainWindow : Window
             client.StartsWith("::1", StringComparison.Ordinal) ||
             client.StartsWith("localhost", StringComparison.OrdinalIgnoreCase)) return false;
         return true;
+    }
+
+    private void RecordLanQuery(DnsRow row, bool insertAtFront = true)
+    {
+        if (!IsLanClient(row.Client)) return;
+        string normIp = DnsClientMatch.NormalizeIp(row.Client);
+        if (string.IsNullOrEmpty(normIp)) return;
+
+        if (!_lanQueriesByClient.TryGetValue(normIp, out var list))
+        {
+            list = new List<DnsRow>();
+            _lanQueriesByClient[normIp] = list;
+        }
+
+        if (insertAtFront)
+        {
+            list.Insert(0, row);
+            while (list.Count > 1000) list.RemoveAt(list.Count - 1);
+        }
+        else if (list.Count < 1000)
+        {
+            list.Add(row);
+        }
+    }
+
+    private IReadOnlyList<DnsRow> GetLanQueriesForClient(string? clientIp)
+    {
+        string normIp = DnsClientMatch.NormalizeIp(clientIp);
+        if (string.IsNullOrEmpty(normIp)) return Array.Empty<DnsRow>();
+        if (_lanQueriesByClient.TryGetValue(normIp, out var list) && list.Count > 0)
+            return list;
+        return DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, normIp)).ToList();
+    }
+
+    private static bool IsOsHealthPing(string? domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain)) return false;
+        return string.Equals(domain, "www.google.com", StringComparison.OrdinalIgnoreCase) ||
+               domain.Contains("connectivitycheck", StringComparison.OrdinalIgnoreCase) ||
+               domain.Contains("clients3.google.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnTvSubTabChanged(object sender, RoutedEventArgs e)
@@ -7017,6 +7112,7 @@ public partial class MainWindow : Window
                         DnsRows.Clear();
                         TvLanActivityRows.Clear();
                         TvDeviceRecentQueries.Clear();
+                        _lanQueriesByClient.Clear();
                         try { File.Delete(p); } catch { }
                         cleanedCount++;
                     }
@@ -7155,6 +7251,28 @@ public partial class MainWindow : Window
 
     private bool _isUpdatingGuardUi;
 
+    private void TryAutoRegisterBrowserHost()
+    {
+        try
+        {
+            string hostExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SpectraNetworkManager.BrowserHost.exe");
+            if (!File.Exists(hostExe))
+            {
+                string altPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "SpectraNetworkManager.BrowserHost", "bin", "Debug", "net8.0-windows", "SpectraNetworkManager.BrowserHost.exe");
+                if (File.Exists(altPath)) hostExe = Path.GetFullPath(altPath);
+                else hostExe = Environment.ProcessPath ?? "";
+            }
+            if (!string.IsNullOrEmpty(hostExe))
+            {
+                BrowserExtensionHost.RegisterHost(hostExe, out _);
+            }
+        }
+        catch
+        {
+            // Non-fatal auto-registration
+        }
+    }
+
     private void RefreshBrowserGuardUi()
     {
         bool isRegistered = BrowserExtensionHost.IsHostRegistered();
@@ -7184,7 +7302,8 @@ public partial class MainWindow : Window
             if (GuardBlockStreamsCheck != null) GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams;
             if (GuardBlockTikTokCheck != null) GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds;
             if (GuardPlaceholderCheck != null) GuardPlaceholderCheck.IsChecked = _browserGuardManager.Config.ShowInPagePlaceholder;
-            if (GuardBlockAdsCheck != null) GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
+            if (GuardBlockAdsCheck != null) GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAds && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
+            if (GuardBlockAnnotationsCheck != null) GuardBlockAnnotationsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAnnotations;
             if (GuardBlockReelsCheck != null) GuardBlockReelsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "ig-reels" && r.Enabled);
         }
         finally
@@ -7431,6 +7550,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnTvInspectorFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (TvMobileGrid.SelectedItem is TvMobileDeviceRow row)
+        {
+            UpdateTvInspector(row);
+        }
+    }
+
     private void UpdateTvInspector(TvMobileDeviceRow row)
     {
         if (TvDeviceInspector == null) return;
@@ -7467,8 +7595,8 @@ public partial class MainWindow : Window
             TvInspectorWebBtn.Visibility = Visibility.Collapsed;
         }
 
-        // 2. Query stats & defense rate for this specific IP
-        var matchingQueries = DnsRows.Where(r => DnsClientMatch.IsSameClient(r.Client, row.IpString)).ToList();
+        // 2. Query stats & defense rate for this specific IP (from persistent LAN store)
+        var matchingQueries = GetLanQueriesForClient(row.IpString);
         int total = matchingQueries.Count;
         int blocked = matchingQueries.Count(q => q.IsBlocked);
         int allowed = total - blocked;
@@ -7478,14 +7606,32 @@ public partial class MainWindow : Window
         TvInspectorQueryRateBadge.Foreground = blocked > 0 ? magenta : cyan;
         TvInspectorQueryStats.Text = $"Total Queries: {total:N0}  •  Blocked: {blocked:N0}  •  Allowed: {allowed:N0}";
 
+        bool hasRealBrowsing = matchingQueries.Any(q =>
+            !IsOsHealthPing(q.Domain) &&
+            !q.Domain.EndsWith(".in-addr.arpa", StringComparison.OrdinalIgnoreCase));
+        int healthPingCount = matchingQueries.Count(q => IsOsHealthPing(q.Domain));
+
+        if (TvInspectorDohWarningBorder != null)
+        {
+            TvInspectorDohWarningBorder.Visibility = (!hasRealBrowsing && healthPingCount >= 3)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
         // 3. Per-device recent activity list
         TvDeviceRecentQueries.Clear();
-        var topRecent = matchingQueries.Take(15).ToList();
-        foreach (var q in topRecent)
+        bool hidePings = TvInspectorHidePingsCheck?.IsChecked == true && hasRealBrowsing;
+        var filteredQueries = hidePings
+            ? matchingQueries.Where(q => !IsOsHealthPing(q.Domain)).Take(200).ToList()
+            : matchingQueries.Take(200).ToList();
+
+        foreach (var q in filteredQueries)
         {
             TvDeviceRecentQueries.Add(q);
         }
-        TvInspectorRecentCountText.Text = $"{topRecent.Count} queries";
+        TvInspectorRecentCountText.Text = hidePings
+            ? $"{filteredQueries.Count:N0} website queries ({healthPingCount} OS pings hidden)"
+            : $"{filteredQueries.Count:N0} queries";
     }
 
     private static string FormatUserAgent(string? ua)
@@ -7679,16 +7825,20 @@ public partial class MainWindow : Window
 
         _browserGuardManager.Config.BlockYouTubeShorts = GuardBlockShortsCheck.IsChecked == true;
         _browserGuardManager.Config.BlockYouTubeVideoStreams = GuardBlockStreamsCheck.IsChecked == true;
+        _browserGuardManager.Config.BlockYouTubeAds = GuardBlockAdsCheck.IsChecked == true;
+        if (GuardBlockAnnotationsCheck != null)
+            _browserGuardManager.Config.BlockYouTubeAnnotations = GuardBlockAnnotationsCheck.IsChecked == true;
         _browserGuardManager.Config.BlockSocialVideoFeeds = GuardBlockTikTokCheck.IsChecked == true || GuardBlockReelsCheck.IsChecked == true;
         _browserGuardManager.Config.ShowInPagePlaceholder = GuardPlaceholderCheck.IsChecked == true;
 
         _browserGuardManager.ToggleRule("yt-shorts", GuardBlockShortsCheck.IsChecked == true);
         _browserGuardManager.ToggleRule("yt-video-stream", GuardBlockStreamsCheck.IsChecked == true);
-        _browserGuardManager.ToggleRule("yt-ads", GuardBlockAdsCheck.IsChecked == true);
+        _browserGuardManager.ToggleYouTubeAdRules(GuardBlockAdsCheck.IsChecked == true);
         _browserGuardManager.ToggleRule("tiktok-feed", GuardBlockTikTokCheck.IsChecked == true);
         _browserGuardManager.ToggleRule("ig-reels", GuardBlockReelsCheck.IsChecked == true);
 
         _browserGuardManager.Save();
+        RefreshBrowserGuardUi();
     }
 
     private void OnAddBrowserGuardRule(object sender, RoutedEventArgs e)

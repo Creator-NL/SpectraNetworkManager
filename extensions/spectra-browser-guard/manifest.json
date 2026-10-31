@@ -1,49 +1,34 @@
 {
   "manifest_version": 3,
-  "name": "Spectra Browser Guard",
+  "name": "Spectra Browser Guard & YouTube AdShield",
   "version": "2.0.0",
-  "description": "Native URL, Video Stream, and YouTube Shorts Blocker synchronized with SpectraNetworkManager.",
-  "icons": {
-    "48": "icon48.png",
-    "128": "icon128.png"
-  },
+  "description": "High-performance YouTube video ad & annotation blocker, Shorts suppressor, and declarative stream guard powered by SpectraNetworkManager.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc/BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ/2W+5JsGY4Hc5n9yBXArwl93lqt7/RN5w6Cf0h4QyQ5v+65YGjQR0/FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt+bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ+G/xBniIqbw0Ls1jF44+csFCur+kEgU8awapJzKnqDKgwIDAQAB",
   "permissions": [
     "declarativeNetRequest",
-    "declarativeNetRequestWithHostAccess",
+    "declarativeNetRequestFeedback",
     "storage",
-    "nativeMessaging",
-    "tabs"
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "*://*.youtube.com/*",
-        "*://*.googlevideo.com/*",
-        "*://*.tiktok.com/*",
-        "*://*.instagram.com/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "css": ["content.css"],
-      "run_at": "document_end"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "48": "icon48.png"
-    }
-  },
   "browser_specific_settings": {
     "gecko": {
       "id": "browserguard@spectranetworkmanager.com",
-      "strict_min_version": "113.0"
+      "strict_min_version": "109.0"
     }
   }
 }

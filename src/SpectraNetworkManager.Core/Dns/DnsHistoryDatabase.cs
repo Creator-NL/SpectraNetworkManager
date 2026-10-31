@@ -69,6 +69,7 @@ public sealed class DnsHistoryDatabase : IDisposable
 
             CREATE INDEX IF NOT EXISTS idx_queries_ts ON queries(ts);
             CREATE INDEX IF NOT EXISTS idx_queries_domain ON queries(domain);
+            CREATE INDEX IF NOT EXISTS idx_queries_client ON queries(client);
         ";
         cmd.ExecuteNonQuery();
     }
@@ -242,6 +243,42 @@ public sealed class DnsHistoryDatabase : IDisposable
         cmd.CommandText = @"
             SELECT ts, client, domain, qtype, outcome, detail, ms
             FROM queries
+            ORDER BY id DESC
+            LIMIT @limit;
+        ";
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var ts = DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt)
+                ? dt : DateTimeOffset.Now;
+            string client = reader.GetString(1);
+            string domain = reader.GetString(2);
+            string type = reader.GetString(3);
+            string outcomeStr = reader.GetString(4);
+            string? detail = reader.IsDBNull(5) ? null : reader.GetString(5);
+            int ms = reader.GetInt32(6);
+
+            var outcome = Enum.TryParse<DnsOutcome>(outcomeStr, out var o) ? o : DnsOutcome.Forwarded;
+            list.Add(new DnsLogEntry(ts, client, domain, type, outcome, detail, ms));
+        }
+
+        return list;
+    }
+
+    public async Task<IReadOnlyList<DnsLogEntry>> GetRecentLanEntriesAsync(int limit = 1000, CancellationToken ct = default)
+    {
+        var list = new List<DnsLogEntry>();
+
+        await using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT ts, client, domain, qtype, outcome, detail, ms
+            FROM queries
+            WHERE client NOT LIKE '127.%' AND client != '::1' AND client != 'localhost'
             ORDER BY id DESC
             LIMIT @limit;
         ";

@@ -14,6 +14,30 @@ public sealed class DnsServer : IDisposable
     private const string FirefoxCanary = "use-application-dns.net";
     private const uint BlockedTtl = 30;
 
+    private static readonly HashSet<string> DohCanaryDomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "use-application-dns.net",
+        "_dns.resolver.arpa",
+        "mask.icloud.com",
+        "mask-h2.icloud.com"
+    };
+
+    private static readonly HashSet<string> LanDohBootstrapDomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dns.google",
+        "dns.google.com",
+        "8888.google",
+        "dns64.dns.google",
+        "cloudflare-dns.com",
+        "one.one.one.one",
+        "1dot1dot1dot1.cloudflare-dns.com",
+        "mozilla.cloudflare-dns.com",
+        "dns.quad9.net",
+        "doh.opendns.com",
+        "dns.adguard-dns.com",
+        "dns.nextdns.io"
+    };
+
     private readonly DnsSettings _settings;
     private readonly Func<DomainFilter> _filter;
     private readonly IUpstreamResolver _upstream;
@@ -30,6 +54,8 @@ public sealed class DnsServer : IDisposable
     private CancellationTokenSource? _cts;
     private UdpClient? _udp;
     private TcpListener? _tcp;
+    private UdpClient? _udpV6;
+    private TcpListener? _tcpV6;
 
     public DnsServer(
         DnsSettings settings,
@@ -107,6 +133,39 @@ public sealed class DnsServer : IDisposable
         var ct = _cts.Token;
         _ = Task.Run(() => UdpLoopAsync(udp, ct));
         _ = Task.Run(() => TcpLoopAsync(tcp, ct));
+
+        // When listening on 0.0.0.0 (LAN mode), also bind IPv6 [::] on the same port so dual-stack phones/TVs are captured
+        if (address.Equals(IPAddress.Any) && Socket.OSSupportsIPv6)
+        {
+            try
+            {
+                var v6Endpoint = new IPEndPoint(IPAddress.IPv6Any, LocalEndPoint.Port);
+                var udpV6 = new UdpClient(AddressFamily.InterNetworkV6);
+                udpV6.Client.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, true);
+                udpV6.Client.Bind(v6Endpoint);
+                if (OperatingSystem.IsWindows())
+                {
+                    try { udpV6.Client.IOControl((IOControlCode)(-1744830452), new byte[] { 0 }, null); }
+                    catch (Exception) { }
+                }
+
+                var tcpV6 = new TcpListener(IPAddress.IPv6Any, LocalEndPoint.Port);
+                tcpV6.Server.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, true);
+                tcpV6.Start();
+
+                _udpV6 = udpV6;
+                _tcpV6 = tcpV6;
+                _ = Task.Run(() => UdpLoopAsync(udpV6, ct));
+                _ = Task.Run(() => TcpLoopAsync(tcpV6, ct));
+            }
+            catch
+            {
+                try { _udpV6?.Dispose(); } catch { }
+                try { _tcpV6?.Stop(); } catch { }
+                _udpV6 = null;
+                _tcpV6 = null;
+            }
+        }
     }
 
     public void Stop()
@@ -118,8 +177,12 @@ public sealed class DnsServer : IDisposable
         cts.Cancel();
         try { _udp?.Dispose(); } catch (Exception) { }
         try { _tcp?.Stop(); } catch (Exception) { }
+        try { _udpV6?.Dispose(); } catch (Exception) { }
+        try { _tcpV6?.Stop(); } catch (Exception) { }
         _udp = null;
         _tcp = null;
+        _udpV6 = null;
+        _tcpV6 = null;
         LocalEndPoint = null;
         cts.Dispose();
     }
@@ -241,7 +304,10 @@ public sealed class DnsServer : IDisposable
         if (!DnsQuery.TryParse(raw, out var q, out _) || q is null)
             return DnsWire.BuildFormatError(raw);
 
-        string clientText = client.Address.IsIPv4MappedToIPv6 ? client.Address.MapToIPv4().ToString() : client.Address.ToString();
+        var clientAddr = client.Address.IsIPv4MappedToIPv6 ? client.Address.MapToIPv4() : client.Address;
+        if (clientAddr.AddressFamily == AddressFamily.InterNetworkV6 && clientAddr.ScopeId != 0)
+            clientAddr = new IPAddress(clientAddr.GetAddressBytes());
+        string clientText = clientAddr.ToString();
         string domain = q.Question.Name;
         string type = TypeName(q.Question.Type);
 
@@ -292,11 +358,20 @@ public sealed class DnsServer : IDisposable
             }
         }
 
-        // Firefox asks this name to find out whether it may switch to its own DNS-over-HTTPS (which would bypass us).
-        if (_settings.BlockBrowserDoh && domain == FirefoxCanary)
+        // Browsers & mobile OSs ask canary / DDR names to check whether they may switch to DNS-over-HTTPS / DoT (which would bypass us).
+        if (_settings.BlockBrowserDoh)
         {
-            Log(DnsOutcome.Blocked, "browser DoH check (tells Firefox to keep using this DNS server)");
-            return Fit(DnsWire.BuildError(q, DnsRcode.NxDomain), q, tcp);
+            if (DohCanaryDomains.Contains(domain))
+            {
+                Log(DnsOutcome.Blocked, "browser DoH/DDR canary check (keeps client using this DNS server)");
+                return Fit(DnsWire.BuildError(q, DnsRcode.NxDomain), q, tcp);
+            }
+
+            if (!IPAddress.IsLoopback(clientAddr) && LanDohBootstrapDomains.Contains(domain))
+            {
+                Log(DnsOutcome.Blocked, "LAN DoH/DoT bypass prevented (forces phone/TV to use port 53)");
+                return Fit(DnsWire.BuildError(q, DnsRcode.NxDomain), q, tcp);
+            }
         }
 
         bool paused = _isBlockingPaused?.Invoke() == true;

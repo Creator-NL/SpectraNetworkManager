@@ -1,4 +1,6 @@
-﻿using System.Net;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 
 namespace SpectraNetworkManager.Sinkhole;
 
@@ -37,6 +39,7 @@ public sealed class ClientAccessPolicy
         {
             _ipv4Networks.AddRange(DefaultPrivateIpv4Networks);
             _ipv6Networks.AddRange(DefaultPrivateIpv6Networks);
+            AddLocalInterfaceIpv6Prefixes();
         }
 
         if (customAllowedRanges is not null)
@@ -79,16 +82,52 @@ public sealed class ClientAccessPolicy
             return false;
         }
 
-        if (clientAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        if (clientAddress.AddressFamily == AddressFamily.InterNetworkV6)
         {
+            var cleanV6 = clientAddress.ScopeId != 0
+                ? new IPAddress(clientAddress.GetAddressBytes())
+                : clientAddress;
+
             for (int i = 0; i < _ipv6Networks.Count; i++)
             {
-                if (_ipv6Networks[i].Contains(clientAddress))
+                if (_ipv6Networks[i].Contains(cleanV6))
                     return true;
             }
             return false;
         }
 
         return false;
+    }
+
+    private void AddLocalInterfaceIpv6Prefixes()
+    {
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                    continue;
+
+                foreach (var uni in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (uni.Address.AddressFamily == AddressFamily.InterNetworkV6 &&
+                        !uni.Address.IsIPv6LinkLocal &&
+                        !IPAddress.IsLoopback(uni.Address))
+                    {
+                        byte[] bytes = uni.Address.GetAddressBytes();
+                        // Zero out the lower 64 bits to form the local /64 LAN prefix
+                        for (int i = 8; i < 16; i++) bytes[i] = 0;
+                        var prefixAddr = new IPAddress(bytes);
+                        var net = new IPNetwork(prefixAddr, 64);
+                        if (!_ipv6Networks.Contains(net))
+                            _ipv6Networks.Add(net);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort local interface prefix discovery
+        }
     }
 }

@@ -435,6 +435,10 @@ public sealed class DnsService : IDisposable
     public Task<IReadOnlyList<DnsLogEntry>> LoadRecentHistoryAsync(int limit = 500, CancellationToken ct = default) =>
         _historyDb.GetRecentEntriesAsync(limit, ct);
 
+    /// <summary>Loads recent historical LAN (non-loopback) queries from the persistent SQLite database.</summary>
+    public Task<IReadOnlyList<DnsLogEntry>> LoadRecentLanHistoryAsync(int limit = 1000, CancellationToken ct = default) =>
+        _historyDb.GetRecentLanEntriesAsync(limit, ct);
+
     /// <summary>Exports query history to CSV.</summary>
     public Task ExportHistoryCsvAsync(TextWriter writer, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default) =>
         _historyDb.ExportCsvAsync(writer, from, to, ct);

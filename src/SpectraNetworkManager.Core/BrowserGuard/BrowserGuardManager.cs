@@ -126,6 +126,72 @@ public sealed class BrowserGuardManager
             },
             new()
             {
+                Id = "yt-pagead",
+                Title = "Block YouTube PageAd & Pre-Roll Requests",
+                Pattern = "*://*.youtube.com/pagead/*",
+                Description = "Blocks YouTube pre-roll, banner, and masthead ad payloads.",
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Id = "yt-midroll",
+                Title = "Block YouTube Mid-Roll Ad Fetchers",
+                Pattern = "*://*.youtube.com/get_midroll_*",
+                Description = "Blocks YouTube mid-roll ad break scheduling and injection.",
+                Action = GuardAction.Block,
+                ResourceType = "xmlhttprequest",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Id = "yt-ptracking",
+                Title = "Block YouTube Ad Playback Tracking",
+                Pattern = "*://*.youtube.com/ptracking*",
+                Description = "Blocks YouTube ad impression and ptracking telemetry.",
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Id = "yt-doubleclick",
+                Title = "Block Google DoubleClick Video Ad Server",
+                Pattern = "*://*.doubleclick.net/*",
+                Description = "Blocks DoubleClick pre-roll and embedded YouTube video ad serving.",
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Id = "yt-googlesyndication",
+                Title = "Block Google Syndication Companion Ads",
+                Pattern = "*://*.googlesyndication.com/*",
+                Description = "Blocks YouTube sidebar companion ads and overlay banners.",
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
+                Id = "yt-googleadservices",
+                Title = "Block Google AdServices Scripts",
+                Pattern = "*://*.googleadservices.com/*",
+                Description = "Blocks Google AdServices conversion and video ad scripts.",
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = true
+            },
+            new()
+            {
                 Id = "tiktok-feed",
                 Title = "Block TikTok Video Feeds",
                 Pattern = "*://*.tiktokcdn.com/*video*",
@@ -189,6 +255,24 @@ public sealed class BrowserGuardManager
             r.Enabled = enabled;
             Save();
             return true;
+        }
+    }
+
+    public void ToggleYouTubeAdRules(bool enabled)
+    {
+        lock (_lock)
+        {
+            Config.BlockYouTubeAds = enabled;
+            var ytAdIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "yt-ads", "yt-pagead", "yt-midroll", "yt-ptracking",
+                "yt-doubleclick", "yt-googlesyndication", "yt-googleadservices"
+            };
+            foreach (var r in Config.CustomRules.Where(x => ytAdIds.Contains(x.Id)))
+            {
+                r.Enabled = enabled;
+            }
+            Save();
         }
     }
 

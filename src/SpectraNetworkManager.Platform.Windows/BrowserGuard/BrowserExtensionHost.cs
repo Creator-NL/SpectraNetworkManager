@@ -20,6 +20,7 @@ public static class BrowserExtensionHost
     private static readonly JsonSerializerOptions IndentedJsonOpts = new() { WriteIndented = true };
 
     public const string HostName = "com.spectranetworkmanager.browser_host";
+    public const string ChromeExtensionId = "kndcdcampgmfjgniielafdiblkfhdklk";
     public const string FirefoxExtensionId = "browserguard@spectranetworkmanager.com";
 
     /// <summary>
@@ -34,7 +35,7 @@ public static class BrowserExtensionHost
             string chromeManifestPath = Path.Combine(hostDir, $"{HostName}.chrome.json");
             string firefoxManifestPath = Path.Combine(hostDir, $"{HostName}.firefox.json");
 
-            // 1. Chrome / Edge manifest (uses allowed_origins)
+            // 1. Chrome / Edge manifest (uses exact deterministic extension ID derived from manifest.json 'key')
             var chromeManifest = new
             {
                 name = HostName,
@@ -43,7 +44,7 @@ public static class BrowserExtensionHost
                 type = "stdio",
                 allowed_origins = new[]
                 {
-                    "chrome-extension://*/*" // Allows all unpacked and published extension IDs
+                    $"chrome-extension://{ChromeExtensionId}/"
                 }
             };
             File.WriteAllText(chromeManifestPath, JsonSerializer.Serialize(chromeManifest, IndentedJsonOpts));
@@ -195,6 +196,9 @@ public static class BrowserExtensionHost
                     {
                         type = "rules_update",
                         enabled = guardManager.Config.ExtensionEnabled,
+                        blockYouTubeAds = guardManager.Config.BlockYouTubeAds,
+                        blockYouTubeAnnotations = guardManager.Config.BlockYouTubeAnnotations,
+                        blockYouTubeShorts = guardManager.Config.BlockYouTubeShorts,
                         placeholder = guardManager.Config.ShowInPagePlaceholder,
                         rulesJson = guardManager.ExportMv3DynamicRulesJson()
                     });

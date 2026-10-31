@@ -1959,12 +1959,38 @@
                         <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="8">
                             <StackPanel>
                                 <DockPanel LastChildFill="False" Margin="0,0,0,4">
-                                    <TextBlock Text="⚡ RECENT ACTIVITY FOR THIS DEVICE (Live Stream)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
-                                    <TextBlock x:Name="TvInspectorRecentCountText" DockPanel.Dock="Right" Text="0 queries" FontSize="10" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock Text="⚡ RECENT ACTIVITY FOR THIS DEVICE (Live Stream)" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TvInspectorRecentCountText" DockPanel.Dock="Right" Text="0 queries" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                                    <CheckBox x:Name="TvInspectorHidePingsCheck" DockPanel.Dock="Right" Content="Hide 60s OS Health Pings (www.google.com)"
+                                              IsChecked="True" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center"
+                                              Checked="OnTvInspectorFilterChanged" Unchecked="OnTvInspectorFilterChanged"
+                                              ToolTip="Hides repetitive 60-second Android/OS connectivity checks (www.google.com) when real website queries are present."/>
                                 </DockPanel>
-                                <DataGrid x:Name="TvInspectorRecentGrid" ItemsSource="{Binding TvDeviceRecentQueries}" MaxHeight="130"
+
+                                <Border x:Name="TvInspectorDohWarningBorder" Visibility="Collapsed" Background="#2E1800" BorderBrush="{StaticResource Amber}" BorderThickness="1" CornerRadius="3" Padding="8,5" Margin="0,0,0,6">
+                                    <DockPanel LastChildFill="True">
+                                        <Button DockPanel.Dock="Right" Content="📱 Fix Steps..." Click="OnOpenPhoneSetupGuide" Padding="8,2" FontSize="10" Margin="8,0,0,0" Foreground="{StaticResource Cyan}"/>
+                                        <TextBlock x:Name="TvInspectorDohWarningText"
+                                                   Text="⚠️ Only 60-second OS health pings (www.google.com) received so far. If you are browsing on this phone and don't see domains below, disable 'Use secure DNS' in your phone browser (Chrome/Brave Settings → Privacy &amp; security → Use secure DNS) and set Android 'Private DNS' to OFF."
+                                                   Foreground="{StaticResource Amber}" FontSize="10.5" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Border>
+
+                                <DataGrid x:Name="TvInspectorRecentGrid" ItemsSource="{Binding TvDeviceRecentQueries}" MaxHeight="180"
                                           AutoGenerateColumns="False" SelectionMode="Single" IsReadOnly="True"
                                           HeadersVisibility="Column" GridLinesVisibility="Horizontal">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource Magenta}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource Amber}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="TIME" Binding="{Binding Time}" Width="70"/>
                                         <DataGridTextColumn Header="DOMAIN / REQUEST" Binding="{Binding Domain}" Width="250" Foreground="{StaticResource Cyan}"/>
@@ -2197,9 +2223,12 @@
                     <CheckBox x:Name="GuardBlockStreamsCheck" Content="🚫 Block Video Streams (googlevideo)"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks raw video playback delivery segments (stops videos from loading)"/>
-                    <CheckBox x:Name="GuardBlockAdsCheck" Content="🚫 Block In-Player Ad Beacons"
+                    <CheckBox x:Name="GuardBlockAdsCheck" Content="🛡️ Block YouTube Ads (Pre-Roll, Mid-Roll &amp; Banners)"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
-                              ToolTip="Blocks in-player YouTube ad statistics and telemetry"/>
+                              ToolTip="Blocks and auto-skips YouTube pre-roll/mid-roll video ads, banner overlays, and feed ads (works on youtube.com and embedded videos)"/>
+                    <CheckBox x:Name="GuardBlockAnnotationsCheck" Content="🚫 Block YouTube Annotations &amp; Promo Cards"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="Hides in-video YouTube annotations, channel branding watermarks, and promo cards"/>
                     <CheckBox x:Name="GuardBlockTikTokCheck" Content="🚫 Block TikTok Video Feeds"
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks TikTok short-form web video playback"/>

@@ -1,117 +1,189 @@
-// Spectra Browser Guard - Manifest V3 Background Service Worker
+// Spectra Browser Guard & YouTube AdShield - Manifest V3 Service Worker
+// Synchronizes declarativeNetRequest rules and YouTube AdShield settings with SpectraNetworkManager via Native Messaging,
+// while providing built-in standalone YouTube ad-blocking rules immediately on startup.
+
 const HOST_NAME = "com.spectranetworkmanager.browser_host";
 let nativePort = null;
-let isConnected = false;
-let currentRules = [];
+let syncedWithNativeHost = false;
 
-function connectToHost() {
+const DEFAULT_STANDALONE_RULES = [
+  {
+    id: 1,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.youtube.com/api/stats/ads*",
+      resourceTypes: ["xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    id: 2,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.youtube.com/pagead/*",
+      resourceTypes: ["xmlhttprequest", "script", "image", "sub_frame", "other"]
+    }
+  },
+  {
+    id: 3,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.youtube.com/get_midroll_*",
+      resourceTypes: ["xmlhttprequest", "other"]
+    }
+  },
+  {
+    id: 4,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.youtube.com/ptracking*",
+      resourceTypes: ["xmlhttprequest", "image", "ping", "other"]
+    }
+  },
+  {
+    id: 5,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.doubleclick.net/*",
+      initiatorDomains: ["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com"],
+      resourceTypes: ["xmlhttprequest", "script", "image", "sub_frame", "media", "other"]
+    }
+  },
+  {
+    id: 6,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.googlesyndication.com/*",
+      initiatorDomains: ["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com"],
+      resourceTypes: ["xmlhttprequest", "script", "image", "sub_frame", "other"]
+    }
+  },
+  {
+    id: 7,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*://*.googleadservices.com/*",
+      initiatorDomains: ["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com"],
+      resourceTypes: ["xmlhttprequest", "script", "image", "sub_frame", "other"]
+    }
+  }
+];
+
+async function ensureDefaultSettingsAndRules() {
+  try {
+    const stored = await chrome.storage.local.get([
+      "spectraInitialized",
+      "blockYouTubeAds",
+      "blockYouTubeAnnotations",
+      "blockYouTubeShorts",
+      "showPlaceholder"
+    ]);
+
+    if (!stored.spectraInitialized) {
+      await chrome.storage.local.set({
+        spectraInitialized: true,
+        blockYouTubeAds: stored.blockYouTubeAds !== undefined ? stored.blockYouTubeAds : true,
+        blockYouTubeAnnotations: stored.blockYouTubeAnnotations !== undefined ? stored.blockYouTubeAnnotations : true,
+        blockYouTubeShorts: stored.blockYouTubeShorts !== undefined ? stored.blockYouTubeShorts : false,
+        showPlaceholder: stored.showPlaceholder !== undefined ? stored.showPlaceholder : true
+      });
+    }
+
+    if (!syncedWithNativeHost) {
+      const existing = await chrome.declarativeNetRequest.getDynamicRules();
+      if (existing.length === 0) {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: [],
+          addRules: DEFAULT_STANDALONE_RULES
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[Spectra Browser Guard] Initialization fallback notice:", err);
+  }
+}
+
+function connectNativeHost() {
   try {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
-    
+
     nativePort.onMessage.addListener((msg) => {
-      handleHostMessage(msg);
+      if (msg && msg.type === "rules_update") {
+        syncedWithNativeHost = true;
+        applyDynamicRules(msg);
+      }
     });
 
     nativePort.onDisconnect.addListener(() => {
-      isConnected = false;
-      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "Disconnected";
-      console.log("Spectra Host disconnected:", err);
       nativePort = null;
-      // Retry connection after 5 seconds
-      setTimeout(connectToHost, 5000);
     });
 
-    isConnected = true;
-    console.log("Connected to Spectra Browser Guard Host.");
-    // Request initial rules
     nativePort.postMessage({ type: "get_rules" });
   } catch (e) {
-    isConnected = false;
-    nativePort = null;
-    setTimeout(connectToHost, 5000);
+    console.warn("[Spectra Browser Guard] Running in standalone mode (Native Host not connected):", e);
   }
 }
 
-async function handleHostMessage(msg) {
-  if (!msg) return;
-  
-  if (msg.type === "rules_update") {
-    try {
-      const dynamicRules = JSON.parse(msg.rulesJson || "[]");
-      await applyDynamicRules(dynamicRules);
-      chrome.storage.local.set({
-        isConnected: true,
-        rulesCount: dynamicRules.length,
-        showPlaceholder: msg.placeholder !== false,
-        lastUpdated: Date.now()
-      });
-    } catch (e) {
-      console.error("Failed to parse/apply dynamic rules:", e);
-    }
-  }
-}
-
-async function applyDynamicRules(newRules) {
+async function applyDynamicRules(payload) {
   try {
     const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
-    const removeRuleIds = existingRules.map(r => r.id);
+    const removeIds = existingRules.map(r => r.id);
+
+    let addRules = [];
+    if (payload.enabled && payload.rulesJson) {
+      try {
+        addRules = JSON.parse(payload.rulesJson);
+      } catch (err) {
+        console.error("[Spectra Browser Guard] Invalid rulesJson:", err);
+      }
+    }
 
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: removeRuleIds,
-      addRules: newRules
+      removeRuleIds: removeIds,
+      addRules: addRules
     });
 
-    currentRules = newRules;
-    console.log(`Applied ${newRules.length} dynamic blocking rules.`);
+    await chrome.storage.local.set({
+      spectraInitialized: true,
+      showPlaceholder: payload.placeholder !== false,
+      blockYouTubeAds: payload.blockYouTubeAds !== false,
+      blockYouTubeAnnotations: payload.blockYouTubeAnnotations !== false,
+      blockYouTubeShorts: payload.blockYouTubeShorts === true,
+      activeRulesCount: addRules.length
+    });
   } catch (err) {
-    console.error("Error updating declarativeNetRequest rules:", err);
+    console.error("[Spectra Browser Guard] Failed to update dynamic rules:", err);
   }
 }
 
-// Listen for messages from popup or content scripts
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "get_status") {
-    sendResponse({
-      connected: isConnected,
-      rulesCount: currentRules.length
-    });
-    return true;
-  }
-  
-  if (message.type === "toggle_rule") {
-    if (nativePort && isConnected) {
-      nativePort.postMessage(message);
-    }
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (message.type === "allow_once") {
-    // Temporary allow rule for 10 minutes
-    const tempRule = {
-      id: 999000 + Math.floor(Math.random() * 999),
-      priority: 100,
-      action: { type: "allow" },
-      condition: {
-        urlFilter: message.urlPattern,
-        resourceTypes: ["media", "main_frame", "sub_frame"]
-      }
-    };
-
-    chrome.declarativeNetRequest.updateDynamicRules({
-      addRules: [tempRule]
-    }).then(() => {
-      sendResponse({ allowed: true });
-      // Remove after 10 minutes
-      setTimeout(() => {
-        chrome.declarativeNetRequest.updateDynamicRules({
-          removeRuleIds: [tempRule.id]
-        });
-      }, 10 * 60 * 1000);
-    });
-    return true;
-  }
+chrome.runtime.onInstalled.addListener(() => {
+  ensureDefaultSettingsAndRules();
+  connectNativeHost();
 });
 
-// Initial startup
-connectToHost();
+chrome.runtime.onStartup.addListener(() => {
+  ensureDefaultSettingsAndRules();
+  connectNativeHost();
+});
+
+// Periodic sync every 30 seconds
+setInterval(() => {
+  if (!nativePort) {
+    connectNativeHost();
+  } else {
+    try {
+      nativePort.postMessage({ type: "get_rules" });
+    } catch {
+      nativePort = null;
+    }
+  }
+}, 30000);
+
+ensureDefaultSettingsAndRules();
+connectNativeHost();

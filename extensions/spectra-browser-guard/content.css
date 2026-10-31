@@ -1,83 +1,107 @@
-/* Spectra Browser Guard In-Page Dark Cybernetic Overlay */
+/* Spectra Browser Guard & YouTube AdShield - Cosmetic & Overlay Styles */
+
+/* 1. YouTube In-Page Feed, Banner, Companion & Masthead Ad Hiding */
+html:not([data-spectra-yt-ads="off"]) ytd-ad-slot-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-in-feed-ad-layout-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-banner-promo-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-statement-banner-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-promoted-sparkles-web-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-promoted-sparkles-text-search-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-promoted-video-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-compact-promoted-video-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-video-masthead-ad-v3-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-primetime-promo-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-companion-slot-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-action-companion-ad-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-image-companion-ad-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-DisplayAdRenderer,
+html:not([data-spectra-yt-ads="off"]) ytd-display-ad-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-search-pyv-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd- mealbar-promo-renderer,
+html:not([data-spectra-yt-ads="off"]) ytm-promoted-sparkles-web-renderer,
+html:not([data-spectra-yt-ads="off"]) ytm-companion-ad-renderer,
+html:not([data-spectra-yt-ads="off"]) #masthead-ad,
+html:not([data-spectra-yt-ads="off"]) #player-ads,
+html:not([data-spectra-yt-ads="off"]) #offer-module,
+html:not([data-spectra-yt-ads="off"]) .ytp-ad-overlay-container,
+html:not([data-spectra-yt-ads="off"]) .ytp-ad-text-overlay,
+html:not([data-spectra-yt-ads="off"]) .ytp-ad-image-overlay,
+html:not([data-spectra-yt-ads="off"]) .ytp-ad-Message-container,
+html:not([data-spectra-yt-ads="off"]) .ytp-ad-action-interstitial,
+html:not([data-spectra-yt-ads="off"]) .ytd-merch-shelf-renderer,
+html:not([data-spectra-yt-ads="off"]) ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"] {
+    display: none !important;
+}
+
+/* Hide black ad screen flash while fast-forwarding pre-roll/mid-roll ads */
+html:not([data-spectra-yt-ads="off"]) .html5-video-player.ad-showing video,
+html:not([data-spectra-yt-ads="off"]) .html5-video-player.ad-interrupting video {
+    opacity: 0 !important;
+}
+
+/* 2. YouTube Video Annotations, Watermark & Promo Cards Hiding */
+html:not([data-spectra-yt-annotations="off"]) .iv-branding,
+html:not([data-spectra-yt-annotations="off"]) .annotation.iv-promo,
+html:not([data-spectra-yt-annotations="off"]) .ytp-paid-content-overlay,
+html:not([data-spectra-yt-annotations="off"]) .ytp-featured-product {
+    display: none !important;
+}
+
+/* 3. Blocked Video / Shorts Cybernetic Overlay */
 .spectra-media-blocked-overlay {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(11, 14, 20, 0.95);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 99999;
-  border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0D1117 0%, #151C28 100%);
+    border: 1px solid #00E5FF;
+    border-radius: 8px;
+    color: #E6EDF3;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    padding: 24px;
+    min-height: 220px;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    margin: 12px 0;
+    z-index: 9999;
 }
 
-.spectra-full-blocked-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: #0B0E14;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 2147483647;
+.spectra-overlay-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
 }
 
-.spectra-card {
-  background: #151B26;
-  border: 1px solid #00E5FF;
-  box-shadow: 0 4px 24px rgba(0, 229, 255, 0.2);
-  border-radius: 8px;
-  padding: 24px;
-  text-align: center;
-  max-width: 420px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #DCE3F0;
+.spectra-overlay-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #00E5FF;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
 }
 
-.spectra-card-large {
-  max-width: 500px;
-  padding: 32px;
+.spectra-overlay-desc {
+    font-size: 12px;
+    color: #8B949E;
+    max-width: 420px;
+    margin-bottom: 16px;
+    line-height: 1.4;
 }
 
-.spectra-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: #00E5FF;
-  letter-spacing: 1px;
-  margin-bottom: 8px;
+.spectra-allow-once-btn {
+    background: #1A2140;
+    border: 1px solid #FF2BD6;
+    color: #FF2BD6;
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
 
-.spectra-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #FF2BD6;
-  margin-bottom: 8px;
-}
-
-.spectra-desc {
-  font-size: 13px;
-  color: #7E8BA3;
-  line-height: 1.5;
-}
-
-.spectra-btn {
-  display: inline-block;
-  padding: 10px 18px;
-  border-radius: 6px;
-  background: #00E5FF;
-  color: #0B0E14;
-  font-weight: 700;
-  font-size: 13px;
-  border: none;
-  cursor: pointer;
-  text-decoration: none;
-  margin: 0 4px;
-  transition: opacity 0.2s;
-}
-
-.spectra-btn:hover {
-  opacity: 0.9;
-}
-
-.spectra-btn-sec {
-  background: #222C3D;
-  color: #DCE3F0;
+.spectra-allow-once-btn:hover {
+    background: #FF2BD6;
+    color: #0D1117;
 }
