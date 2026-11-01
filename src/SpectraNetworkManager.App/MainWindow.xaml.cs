@@ -3609,6 +3609,28 @@ public partial class MainWindow : Window
 
     private async void OnDnsContextMenuBlock(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: false);
 
+    private async void OnDnsContextMenuBlockRoot(object sender, RoutedEventArgs e)
+    {
+        var row = (DnsGrid.SelectedItem as DnsRow) ?? _inspectedDnsRow;
+        if (row is null)
+        {
+            Info("Select a line in the query log first.");
+            return;
+        }
+        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: true);
+    }
+
+    private async void OnDnsContextMenuInvestigateAi(object sender, RoutedEventArgs e)
+    {
+        var row = (DnsGrid.SelectedItem as DnsRow) ?? _inspectedDnsRow;
+        if (row is null)
+        {
+            Info("Select a domain row first.");
+            return;
+        }
+        await RunDomainAiInvestigationAsync(row);
+    }
+
     private async void OnDnsContextMenuAllow(object sender, RoutedEventArgs e) => await ChangeDnsRuleAsync(allow: true);
 
     private void OnDnsContextMenuWhois(object sender, RoutedEventArgs e)
@@ -7825,20 +7847,293 @@ public partial class MainWindow : Window
             }
         }
 
-        // 3. Per-device recent activity list
-        TvDeviceRecentQueries.Clear();
+        // 3. Per-device recent activity list (preserve selection across live 1s refreshes)
+        var prevSelected = TvInspectorRecentGrid.SelectedItem as DnsRow;
+        string? prevDomain = prevSelected?.Domain;
+        string? prevTime = prevSelected?.Time;
+
         bool hidePings = TvInspectorHidePingsCheck?.IsChecked == true && hasRealBrowsing;
         var filteredQueries = hidePings
             ? matchingQueries.Where(q => !IsOsHealthPing(q.Domain)).Take(200).ToList()
             : matchingQueries.Take(200).ToList();
 
-        foreach (var q in filteredQueries)
+        bool listChanged = TvDeviceRecentQueries.Count != filteredQueries.Count
+            || (filteredQueries.Count > 0 && !ReferenceEquals(TvDeviceRecentQueries[0], filteredQueries[0]));
+
+        if (listChanged)
         {
-            TvDeviceRecentQueries.Add(q);
+            TvDeviceRecentQueries.Clear();
+            foreach (var q in filteredQueries)
+            {
+                TvDeviceRecentQueries.Add(q);
+            }
+
+            if (prevSelected != null)
+            {
+                var match = TvDeviceRecentQueries.FirstOrDefault(q =>
+                    ReferenceEquals(q, prevSelected) ||
+                    (string.Equals(q.Domain, prevDomain, StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(q.Time, prevTime, StringComparison.Ordinal)));
+                if (match != null)
+                {
+                    TvInspectorRecentGrid.SelectedItem = match;
+                }
+            }
         }
+
         TvInspectorRecentCountText.Text = hidePings
             ? $"{filteredQueries.Count:N0} website queries ({healthPingCount} OS pings hidden)"
             : $"{filteredQueries.Count:N0} queries";
+
+        UpdateTvInspectorSelectedQueryUi(TvInspectorRecentGrid.SelectedItem as DnsRow);
+    }
+
+    private void OnTvInspectorRecentSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        UpdateTvInspectorSelectedQueryUi(TvInspectorRecentGrid.SelectedItem as DnsRow);
+    }
+
+    private static string NormalizeDomainFromQueryRow(string? rawDomain)
+    {
+        if (string.IsNullOrWhiteSpace(rawDomain)) return "";
+        string clean = rawDomain.Trim();
+        int colonIdx = clean.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            clean = clean[..colonIdx];
+        }
+        return DomainFilter.Normalize(clean).TrimEnd('.');
+    }
+
+    private void UpdateTvInspectorSelectedQueryUi(DnsRow? row)
+    {
+        if (TvInspectorSelectedDomainInfoText == null) return;
+
+        if (row == null)
+        {
+            TvInspectorSelectedDomainInfoText.Text = "💡 Click or right-click any domain row below to Block Ad Domain, Whitelist, or Investigate with Spectra AI.";
+            TvInspectorSelectedDomainInfoText.Foreground = (Brush)FindResource("Muted");
+            if (TvQueryUndoCustomBtn != null) TvQueryUndoCustomBtn.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
+        var analysis = DomainIntelligence.Analyze(cleanDomain, row.IsBlocked, row.IsFailed);
+        bool isCustomBlock = _sink.IsCustomBlocked(cleanDomain);
+        bool isCustomAllow = _sink.IsCustomAllowed(cleanDomain);
+
+        if (TvQueryUndoCustomBtn != null)
+        {
+            TvQueryUndoCustomBtn.Visibility = (isCustomBlock || isCustomAllow) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (TvQueryBlockRootBtn != null)
+        {
+            TvQueryBlockRootBtn.Content = !string.IsNullOrWhiteSpace(analysis.RootDomain)
+                ? $"🚫 Block Root ({analysis.RootDomain})"
+                : "🚫 Block Root (*.domain)";
+        }
+
+        string customTag = isCustomBlock
+            ? " [CUSTOM BLOCKED]"
+            : isCustomAllow
+                ? " [CUSTOM ALLOWED]"
+                : "";
+
+        TvInspectorSelectedDomainInfoText.Text =
+            $"🎯 {cleanDomain}{customTag}  —  {analysis.ServiceName} ({analysis.CategoryName})  •  {analysis.AdviceTitle}";
+        TvInspectorSelectedDomainInfoText.Foreground = row.IsBlocked || isCustomBlock
+            ? (Brush)FindResource("Magenta")
+            : (Brush)FindResource("Cyan");
+    }
+
+    private DnsRow? GetSelectedTvOrLanQueryRow(object? sender)
+    {
+        if (sender is MenuItem mi && mi.Parent is ContextMenu cm && cm.PlacementTarget is DataGrid dg && dg.SelectedItem is DnsRow cmRow)
+        {
+            return cmRow;
+        }
+        if (TvInspectorRecentGrid?.SelectedItem is DnsRow recentRow)
+        {
+            return recentRow;
+        }
+        if (TvLanFeedGrid?.SelectedItem is DnsRow lanRow)
+        {
+            return lanRow;
+        }
+        Info("Select a domain row in the activity table first.");
+        return null;
+    }
+
+    private async Task BlockOrAllowDomainCoreAsync(DnsRow row, bool allow, bool useRootDomain)
+    {
+        string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
+        if (string.IsNullOrWhiteSpace(cleanDomain)) return;
+
+        string targetDomain = useRootDomain
+            ? DomainIntelligence.GetRootDomain(cleanDomain)
+            : cleanDomain;
+        if (string.IsNullOrWhiteSpace(targetDomain)) targetDomain = cleanDomain;
+
+        try
+        {
+            if (allow)
+            {
+                await _sink.AllowDomainAsync(targetDomain);
+            }
+            else
+            {
+                await _sink.BlockDomainAsync(targetDomain);
+            }
+
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+
+            // Update matching rows in TV & Mobile live stream immediately so visual feedback is instant
+            void UpdateMatchingRows(IList<DnsRow> list)
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var item = list[i];
+                    string itemDom = NormalizeDomainFromQueryRow(item.Domain);
+                    if (itemDom.Equals(targetDomain, StringComparison.OrdinalIgnoreCase) ||
+                        itemDom.EndsWith("." + targetDomain, StringComparison.OrdinalIgnoreCase))
+                    {
+                        list[i] = item with
+                        {
+                            IsBlocked = !allow,
+                            Result = allow ? "ok (allowed)" : "BLOCKED",
+                            Detail = allow ? "custom whitelist rule" : $"custom blocked ({targetDomain})"
+                        };
+                    }
+                }
+            }
+
+            UpdateMatchingRows(TvDeviceRecentQueries);
+            UpdateMatchingRows(TvLanActivityRows);
+            foreach (var kv in _lanQueriesByClient.Values)
+            {
+                UpdateMatchingRows(kv);
+            }
+
+            UpdateTvInspectorSelectedQueryUi(TvInspectorRecentGrid?.SelectedItem as DnsRow ?? row);
+
+            StatusText.Text = allow
+                ? $"🛡️ Whitelisted '{targetDomain}' — now allowed on all devices."
+                : $"🚫 Added '{targetDomain}' to custom blocklist — now blocked across DNS & Smart Proxy!";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not update domain rule", ex);
+        }
+    }
+
+    private async void OnTvQueryBlockClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row == null) return;
+        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: false);
+    }
+
+    private async void OnTvQueryBlockRootClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row == null) return;
+        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: true);
+    }
+
+    private async void OnTvQueryAllowClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row == null) return;
+        await BlockOrAllowDomainCoreAsync(row, allow: true, useRootDomain: false);
+    }
+
+    private async void OnTvQueryRemoveCustomClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row == null) return;
+        string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
+        string rootDomain = DomainIntelligence.GetRootDomain(cleanDomain);
+
+        try
+        {
+            await _sink.RemoveCustomRuleAsync(cleanDomain);
+            if (!string.IsNullOrWhiteSpace(rootDomain) && !string.Equals(rootDomain, cleanDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                await _sink.RemoveCustomRuleAsync(rootDomain);
+            }
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            UpdateTvInspectorSelectedQueryUi(row);
+            StatusText.Text = $"Removed custom rule for '{cleanDomain}'.";
+        }
+        catch (Exception ex)
+        {
+            Error("Could not remove custom rule", ex);
+        }
+    }
+
+    private async void OnTvQueryInvestigateAiClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row == null) return;
+        await RunDomainAiInvestigationAsync(row);
+    }
+
+    private async Task RunDomainAiInvestigationAsync(DnsRow row)
+    {
+        string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
+        if (string.IsNullOrWhiteSpace(cleanDomain)) return;
+
+        AiTab.IsChecked = true;
+        OnViewChanged(AiTab, new RoutedEventArgs());
+
+        AiTargetTitle.Text = $"🌐 {cleanDomain}";
+        AiTargetDisplay.Text = $"Domain: {cleanDomain} (Requested by {row.Client})";
+        AiInvestigateButton.IsEnabled = false;
+        AiRunningIndicator.Visibility = Visibility.Visible;
+        StatusText.Text = $"Spectra AI: Investigating domain '{cleanDomain}'...";
+
+        try
+        {
+            string lang = LocalizationManager.IsDutch ? "Nederlands" : "English";
+            string model = AiModelText.Text.Trim();
+            var report = await _aiCoordinator.InvestigateDomainAsync(
+                cleanDomain, row.Client, row.Type, row.Result, row.Detail, row.IsBlocked, lang, model);
+
+            DisplayAiReport(report);
+            await RefreshAiHistoryAsync();
+            StatusText.Text = $"Spectra AI Domain Analysis Complete: {cleanDomain} — {report.FormatVerdictBadge()} (Risk: {report.RiskScore}/100)";
+        }
+        catch (Exception ex)
+        {
+            Error("Domain AI investigation failed", ex);
+        }
+        finally
+        {
+            AiInvestigateButton.IsEnabled = true;
+            AiRunningIndicator.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnTvQueryWhoisClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row != null) OpenWhoisLookup(NormalizeDomainFromQueryRow(row.Domain));
+    }
+
+    private void OnTvQueryVirusTotalClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row != null) OpenDomainOnlineLookup(NormalizeDomainFromQueryRow(row.Domain));
+    }
+
+    private void OnTvQueryCopyClick(object sender, RoutedEventArgs e)
+    {
+        var row = GetSelectedTvOrLanQueryRow(sender);
+        if (row != null) CopyDomainToClipboard(NormalizeDomainFromQueryRow(row.Domain));
     }
 
     private static string FormatUserAgent(string? ua)
@@ -8558,8 +8853,19 @@ public partial class MainWindow : Window
         _appSettings.Save(_appSettings.Settings with { AiAutoInvestigateUnverified = enabled });
     }
 
-    private void OnAiAllowProgramClick(object sender, RoutedEventArgs e)
+    private async void OnAiAllowProgramClick(object sender, RoutedEventArgs e)
     {
+        if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+        {
+            string dom = _currentAiReport.TargetIdentifier;
+            await _sink.AllowDomainAsync(dom);
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            StatusText.Text = $"🛡️ Whitelisted domain '{dom}' in DNS sinkhole.";
+            return;
+        }
+
         string? path = _currentAiReport?.Evidence?.ExecutablePath ?? _aiSelectedPath;
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -8571,8 +8877,19 @@ public partial class MainWindow : Window
         StatusText.Text = $"Allowed program in firewall rules: {Path.GetFileName(path)}";
     }
 
-    private void OnAiBlockProgramClick(object sender, RoutedEventArgs e)
+    private async void OnAiBlockProgramClick(object sender, RoutedEventArgs e)
     {
+        if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+        {
+            string dom = _currentAiReport.TargetIdentifier;
+            await _sink.BlockDomainAsync(dom);
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            StatusText.Text = $"🚫 Blocked domain '{dom}' in DNS sinkhole & Smart Proxy.";
+            return;
+        }
+
         string? path = _currentAiReport?.Evidence?.ExecutablePath ?? _aiSelectedPath;
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -8599,6 +8916,12 @@ public partial class MainWindow : Window
 
     private void OnAiVirusTotalClick(object sender, RoutedEventArgs e)
     {
+        if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+        {
+            OpenDomainOnlineLookup(_currentAiReport.TargetIdentifier);
+            return;
+        }
         string? sha256 = _currentAiReport?.Evidence?.Sha256;
         if (string.IsNullOrWhiteSpace(sha256) && !string.IsNullOrWhiteSpace(_aiSelectedPath))
         {
