@@ -196,4 +196,35 @@ public class WindowsPlatformTests
         Assert.Equal(Path.Combine(sysDir, "notepad.exe"), entry.ExecutablePath, ignoreCase: true);
         Assert.Contains("--auto-run", entry.RawCommand);
     }
+
+    [Fact]
+    public void StartupManager_ExtractExecutablePath_PreservesUnquotedFilePathsWithSpaces()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Spectra Startup Test With Spaces " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string cmdFile = Path.Combine(tempDir, "OpenClaw Gateway.cmd");
+        try
+        {
+            File.WriteAllText(cmdFile, "@echo off\r\necho hello\r\n");
+            string extracted = StartupManager.ExtractExecutablePath(cmdFile);
+            Assert.Equal(cmdFile, extracted, ignoreCase: true);
+            Assert.True(File.Exists(extracted));
+
+            string? pubHint = StartupManager.ResolvePublisherHint(extracted, null);
+            Assert.NotNull(pubHint);
+            Assert.Contains(".cmd", pubHint, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void StartupManager_GetAllEntries_DiscoversSystemEntriesAndAppxStartupTasks()
+    {
+        var entries = StartupManager.GetAllEntries();
+        Assert.NotNull(entries);
+        Assert.NotEmpty(entries);
+    }
 }

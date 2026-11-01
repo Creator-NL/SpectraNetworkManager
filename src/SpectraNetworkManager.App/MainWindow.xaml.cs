@@ -4244,10 +4244,30 @@ public partial class MainWindow : Window
     private bool StartupFilter(object item)
     {
         var s = (StartupRow)item;
+
+        if (StartupSourceFilterCombo?.SelectedItem is System.Windows.Controls.ComboBoxItem selectedFilter &&
+            selectedFilter.Tag is string filterTag)
+        {
+            bool sourceMatches = filterTag switch
+            {
+                "TaskManager" => s.SourceKind is not StartupSourceKind.ScheduledTask and not StartupSourceKind.WindowsService,
+                "Appx" => s.SourceKind == StartupSourceKind.AppxStartupTask,
+                "RegistryAndFolders" => s.SourceKind is not StartupSourceKind.AppxStartupTask
+                                     and not StartupSourceKind.ScheduledTask
+                                     and not StartupSourceKind.WindowsService,
+                "ScheduledTask" => s.SourceKind == StartupSourceKind.ScheduledTask,
+                "Services" => s.SourceKind == StartupSourceKind.WindowsService,
+                "Missing" => !s.FileExists,
+                _ => true
+            };
+            if (!sourceMatches) return false;
+        }
+
         string q = StartupSearchBox?.Text.Trim() ?? "";
         if (q.Length == 0) return true;
         return s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
             || s.Command.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || s.ExecutablePath.Contains(q, StringComparison.OrdinalIgnoreCase)
             || s.Publisher.Contains(q, StringComparison.OrdinalIgnoreCase)
             || s.Location.Contains(q, StringComparison.OrdinalIgnoreCase)
             || s.Status.Contains(q, StringComparison.OrdinalIgnoreCase)
@@ -4356,7 +4376,9 @@ public partial class MainWindow : Window
             foreach (var entry in entries)
             {
                 SignatureInfo? sig = null;
-                if (!string.IsNullOrWhiteSpace(entry.ExecutablePath) && File.Exists(entry.ExecutablePath))
+                if (!string.IsNullOrWhiteSpace(entry.ExecutablePath) &&
+                    File.Exists(entry.ExecutablePath) &&
+                    (entry.PublisherHint == null || !entry.PublisherHint.StartsWith('✓')))
                 {
                     sig = _signatures.TryGet(entry.ExecutablePath);
                 }
@@ -4372,7 +4394,9 @@ public partial class MainWindow : Window
 
             int enabledCount = StartupItems.Count(s => !s.IsDisabled);
             int disabledCount = StartupItems.Count(s => s.IsDisabled);
-            StatusText.Text = $"Startup Manager: {StartupItems.Count} auto-start item(s) found ({enabledCount} enabled, {disabledCount} disabled).";
+            int appxCount = StartupItems.Count(s => s.SourceKind == StartupSourceKind.AppxStartupTask);
+            int svcCount = StartupItems.Count(s => s.SourceKind == StartupSourceKind.WindowsService);
+            StatusText.Text = $"Startup Manager: {StartupItems.Count} auto-start item(s) found ({enabledCount} enabled, {disabledCount} disabled · {appxCount} Store/MSIX apps · {svcCount} auto-start services).";
         }
         catch (Exception ex)
         {

@@ -500,12 +500,12 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Margin="0,0,0,8" Foreground="{StaticResource Muted}" TextWrapping="Wrap"
-                       Text="Shows every auto-start entry registered in Windows Registry (Run / RunOnce / Policies across 64-bit, 32-bit WOW6432Node, and Current User), Startup folders, and Windows Task Scheduler (Logon / Boot / Background tasks) — including hidden launchers not shown in Windows Settings. 'Turn Off (Disable)' safely disables an entry so you can re-enable it later; 'Remove Permanently' deletes it completely."/>
+                       Text="Shows every auto-start entry across Store / MSIX StartupTasks (ChatGPT/Codex, Claude, Terminal, Spotify, etc.), Windows Registry (Run / RunOnce / Policies across 64-bit, 32-bit WOW6432Node, and Current User), Startup folders, Windows Task Scheduler, and 3rd-Party Auto-Start Services. Syncs 1:1 with Windows Task Manager."/>
             <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="False">
-                <Grid Width="280" Margin="0,0,12,0" VerticalAlignment="Center">
+                <Grid Width="250" Margin="0,0,8,0" VerticalAlignment="Center">
                     <TextBox x:Name="StartupSearchBox" VerticalContentAlignment="Center" TextChanged="OnStartupFilterChanged"
                              ToolTip="Filter startup entries by name, publisher, location, or path"/>
-                    <TextBlock Text="Search startup name, path, publisher, location..." IsHitTestVisible="False"
+                    <TextBlock Text="Search name, publisher, path..." IsHitTestVisible="False"
                                Foreground="{StaticResource Muted}" Margin="9,0,0,0" VerticalAlignment="Center">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -519,6 +519,17 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </Grid>
+                <ComboBox x:Name="StartupSourceFilterCombo" Width="215" Margin="0,0,10,0" VerticalAlignment="Center"
+                          SelectedIndex="0" SelectionChanged="OnStartupFilterChanged"
+                          ToolTip="Filter startup items by source category">
+                    <ComboBoxItem Content="All Startup Sources" Tag="All"/>
+                    <ComboBoxItem Content="Task Manager View (1:1)" Tag="TaskManager"/>
+                    <ComboBoxItem Content="Store / MSIX Apps (StartupTask)" Tag="Appx"/>
+                    <ComboBoxItem Content="Registry &amp; Startup Folders" Tag="RegistryAndFolders"/>
+                    <ComboBoxItem Content="Task Scheduler (Logon / Boot)" Tag="ScheduledTask"/>
+                    <ComboBoxItem Content="Auto-Start Services (3rd-Party)" Tag="Services"/>
+                    <ComboBoxItem Content="Orphaned / Missing Files Only" Tag="Missing"/>
+                </ComboBox>
                 <Button x:Name="DisableStartupButton" Content="⏸ Turn Off (Disable)" Margin="0,0,8,0" Click="OnDisableStartupItem"
                         Foreground="{StaticResource Amber}"
                         ToolTip="Disables the selected auto-start item without deleting it permanently, so you can re-enable it anytime."/>

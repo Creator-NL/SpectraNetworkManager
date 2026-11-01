@@ -21,7 +21,9 @@ public enum StartupSourceKind
     HklmPoliciesRun,
     UserStartupFolder,
     CommonStartupFolder,
-    ScheduledTask
+    ScheduledTask,
+    AppxStartupTask,
+    WindowsService
 }
 
 public sealed record StartupEntry(
@@ -32,7 +34,8 @@ public sealed record StartupEntry(
     string LocationDisplay,
     StartupSourceKind SourceKind,
     bool IsEnabled,
-    bool RequiresAdmin);
+    bool RequiresAdmin,
+    string? PublisherHint = null);
 
 /// <summary>
 /// Discovers and manages Windows auto-start programs across Registry Run/RunOnce/Policies keys
@@ -101,27 +104,40 @@ public static class StartupManager
         ScanStartupFolder(commonStartup, RegistryHive.LocalMachine, ApprovedFolderSubKey,
             StartupSourceKind.CommonStartupFolder, "Startup Folder (All Users)", requiresAdmin: true, entries);
 
-        // 3. Scheduled Tasks (Logon / Boot / Third-party background tasks)
+        // 3. Packaged MSIX / Store App StartupTasks (windows.startupTask, e.g. OpenAI Codex / ChatGPT, Claude, Windows Terminal, Spotify)
+        ScanAppxStartupTasks(entries, vault);
+
+        // 4. Scheduled Tasks (Logon / Boot / Third-party background tasks)
         ScanScheduledTasks(entries);
 
-        // 4. Merge items disabled in Spectra Vault
+        // 5. Third-Party Auto-Start Windows Services (e.g. CodexSandboxService.OpenAI.Codex, VPNs, Updaters)
+        ScanAutoStartServices(entries, vault);
+
+        // 6. Merge items disabled in Spectra Vault
         foreach (var v in vault)
         {
-            if (!entries.ContainsKey(v.Id))
+            if (entries.TryGetValue(v.Id, out var existingEntry))
             {
-                string exe = ExtractExecutablePath(v.RawCommand);
-                string loc = GetLocationDisplay(v.SourceKind);
-                bool reqAdmin = IsAdminSource(v.SourceKind);
-                entries[v.Id] = new StartupEntry(
-                    Id: v.Id,
-                    Name: v.Name,
-                    RawCommand: v.RawCommand,
-                    ExecutablePath: exe,
-                    LocationDisplay: loc,
-                    SourceKind: v.SourceKind,
-                    IsEnabled: false,
-                    RequiresAdmin: reqAdmin);
+                if (existingEntry.SourceKind is StartupSourceKind.AppxStartupTask or StartupSourceKind.WindowsService)
+                {
+                    entries[v.Id] = existingEntry with { IsEnabled = false };
+                }
+                continue;
             }
+
+            string exe = ExtractExecutablePath(v.RawCommand);
+            string loc = GetLocationDisplay(v.SourceKind);
+            bool reqAdmin = IsAdminSource(v.SourceKind);
+            entries[v.Id] = new StartupEntry(
+                Id: v.Id,
+                Name: v.Name,
+                RawCommand: v.RawCommand,
+                ExecutablePath: exe,
+                LocationDisplay: loc,
+                SourceKind: v.SourceKind,
+                IsEnabled: false,
+                RequiresAdmin: reqAdmin,
+                PublisherHint: ResolvePublisherHint(exe, null));
         }
 
         return entries.Values
@@ -170,7 +186,23 @@ public static class StartupManager
                     SaveVault(vault);
                 }
 
-                if (entry.SourceKind == StartupSourceKind.ScheduledTask)
+                if (entry.SourceKind == StartupSourceKind.AppxStartupTask)
+                {
+                    var disabledRes = await DisableEntryCoreAsync(entry);
+                    return (disabledRes.Success,
+                        disabledRes.Success
+                            ? $"Disabled Store / MSIX startup task '{entry.Name}'. (To uninstall the MSIX package completely, use Windows Installed Apps)."
+                            : disabledRes.Message);
+                }
+                else if (entry.SourceKind == StartupSourceKind.WindowsService)
+                {
+                    var disabledRes = await DisableEntryCoreAsync(entry);
+                    return (disabledRes.Success,
+                        disabledRes.Success
+                            ? $"Set Windows Service '{entry.Name}' to Manual start so it no longer starts at boot."
+                            : disabledRes.Message);
+                }
+                else if (entry.SourceKind == StartupSourceKind.ScheduledTask)
                 {
                     string taskPath = GetScheduledTaskPath(entry);
                     bool ok = await RunSchtasksAsync($"/Delete /TN \"{taskPath}\" /F");
@@ -191,6 +223,8 @@ public static class StartupManager
                             if (!ok) return (false, "Administrator privileges were declined or failed to delete the startup file.");
                         }
                     }
+                    var hive = entry.SourceKind == StartupSourceKind.CommonStartupFolder ? RegistryHive.LocalMachine : RegistryHive.CurrentUser;
+                    TryDeleteRegistryValue(hive, ApprovedFolderSubKey, Path.GetFileName(entry.RawCommand));
                     return (true, $"Permanently removed startup item '{entry.Name}'.");
                 }
                 else
@@ -219,6 +253,44 @@ public static class StartupManager
 
     private static async Task<(bool Success, string Message)> DisableEntryCoreAsync(StartupEntry entry)
     {
+        if (entry.SourceKind == StartupSourceKind.AppxStartupTask)
+        {
+            var (pfn, taskId) = GetAppxTaskIds(entry);
+            bool regOk = TrySetAppxStartupTaskState(pfn, taskId, enabled: false);
+            var appxVault = LoadVault();
+            appxVault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
+            if (!regOk)
+            {
+                appxVault.Add(new DisabledVaultItem
+                {
+                    Id = entry.Id,
+                    Name = entry.Name,
+                    RawCommand = entry.RawCommand,
+                    SourceKind = entry.SourceKind
+                });
+            }
+            SaveVault(appxVault);
+            return (true, $"Turned off Store / MSIX startup task '{entry.Name}'.");
+        }
+
+        if (entry.SourceKind == StartupSourceKind.WindowsService)
+        {
+            string svcName = GetServiceName(entry);
+            bool ok = await RunScConfigAsync(svcName, "demand");
+            if (!ok) return (false, $"Administrator permission is required to change service '{entry.Name}' startup mode.");
+            var svcVault = LoadVault();
+            svcVault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
+            svcVault.Add(new DisabledVaultItem
+            {
+                Id = entry.Id,
+                Name = entry.Name,
+                RawCommand = entry.RawCommand,
+                SourceKind = entry.SourceKind
+            });
+            SaveVault(svcVault);
+            return (true, $"Turned off auto-start for Windows Service '{entry.Name}' (set to Manual).");
+        }
+
         if (entry.SourceKind == StartupSourceKind.ScheduledTask)
         {
             string taskPath = GetScheduledTaskPath(entry);
@@ -232,42 +304,58 @@ public static class StartupManager
 
         if (entry.SourceKind is StartupSourceKind.UserStartupFolder or StartupSourceKind.CommonStartupFolder)
         {
-            string sourceFile = entry.RawCommand;
-            string folder = Path.GetDirectoryName(sourceFile) ?? "";
-            string disabledDir = Path.Combine(EngineStoragePaths.BaseDirectory, "disabled-startup-files");
-            Directory.CreateDirectory(disabledDir);
-            string backupFile = Path.Combine(disabledDir, $"{Guid.NewGuid():N}_{Path.GetFileName(sourceFile)}");
+            string fileName = Path.GetFileName(entry.RawCommand);
+            var hive = entry.SourceKind == StartupSourceKind.CommonStartupFolder ? RegistryHive.LocalMachine : RegistryHive.CurrentUser;
 
-            if (File.Exists(sourceFile))
+            // Use Windows' native StartupApproved\StartupFolder flag first so Task Manager and Spectra stay 100% synced
+            if (TrySetStartupApprovedState(hive, ApprovedFolderSubKey, fileName, enabled: false))
             {
-                File.Copy(sourceFile, backupFile, overwrite: true);
-                try
-                {
-                    File.Delete(sourceFile);
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    bool ok = await RunElevatedCmdAsync($"del /f /q \"{sourceFile}\"");
-                    if (!ok) return (false, "Administrator permission required to disable All-Users Startup folder item.");
-                }
+                SaveVault(vault);
+                return (true, $"Turned off auto-start for '{entry.Name}'.");
             }
 
-            vault.Add(new DisabledVaultItem
+            if (entry.RequiresAdmin)
             {
-                Id = entry.Id,
-                Name = entry.Name,
-                RawCommand = entry.RawCommand,
-                SourceKind = entry.SourceKind,
-                DisabledFilePath = backupFile
-            });
-            SaveVault(vault);
-            return (true, $"Turned off auto-start for '{entry.Name}'.");
+                string hexDisabled = BuildStartupApprovedDisabledHex();
+                bool ok = await RunElevatedCmdAsync($"reg add \"HKLM\\{ApprovedFolderSubKey}\" /v \"{fileName}\" /t REG_BINARY /d {hexDisabled} /f");
+                if (ok)
+                {
+                    SaveVault(vault);
+                    return (true, $"Turned off auto-start for '{entry.Name}'.");
+                }
+                return (false, "Administrator permission required to disable All-Users Startup folder item.");
+            }
+
+            return (false, $"Could not update startup state for '{entry.Name}'.");
         }
         else
         {
             var (hive, subKey, approvedSubKey) = GetRegistryMetadata(entry.SourceKind);
 
-            // Save to vault first so we can always restore it
+            // For standard Run keys with StartupApproved support, toggle Windows' native StartupApproved flag in-place
+            if (approvedSubKey != null)
+            {
+                if (TrySetStartupApprovedState(hive, approvedSubKey, entry.Name, enabled: false))
+                {
+                    SaveVault(vault);
+                    return (true, $"Turned off auto-start for '{entry.Name}'.");
+                }
+
+                if (entry.RequiresAdmin)
+                {
+                    string rootName = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU";
+                    string hexDisabled = BuildStartupApprovedDisabledHex();
+                    bool ok = await RunElevatedCmdAsync($"reg add \"{rootName}\\{approvedSubKey}\" /v \"{entry.Name}\" /t REG_BINARY /d {hexDisabled} /f");
+                    if (ok)
+                    {
+                        SaveVault(vault);
+                        return (true, $"Turned off auto-start for '{entry.Name}'.");
+                    }
+                    return (false, "Administrator permission is required to turn off system-wide HKLM startup items.");
+                }
+            }
+
+            // Fallback for RunOnce / Policies keys that do not have a Windows StartupApproved key: vault & remove
             vault.Add(new DisabledVaultItem
             {
                 Id = entry.Id,
@@ -284,16 +372,10 @@ public static class StartupManager
                 bool ok = await RunElevatedCmdAsync($"reg delete \"{rootName}\\{subKey}\" /v \"{entry.Name}\" /f");
                 if (!ok)
                 {
-                    // Revert vault if user canceled UAC
                     vault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
                     SaveVault(vault);
                     return (false, "Administrator permission is required to turn off system-wide HKLM startup items.");
                 }
-            }
-
-            if (approvedSubKey != null)
-            {
-                TryDeleteRegistryValue(hive, approvedSubKey, entry.Name);
             }
 
             return (true, $"Turned off auto-start for '{entry.Name}'.");
@@ -302,6 +384,27 @@ public static class StartupManager
 
     private static async Task<(bool Success, string Message)> EnableEntryCoreAsync(StartupEntry entry)
     {
+        if (entry.SourceKind == StartupSourceKind.AppxStartupTask)
+        {
+            var (pfn, taskId) = GetAppxTaskIds(entry);
+            TrySetAppxStartupTaskState(pfn, taskId, enabled: true);
+            var appxVault = LoadVault();
+            appxVault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
+            SaveVault(appxVault);
+            return (true, $"Turned on Store / MSIX startup task '{entry.Name}'.");
+        }
+
+        if (entry.SourceKind == StartupSourceKind.WindowsService)
+        {
+            string svcName = GetServiceName(entry);
+            bool ok = await RunScConfigAsync(svcName, "auto");
+            if (!ok) return (false, $"Administrator permission is required to enable auto-start for service '{entry.Name}'.");
+            var svcVault = LoadVault();
+            svcVault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
+            SaveVault(svcVault);
+            return (true, $"Turned on Automatic startup for Windows Service '{entry.Name}'.");
+        }
+
         if (entry.SourceKind == StartupSourceKind.ScheduledTask)
         {
             string taskPath = GetScheduledTaskPath(entry);
@@ -330,9 +433,13 @@ public static class StartupManager
                 }
             }
 
-            // Also clear any Windows StartupApproved disable flag
+            string fileName = Path.GetFileName(entry.RawCommand);
             var hive = entry.SourceKind == StartupSourceKind.CommonStartupFolder ? RegistryHive.LocalMachine : RegistryHive.CurrentUser;
-            TrySetStartupApprovedEnabled(hive, ApprovedFolderSubKey, Path.GetFileName(entry.RawCommand));
+            if (!TrySetStartupApprovedState(hive, ApprovedFolderSubKey, fileName, enabled: true) && entry.RequiresAdmin)
+            {
+                bool ok = await RunElevatedCmdAsync($"reg add \"HKLM\\{ApprovedFolderSubKey}\" /v \"{fileName}\" /t REG_BINARY /d 020000000000000000000000 /f");
+                if (!ok) return (false, "Administrator permission required to enable All-Users Startup folder item.");
+            }
 
             vault.RemoveAll(v => string.Equals(v.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
             SaveVault(vault);
@@ -341,21 +448,27 @@ public static class StartupManager
         else
         {
             var (hive, subKey, approvedSubKey) = GetRegistryMetadata(entry.SourceKind);
-            bool written = TrySetRegistryValue(hive, subKey, entry.Name, entry.RawCommand);
-            if (!written && entry.RequiresAdmin)
+
+            // If this entry was previously vaulted (or is a RunOnce/Policies key), ensure the Run registry value exists
+            if (vaultMatch != null || approvedSubKey == null)
             {
-                string rootName = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU";
-                string escapedCmd = entry.RawCommand.Replace("\"", "\\\"");
-                bool ok = await RunElevatedCmdAsync($"reg add \"{rootName}\\{subKey}\" /v \"{entry.Name}\" /t REG_SZ /d \"{escapedCmd}\" /f");
-                if (!ok) return (false, "Administrator permission is required to enable system-wide HKLM startup items.");
+                bool written = TrySetRegistryValue(hive, subKey, entry.Name, entry.RawCommand);
+                if (!written && entry.RequiresAdmin)
+                {
+                    string rootName = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU";
+                    string escapedCmd = entry.RawCommand.Replace("\"", "\\\"");
+                    bool ok = await RunElevatedCmdAsync($"reg add \"{rootName}\\{subKey}\" /v \"{entry.Name}\" /t REG_SZ /d \"{escapedCmd}\" /f");
+                    if (!ok) return (false, "Administrator permission is required to enable system-wide HKLM startup items.");
+                }
             }
 
             if (approvedSubKey != null)
             {
-                if (!TrySetStartupApprovedEnabled(hive, approvedSubKey, entry.Name) && entry.RequiresAdmin)
+                if (!TrySetStartupApprovedState(hive, approvedSubKey, entry.Name, enabled: true) && entry.RequiresAdmin)
                 {
                     string rootName = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU";
-                    await RunElevatedCmdAsync($"reg delete \"{rootName}\\{approvedSubKey}\" /v \"{entry.Name}\" /f");
+                    bool ok = await RunElevatedCmdAsync($"reg add \"{rootName}\\{approvedSubKey}\" /v \"{entry.Name}\" /t REG_BINARY /d 020000000000000000000000 /f");
+                    if (!ok) return (false, "Administrator permission is required to enable system-wide HKLM startup items.");
                 }
             }
 
@@ -423,7 +536,8 @@ public static class StartupManager
                     LocationDisplay: locationDisplay,
                     SourceKind: kind,
                     IsEnabled: isEnabled,
-                    RequiresAdmin: requiresAdmin);
+                    RequiresAdmin: requiresAdmin,
+                    PublisherHint: ResolvePublisherHint(exePath, null));
             }
         }
         catch { }
@@ -469,6 +583,9 @@ public static class StartupManager
                 string id = $"{kind}|{fileName}";
                 string exePath = ExtractExecutablePath(file);
                 bool isEnabled = !disabledByWindows.Contains(fileName);
+                string displayCmd = !string.Equals(exePath, file, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(exePath)
+                    ? $"\"{file}\" -> \"{exePath}\""
+                    : file;
 
                 target[id] = new StartupEntry(
                     Id: id,
@@ -478,7 +595,8 @@ public static class StartupManager
                     LocationDisplay: locationDisplay,
                     SourceKind: kind,
                     IsEnabled: isEnabled,
-                    RequiresAdmin: requiresAdmin);
+                    RequiresAdmin: requiresAdmin,
+                    PublisherHint: ResolvePublisherHint(exePath, displayCmd));
             }
         }
         catch { }
@@ -488,16 +606,31 @@ public static class StartupManager
     {
         if (string.IsNullOrWhiteSpace(rawCommand)) return "";
         string expanded = Environment.ExpandEnvironmentVariables(rawCommand.Trim());
+        string unquoted = expanded.Trim('"').Trim();
 
-        // If it's a .lnk shortcut file on disk, try to resolve the target path
-        if (expanded.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) && File.Exists(expanded))
+        // 1. If it's a .lnk shortcut file on disk, resolve the shortcut target path
+        if (unquoted.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) && File.Exists(unquoted))
         {
-            string? resolved = TryResolveShortcutTarget(expanded);
+            string? resolved = TryResolveShortcutTarget(unquoted);
             if (!string.IsNullOrWhiteSpace(resolved)) return resolved;
-            return expanded;
+            return unquoted;
         }
 
-        // Quoted executable path: "C:\Program Files\App\app.exe" --args
+        // 2. If the entire unquoted string is already an existing file on disk (e.g. unquoted Startup Folder path with spaces like "OpenClaw Gateway.cmd"), return it directly!
+        if (File.Exists(unquoted))
+        {
+            if (IsScriptExtension(unquoted))
+            {
+                string? innerExe = TryExtractTargetFromScriptFile(unquoted);
+                if (!string.IsNullOrWhiteSpace(innerExe) && File.Exists(innerExe))
+                {
+                    return innerExe;
+                }
+            }
+            return unquoted;
+        }
+
+        // 3. Quoted executable or script path: "C:\Program Files\App\app.exe" --args
         if (expanded.StartsWith('"'))
         {
             int closeQuote = expanded.IndexOf('"', 1);
@@ -508,18 +641,71 @@ public static class StartupManager
             }
         }
 
-        // Unquoted path containing .exe
-        int exeIdx = expanded.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-        if (exeIdx > 0)
+        // 4. Unquoted path containing known executable/script extension (.exe, .cmd, .bat, .ps1, .vbs, .msc)
+        foreach (string ext in new[] { ".exe", ".cmd", ".bat", ".ps1", ".vbs", ".msc", ".com" })
         {
-            string candidate = expanded[..(exeIdx + 4)].Trim();
-            return ResolveSystemPathIfNeeded(candidate);
+            int extIdx = expanded.IndexOf(ext, StringComparison.OrdinalIgnoreCase);
+            if (extIdx > 0)
+            {
+                int endIdx = extIdx + ext.Length;
+                if (endIdx == expanded.Length || char.IsWhiteSpace(expanded[endIdx]) || expanded[endIdx] is '"' or ',' or '/')
+                {
+                    string candidate = expanded[..endIdx].Trim().Trim('"');
+                    return ResolveSystemPathIfNeeded(candidate);
+                }
+            }
         }
 
-        // Fallback: first token
+        // 5. Fallback: first token
         int spaceIdx = expanded.IndexOf(' ');
         string firstToken = spaceIdx > 0 ? expanded[..spaceIdx] : expanded;
         return ResolveSystemPathIfNeeded(firstToken);
+    }
+
+    private static bool IsScriptExtension(string path)
+    {
+        string ext = Path.GetExtension(path);
+        return ext.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".bat", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".ps1", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".vbs", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".js", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryExtractTargetFromScriptFile(string scriptPath)
+    {
+        try
+        {
+            foreach (var rawLine in File.ReadLines(scriptPath).Take(40))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("::", StringComparison.Ordinal) || line.StartsWith("REM ", StringComparison.OrdinalIgnoreCase) || line.StartsWith('#'))
+                    continue;
+
+                // Look for quoted path ending in .exe inside the script
+                int exeIdx = line.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                if (exeIdx > 2)
+                {
+                    int start = Math.Max(0, exeIdx - 240);
+                    for (int i = exeIdx - 1; i >= start; i--)
+                    {
+                        if (i + 2 < line.Length && char.IsLetter(line[i]) && line[i + 1] == ':' && line[i + 2] == '\\')
+                        {
+                            string candidate = Environment.ExpandEnvironmentVariables(line[i..(exeIdx + 4)].Trim('"'));
+                            if (File.Exists(candidate) &&
+                                !candidate.EndsWith(@"\cmd.exe", StringComparison.OrdinalIgnoreCase) &&
+                                !candidate.EndsWith(@"\conhost.exe", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return candidate;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
     }
 
     private static string ResolveSystemPathIfNeeded(string path)
@@ -542,9 +728,30 @@ public static class StartupManager
 
     private static string? TryResolveShortcutTarget(string lnkPath)
     {
+        // 1. Primary: Native Windows Script Host COM ShellLink resolver
         try
         {
-            // Fast binary .lnk scan for local executable path (e.g. "C:\...\*.exe")
+            Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType != null)
+            {
+                dynamic? shell = Activator.CreateInstance(shellType);
+                if (shell != null)
+                {
+                    dynamic shortcut = shell.CreateShortcut(lnkPath);
+                    string? targetPath = (string?)shortcut.TargetPath;
+                    if (!string.IsNullOrWhiteSpace(targetPath))
+                    {
+                        string expanded = Environment.ExpandEnvironmentVariables(targetPath.Trim());
+                        if (File.Exists(expanded)) return expanded;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // 2. Fallback: Fast binary .lnk scan for local executable path (e.g. "C:\...\*.exe")
+        try
+        {
             byte[] bytes = File.ReadAllBytes(lnkPath);
             string ascii = Encoding.Default.GetString(bytes);
             string unicode = Encoding.Unicode.GetString(bytes);
@@ -578,6 +785,425 @@ public static class StartupManager
         }
         catch { }
         return null;
+    }
+
+    public static string? ResolvePublisherHint(string? exePath, string? explicitPublisher)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPublisher) &&
+            !explicitPublisher.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase) &&
+            !explicitPublisher.Contains("->", StringComparison.Ordinal))
+        {
+            return explicitPublisher.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(exePath)) return null;
+
+        try
+        {
+            if (File.Exists(exePath))
+            {
+                if (IsScriptExtension(exePath))
+                {
+                    string ext = Path.GetExtension(exePath).ToLowerInvariant();
+                    return $"✓ Local Startup Script ({ext})";
+                }
+
+                var vi = FileVersionInfo.GetVersionInfo(exePath);
+                if (!string.IsNullOrWhiteSpace(vi.CompanyName))
+                {
+                    return vi.CompanyName.Trim();
+                }
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    private static void ScanAppxStartupTasks(Dictionary<string, StartupEntry> target, List<DisabledVaultItem> vault)
+    {
+        var packageFolders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string windowsAppsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps");
+
+        // Source A: HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages
+        try
+        {
+            using var repoKey = Registry.CurrentUser.OpenSubKey(
+                @"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages", writable: false);
+            if (repoKey != null)
+            {
+                foreach (var pkgFullName in repoKey.GetSubKeyNames())
+                {
+                    using var pkgKey = repoKey.OpenSubKey(pkgFullName, writable: false);
+                    string? rootFolder = pkgKey?.GetValue("PackageRootFolder")?.ToString();
+                    if (!string.IsNullOrWhiteSpace(rootFolder))
+                    {
+                        packageFolders[pkgFullName] = rootFolder;
+                    }
+                    else
+                    {
+                        packageFolders[pkgFullName] = Path.Combine(windowsAppsRoot, pkgFullName);
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // Source B: HKCU\Software\Classes\Extensions\ContractId\*\PackageId (Always readable in Standard User & sandboxed contexts)
+        try
+        {
+            using var contractRoot = Registry.CurrentUser.OpenSubKey(@"Software\Classes\Extensions\ContractId", writable: false);
+            if (contractRoot != null)
+            {
+                foreach (var contractName in contractRoot.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var pkgIdKey = contractRoot.OpenSubKey(contractName + @"\PackageId", writable: false);
+                        if (pkgIdKey == null) continue;
+                        foreach (var pkgFullName in pkgIdKey.GetSubKeyNames())
+                        {
+                            if (!packageFolders.ContainsKey(pkgFullName))
+                            {
+                                packageFolders[pkgFullName] = Path.Combine(windowsAppsRoot, pkgFullName);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+
+        // Source C: HKLM PackageRepository
+        try
+        {
+            using var hklmRepo = Registry.LocalMachine.OpenSubKey(
+                @"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Packages", writable: false);
+            if (hklmRepo != null)
+            {
+                foreach (var pkgFullName in hklmRepo.GetSubKeyNames())
+                {
+                    if (!packageFolders.ContainsKey(pkgFullName))
+                    {
+                        using var pkgKey = hklmRepo.OpenSubKey(pkgFullName, writable: false);
+                        string? path = pkgKey?.GetValue("Path")?.ToString();
+                        packageFolders[pkgFullName] = !string.IsNullOrWhiteSpace(path)
+                            ? path
+                            : Path.Combine(windowsAppsRoot, pkgFullName);
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // Source D: Direct WindowsApps directory listing (when running as Admin)
+        try
+        {
+            if (Directory.Exists(windowsAppsRoot))
+            {
+                foreach (var dir in Directory.EnumerateDirectories(windowsAppsRoot))
+                {
+                    string folderName = Path.GetFileName(dir);
+                    if (!packageFolders.ContainsKey(folderName))
+                    {
+                        packageFolders[folderName] = dir;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        var highestVersionPerTask = new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (pkgFullName, pkgFolder) in packageFolders)
+        {
+            try
+            {
+                string manifestPath = Path.Combine(pkgFolder, "AppxManifest.xml");
+                if (!File.Exists(manifestPath)) continue;
+
+                var doc = XDocument.Load(manifestPath);
+                var root = doc.Root;
+                if (root == null) continue;
+
+                // Find all <Extension Category="windows.startupTask">
+                var startupExtensions = root.Descendants()
+                    .Where(e => e.Name.LocalName == "Extension" &&
+                                string.Equals(e.Attribute("Category")?.Value, "windows.startupTask", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (startupExtensions.Count == 0) continue;
+
+                var identityEl = root.Elements().FirstOrDefault(e => e.Name.LocalName == "Identity");
+                string identityName = identityEl?.Attribute("Name")?.Value?.Trim() ?? pkgFullName;
+                string versionStr = identityEl?.Attribute("Version")?.Value?.Trim() ?? "0.0.0.0";
+                _ = Version.TryParse(versionStr, out var pkgVersion);
+                pkgVersion ??= new Version(0, 0, 0, 0);
+
+                string packageFamilyName = BuildPackageFamilyName(pkgFullName, identityName);
+
+                var propsEl = root.Elements().FirstOrDefault(e => e.Name.LocalName == "Properties");
+                string pkgDisplayName = propsEl?.Elements().FirstOrDefault(e => e.Name.LocalName == "DisplayName")?.Value?.Trim() ?? "";
+                string pkgPublisherDisplay = propsEl?.Elements().FirstOrDefault(e => e.Name.LocalName == "PublisherDisplayName")?.Value?.Trim() ?? "";
+
+                foreach (var extEl in startupExtensions)
+                {
+                    string? extExe = extEl.Attribute("Executable")?.Value?.Trim();
+                    if (string.IsNullOrWhiteSpace(extExe))
+                    {
+                        var appEl = extEl.Ancestors().FirstOrDefault(a => a.Name.LocalName == "Application");
+                        extExe = appEl?.Attribute("Executable")?.Value?.Trim();
+                    }
+
+                    var taskEls = extEl.Elements().Where(e => e.Name.LocalName == "StartupTask").ToList();
+                    if (taskEls.Count == 0) continue;
+
+                    foreach (var taskEl in taskEls)
+                    {
+                        string taskId = taskEl.Attribute("TaskId")?.Value?.Trim() ?? "StartupTask";
+                        string taskDisplayName = taskEl.Attribute("DisplayName")?.Value?.Trim() ?? "";
+                        string enabledAttr = taskEl.Attribute("Enabled")?.Value?.Trim() ?? "true";
+                        bool manifestEnabled = !string.Equals(enabledAttr, "false", StringComparison.OrdinalIgnoreCase);
+
+                        string entryId = $"{StartupSourceKind.AppxStartupTask}|{packageFamilyName}|{taskId}";
+                        if (highestVersionPerTask.TryGetValue(entryId, out var prevVer) && prevVer > pkgVersion)
+                        {
+                            continue;
+                        }
+                        highestVersionPerTask[entryId] = pkgVersion;
+
+                        string exeFullPath = !string.IsNullOrWhiteSpace(extExe)
+                            ? Path.Combine(pkgFolder, extExe.Replace('/', '\\'))
+                            : pkgFolder;
+
+                        string friendlyName = !string.IsNullOrWhiteSpace(taskDisplayName) && !taskDisplayName.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
+                            ? taskDisplayName
+                            : (!string.IsNullOrWhiteSpace(pkgDisplayName) && !pkgDisplayName.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
+                                ? pkgDisplayName
+                                : ResolveFriendlyNameFromExeOrIdentity(exeFullPath, identityName));
+
+                        // If DisplayName differs from Identity Name (e.g. "ChatGPT" vs "OpenAI.Codex"), include both so searching either finds it immediately
+                        string shortIdentity = identityName.Contains('.') ? identityName.Split('.').Last() : identityName;
+                        if (!friendlyName.Contains(shortIdentity, StringComparison.OrdinalIgnoreCase) &&
+                            !friendlyName.Equals(identityName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            friendlyName = $"{friendlyName} ({identityName})";
+                        }
+
+                        bool isEnabled = ReadAppxStartupTaskEnabledState(packageFamilyName, taskId, manifestEnabled, entryId, vault);
+                        string? publisherHint = ResolvePublisherHint(exeFullPath, pkgPublisherDisplay);
+
+                        target[entryId] = new StartupEntry(
+                            Id: entryId,
+                            Name: friendlyName,
+                            RawCommand: $"\"{exeFullPath}\" (MSIX StartupTask: {packageFamilyName} [{taskId}])",
+                            ExecutablePath: exeFullPath,
+                            LocationDisplay: "Store / MSIX App (StartupTask)",
+                            SourceKind: StartupSourceKind.AppxStartupTask,
+                            IsEnabled: isEnabled,
+                            RequiresAdmin: false,
+                            PublisherHint: publisherHint);
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    private static string BuildPackageFamilyName(string packageFullName, string identityName)
+    {
+        // Standard PackageFullName format: <Name>_<Version>_<Arch>_<ResourceId>_<PublisherId>
+        int lastUnderscore = packageFullName.LastIndexOf('_');
+        if (lastUnderscore > 0 && lastUnderscore + 1 < packageFullName.Length)
+        {
+            string publisherId = packageFullName[(lastUnderscore + 1)..];
+            return $"{identityName}_{publisherId}";
+        }
+        return packageFullName;
+    }
+
+    private static string ResolveFriendlyNameFromExeOrIdentity(string exePath, string identityName)
+    {
+        try
+        {
+            if (File.Exists(exePath))
+            {
+                var vi = FileVersionInfo.GetVersionInfo(exePath);
+                if (!string.IsNullOrWhiteSpace(vi.FileDescription)) return vi.FileDescription.Trim();
+                if (!string.IsNullOrWhiteSpace(vi.ProductName)) return vi.ProductName.Trim();
+            }
+        }
+        catch { }
+        return identityName;
+    }
+
+    private static bool ReadAppxStartupTaskEnabledState(
+        string packageFamilyName,
+        string taskId,
+        bool manifestDefaultEnabled,
+        string entryId,
+        List<DisabledVaultItem> vault)
+    {
+        try
+        {
+            string subKey = $@"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\{packageFamilyName}\{taskId}";
+            using var key = Registry.CurrentUser.OpenSubKey(subKey, writable: false);
+            if (key?.GetValue("State") is int state)
+            {
+                // Windows StartupTaskState: 0=Disabled, 1=DisabledByUser, 2=Enabled, 3=DisabledByPolicy, 4=EnabledByPolicy
+                return state is 2 or 4;
+            }
+        }
+        catch { }
+
+        if (vault.Any(v => string.Equals(v.Id, entryId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return manifestDefaultEnabled;
+    }
+
+    private static (string PackageFamilyName, string TaskId) GetAppxTaskIds(StartupEntry entry)
+    {
+        var parts = entry.Id.Split('|');
+        if (parts.Length >= 3)
+        {
+            return (parts[1], parts[2]);
+        }
+        return (entry.Name, "App");
+    }
+
+    private static bool TrySetAppxStartupTaskState(string packageFamilyName, string taskId, bool enabled)
+    {
+        try
+        {
+            string subKey = $@"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\{packageFamilyName}\{taskId}";
+            using var key = Registry.CurrentUser.CreateSubKey(subKey, writable: true);
+            if (key == null) return false;
+            // 2 = Enabled, 1 = DisabledByUser
+            key.SetValue("State", enabled ? 2 : 1, RegistryValueKind.DWord);
+            key.SetValue("UserEnabledStartupOnce", 1, RegistryValueKind.DWord);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ScanAutoStartServices(Dictionary<string, StartupEntry> target, List<DisabledVaultItem> vault)
+    {
+        try
+        {
+            using var servicesKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services", writable: false);
+            if (servicesKey == null) return;
+
+            string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+            foreach (var svcName in servicesKey.GetSubKeyNames())
+            {
+                try
+                {
+                    using var svcKey = servicesKey.OpenSubKey(svcName, writable: false);
+                    if (svcKey == null) continue;
+
+                    // Only user-mode Win32 services (0x10 = OwnProcess, 0x20 = ShareProcess), skip kernel/fs drivers (0x01, 0x02)
+                    int type = svcKey.GetValue("Type") is int t ? t : 0;
+                    if ((type & 0x30) == 0) continue;
+
+                    int start = svcKey.GetValue("Start") is int s ? s : -1;
+                    string entryId = $"{StartupSourceKind.WindowsService}|{svcName}";
+                    bool inVault = vault.Any(v => string.Equals(v.Id, entryId, StringComparison.OrdinalIgnoreCase));
+
+                    // Include Automatic (Start == 2) services, or Manual (Start == 3) services that were disabled in Spectra or belong to packaged WindowsApps (like CodexSandboxService)
+                    string rawImagePath = svcKey.GetValue("ImagePath")?.ToString()?.Trim() ?? "";
+                    if (string.IsNullOrWhiteSpace(rawImagePath)) continue;
+
+                    bool isWindowsAppService = rawImagePath.Contains("WindowsApps", StringComparison.OrdinalIgnoreCase)
+                                            || svcName.Contains("Codex", StringComparison.OrdinalIgnoreCase);
+
+                    if (start != 2 && !inVault && !(start == 3 && isWindowsAppService))
+                        continue;
+
+                    string exePath = ExtractExecutablePath(rawImagePath);
+                    if (string.IsNullOrWhiteSpace(exePath)) continue;
+
+                    // Skip built-in Windows OS services hosted in C:\Windows (svchost, System32 OS services, Windows Defender core)
+                    if (exePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    string? publisher = ResolvePublisherHint(exePath, null);
+                    if (publisher != null &&
+                        publisher.Contains("Microsoft Windows", StringComparison.OrdinalIgnoreCase) &&
+                        !isWindowsAppService)
+                    {
+                        continue;
+                    }
+
+                    string displayName = svcKey.GetValue("DisplayName")?.ToString()?.Trim() ?? svcName;
+                    if (displayName.StartsWith('@'))
+                    {
+                        displayName = svcName;
+                    }
+                    else if (!displayName.Contains(svcName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        displayName = $"{displayName} ({svcName})";
+                    }
+
+                    bool isEnabled = start == 2 && !inVault;
+
+                    target[entryId] = new StartupEntry(
+                        Id: entryId,
+                        Name: displayName,
+                        RawCommand: rawImagePath,
+                        ExecutablePath: exePath,
+                        LocationDisplay: "Auto-Start Service (3rd-Party)",
+                        SourceKind: StartupSourceKind.WindowsService,
+                        IsEnabled: isEnabled,
+                        RequiresAdmin: true,
+                        PublisherHint: publisher);
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static string GetServiceName(StartupEntry entry)
+    {
+        const string prefix = "WindowsService|";
+        if (entry.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return entry.Id[prefix.Length..];
+        }
+        return entry.Name;
+    }
+
+    private static async Task<bool> RunScConfigAsync(string serviceName, string startMode)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = $"config \"{serviceName}\" start= {startMode}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                await proc.WaitForExitAsync();
+                if (proc.ExitCode == 0) return true;
+            }
+        }
+        catch { }
+
+        return await RunElevatedCmdAsync($"sc config \"{serviceName}\" start= {startMode}");
     }
 
     private static void ScanScheduledTasks(Dictionary<string, StartupEntry> target)
@@ -755,7 +1381,8 @@ public static class StartupManager
                 LocationDisplay: triggerKind,
                 SourceKind: StartupSourceKind.ScheduledTask,
                 IsEnabled: isEnabled,
-                RequiresAdmin: true);
+                RequiresAdmin: true,
+                PublisherHint: ResolvePublisherHint(exePath, null));
             return true;
         }
         catch
@@ -825,6 +1452,8 @@ public static class StartupManager
         StartupSourceKind.UserStartupFolder => "Startup Folder (Current User)",
         StartupSourceKind.CommonStartupFolder => "Startup Folder (All Users)",
         StartupSourceKind.ScheduledTask => "Task Scheduler",
+        StartupSourceKind.AppxStartupTask => "Store / MSIX App (StartupTask)",
+        StartupSourceKind.WindowsService => "Auto-Start Service (3rd-Party)",
         _ => "Registry Run"
     };
 
@@ -835,7 +1464,8 @@ public static class StartupManager
         StartupSourceKind.HklmWow64Run or
         StartupSourceKind.HklmWow64RunOnce or
         StartupSourceKind.CommonStartupFolder or
-        StartupSourceKind.ScheduledTask;
+        StartupSourceKind.ScheduledTask or
+        StartupSourceKind.WindowsService;
 
     private static bool TryDeleteRegistryValue(RegistryHive hive, string subKey, string valueName)
     {
@@ -880,19 +1510,27 @@ public static class StartupManager
         }
     }
 
-    private static bool TrySetStartupApprovedEnabled(RegistryHive hive, string approvedSubKey, string valueName)
+    private static bool TrySetStartupApprovedState(RegistryHive hive, string approvedSubKey, string valueName, bool enabled)
     {
         try
         {
             using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
-            using var key = baseKey.OpenSubKey(approvedSubKey, writable: true);
-            if (key == null) return true;
-            if (key.GetValue(valueName) is byte[] bytes && bytes.Length >= 12)
+            using var key = baseKey.CreateSubKey(approvedSubKey, writable: true);
+            if (key == null) return false;
+
+            byte[] stateBytes = new byte[12];
+            if (enabled)
             {
-                byte[] enabledBytes = new byte[12];
-                enabledBytes[0] = 0x02; // 0x02 = Enabled in Windows StartupApproved
-                key.SetValue(valueName, enabledBytes, RegistryValueKind.Binary);
+                stateBytes[0] = 0x02; // 0x02 = Enabled in Windows StartupApproved
             }
+            else
+            {
+                stateBytes[0] = 0x03; // 0x03 = Disabled in Windows StartupApproved
+                byte[] ft = BitConverter.GetBytes(DateTime.UtcNow.ToFileTimeUtc());
+                Buffer.BlockCopy(ft, 0, stateBytes, 4, Math.Min(8, ft.Length));
+            }
+
+            key.SetValue(valueName, stateBytes, RegistryValueKind.Binary);
             return true;
         }
         catch (UnauthorizedAccessException)
@@ -903,6 +1541,15 @@ public static class StartupManager
         {
             return false;
         }
+    }
+
+    private static string BuildStartupApprovedDisabledHex()
+    {
+        byte[] stateBytes = new byte[12];
+        stateBytes[0] = 0x03;
+        byte[] ft = BitConverter.GetBytes(DateTime.UtcNow.ToFileTimeUtc());
+        Buffer.BlockCopy(ft, 0, stateBytes, 4, Math.Min(8, ft.Length));
+        return Convert.ToHexString(stateBytes).ToLowerInvariant();
     }
 
     private static async Task<bool> RunElevatedCmdAsync(string command)

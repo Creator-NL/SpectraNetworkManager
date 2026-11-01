@@ -291,16 +291,43 @@ public sealed class StartupRow : INotifyPropertyChanged
 
     public StartupEntry Entry => _entry;
     public string Id => _entry.Id;
+    public StartupSourceKind SourceKind => _entry.SourceKind;
     public bool IsEnabled => _entry.IsEnabled;
     public bool IsDisabled => !_entry.IsEnabled;
+    public bool FileExists => !string.IsNullOrWhiteSpace(_entry.ExecutablePath) && System.IO.File.Exists(_entry.ExecutablePath);
     public string Status => _entry.IsEnabled ? "● ENABLED" : "○ DISABLED";
     public string Name => _entry.Name;
     public string ExecutablePath => _entry.ExecutablePath;
     public string Command => _entry.RawCommand;
     public string Location => _entry.LocationDisplay;
 
-    public string Publisher => _signature?.Describe()
-        ?? (!string.IsNullOrWhiteSpace(_entry.ExecutablePath) && System.IO.File.Exists(_entry.ExecutablePath) ? "checking..." : "(file not found)");
+    public string Publisher
+    {
+        get
+        {
+            if (_signature != null)
+            {
+                if (_signature.Status == SignatureStatus.Valid)
+                {
+                    return _signature.Describe();
+                }
+                if (_signature.Status == SignatureStatus.NotSigned && !string.IsNullOrWhiteSpace(_entry.PublisherHint))
+                {
+                    return _entry.PublisherHint.StartsWith('✓')
+                        ? _entry.PublisherHint
+                        : $"{_entry.PublisherHint} (not signed)";
+                }
+                return _signature.Describe();
+            }
+
+            if (FileExists)
+            {
+                return !string.IsNullOrWhiteSpace(_entry.PublisherHint) ? _entry.PublisherHint : "checking...";
+            }
+
+            return "⚠️ (file not found — orphaned)";
+        }
+    }
 
     public bool IsUnsigned => _signature is { IsAlarming: true };
 
