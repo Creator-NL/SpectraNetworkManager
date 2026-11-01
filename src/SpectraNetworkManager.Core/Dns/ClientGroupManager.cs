@@ -58,10 +58,15 @@ public sealed class ClientGroupManager
     private readonly List<GroupRule> _groups = new();
     private readonly ClientGroup _defaultGroup;
     private readonly Func<DomainFilter> _baseFilterProvider;
+    private readonly Func<DomainFilter> _lanFilterProvider;
 
-    public ClientGroupManager(IEnumerable<ClientGroup>? groups, Func<DomainFilter> baseFilterProvider)
+    public ClientGroupManager(
+        IEnumerable<ClientGroup>? groups,
+        Func<DomainFilter> baseFilterProvider,
+        Func<DomainFilter>? lanFilterProvider = null)
     {
         _baseFilterProvider = baseFilterProvider;
+        _lanFilterProvider = lanFilterProvider ?? baseFilterProvider;
         _defaultGroup = new ClientGroup { Name = "Default", BlockingEnabled = true };
 
         if (groups is not null)
@@ -81,7 +86,7 @@ public sealed class ClientGroupManager
     }
 
     public ClientGroupManager(IEnumerable<ClientGroup>? groups, DomainFilter baseFilter)
-        : this(groups, () => baseFilter)
+        : this(groups, () => baseFilter, null)
     {
     }
 
@@ -89,7 +94,9 @@ public sealed class ClientGroupManager
     {
         // Unmap IPv4-mapped IPv6 addresses if needed
         var targetIp = clientIp.IsIPv4MappedToIPv6 ? clientIp.MapToIPv4() : clientIp;
-        var baseFilter = _baseFilterProvider();
+        var baseFilter = IPAddress.IsLoopback(targetIp)
+            ? _baseFilterProvider()
+            : _lanFilterProvider();
 
         foreach (var rule in _groups)
         {

@@ -6518,6 +6518,14 @@ public partial class MainWindow : Window
     {
         TvMobileManager.EnsureDefaultGroups(_sink.Settings);
 
+        if (TvManageBlocklistBtn != null)
+        {
+            int tvRules = _sink.TvMobileRules.CustomBlock.Count + _sink.TvMobileRules.CustomAllow.Count;
+            TvManageBlocklistBtn.Content = tvRules > 0
+                ? $"📋 Phone & TV Blocklist ({tvRules:N0})"
+                : "📋 Phone & TV Blocklist";
+        }
+
         // LAN protection banner + toggle button (state comes from what is really bound, not from settings)
         ApplyLanBanner();
         QueueLanProbeIfStale();
@@ -7906,13 +7914,31 @@ public partial class MainWindow : Window
         return DomainFilter.Normalize(clean).TrimEnd('.');
     }
 
+    private void OnManageTvMobileRulesClick(object sender, RoutedEventArgs e)
+    {
+        var win = new DnsCustomRulesWindow(_sink, () =>
+        {
+            LoadDnsSettingsIntoUi();
+            RefreshDnsUi();
+            RefreshTvMobileUi();
+            if (TvInspectorRecentGrid?.SelectedItem is DnsRow selRow)
+            {
+                UpdateTvInspectorSelectedQueryUi(selRow);
+            }
+        }, openTvMobileScope: true)
+        {
+            Owner = this
+        };
+        win.ShowDialog();
+    }
+
     private void UpdateTvInspectorSelectedQueryUi(DnsRow? row)
     {
         if (TvInspectorSelectedDomainInfoText == null) return;
 
         if (row == null)
         {
-            TvInspectorSelectedDomainInfoText.Text = "💡 Click or right-click any domain row below to Block Ad Domain, Whitelist, or Investigate with Spectra AI.";
+            TvInspectorSelectedDomainInfoText.Text = "💡 Click or right-click any domain row below to Block on Phone/TV (saved separately in tv-mobile-rules.json), Whitelist, or Investigate with Spectra AI.";
             TvInspectorSelectedDomainInfoText.Foreground = (Brush)FindResource("Muted");
             if (TvQueryUndoCustomBtn != null) TvQueryUndoCustomBtn.Visibility = Visibility.Collapsed;
             return;
@@ -7920,8 +7946,8 @@ public partial class MainWindow : Window
 
         string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
         var analysis = DomainIntelligence.Analyze(cleanDomain, row.IsBlocked, row.IsFailed);
-        bool isCustomBlock = _sink.IsCustomBlocked(cleanDomain);
-        bool isCustomAllow = _sink.IsCustomAllowed(cleanDomain);
+        bool isCustomBlock = _sink.IsTvMobileCustomBlocked(cleanDomain);
+        bool isCustomAllow = _sink.IsTvMobileCustomAllowed(cleanDomain);
 
         if (TvQueryUndoCustomBtn != null)
         {
@@ -7936,9 +7962,9 @@ public partial class MainWindow : Window
         }
 
         string customTag = isCustomBlock
-            ? " [CUSTOM BLOCKED]"
+            ? " [PHONE/TV BLOCKED]"
             : isCustomAllow
-                ? " [CUSTOM ALLOWED]"
+                ? " [PHONE/TV ALLOWED]"
                 : "";
 
         TvInspectorSelectedDomainInfoText.Text =
@@ -7966,7 +7992,13 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private async Task BlockOrAllowDomainCoreAsync(DnsRow row, bool allow, bool useRootDomain)
+    private static bool IsLanClientString(string? client) =>
+        !string.IsNullOrWhiteSpace(client) &&
+        !string.Equals(client.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(client.Trim(), "::1", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(client.Trim(), "localhost", StringComparison.OrdinalIgnoreCase);
+
+    private async Task BlockOrAllowDomainCoreAsync(DnsRow row, bool allow, bool useRootDomain, bool? forceTvMobileScope = null)
     {
         string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
         if (string.IsNullOrWhiteSpace(cleanDomain)) return;
@@ -7976,52 +8008,70 @@ public partial class MainWindow : Window
             : cleanDomain;
         if (string.IsNullOrWhiteSpace(targetDomain)) targetDomain = cleanDomain;
 
+        bool useTvMobileScope = forceTvMobileScope ?? IsLanClientString(row.Client);
+
         try
         {
-            if (allow)
+            if (useTvMobileScope)
             {
-                await _sink.AllowDomainAsync(targetDomain);
+                if (allow)
+                    await _sink.AllowTvMobileDomainAsync(targetDomain);
+                else
+                    await _sink.BlockTvMobileDomainAsync(targetDomain);
             }
             else
             {
-                await _sink.BlockDomainAsync(targetDomain);
+                if (allow)
+                    await _sink.AllowDomainAsync(targetDomain);
+                else
+                    await _sink.BlockDomainAsync(targetDomain);
             }
 
             LoadDnsSettingsIntoUi();
             RefreshDnsUi();
+            RefreshTvMobileUi();
 
-            // Update matching rows in TV & Mobile live stream immediately so visual feedback is instant
-            void UpdateMatchingRows(IList<DnsRow> list)
+            if (useTvMobileScope)
             {
-                for (int i = 0; i < list.Count; i++)
+                // Update matching rows in TV & Mobile live stream immediately so visual feedback is instant
+                void UpdateMatchingRows(IList<DnsRow> list)
                 {
-                    var item = list[i];
-                    string itemDom = NormalizeDomainFromQueryRow(item.Domain);
-                    if (itemDom.Equals(targetDomain, StringComparison.OrdinalIgnoreCase) ||
-                        itemDom.EndsWith("." + targetDomain, StringComparison.OrdinalIgnoreCase))
+                    for (int i = 0; i < list.Count; i++)
                     {
-                        list[i] = item with
+                        var item = list[i];
+                        string itemDom = NormalizeDomainFromQueryRow(item.Domain);
+                        if (itemDom.Equals(targetDomain, StringComparison.OrdinalIgnoreCase) ||
+                            itemDom.EndsWith("." + targetDomain, StringComparison.OrdinalIgnoreCase))
                         {
-                            IsBlocked = !allow,
-                            Result = allow ? "ok (allowed)" : "BLOCKED",
-                            Detail = allow ? "custom whitelist rule" : $"custom blocked ({targetDomain})"
-                        };
+                            list[i] = item with
+                            {
+                                IsBlocked = !allow,
+                                Result = allow ? "ok (allowed)" : "BLOCKED",
+                                Detail = allow ? "phone/tv whitelist rule (tv-mobile-rules.json)" : $"phone/tv blocked ({targetDomain})"
+                            };
+                        }
                     }
                 }
-            }
 
-            UpdateMatchingRows(TvDeviceRecentQueries);
-            UpdateMatchingRows(TvLanActivityRows);
-            foreach (var kv in _lanQueriesByClient.Values)
+                UpdateMatchingRows(TvDeviceRecentQueries);
+                UpdateMatchingRows(TvLanActivityRows);
+                foreach (var kv in _lanQueriesByClient.Values)
+                {
+                    UpdateMatchingRows(kv);
+                }
+
+                UpdateTvInspectorSelectedQueryUi(TvInspectorRecentGrid?.SelectedItem as DnsRow ?? row);
+
+                StatusText.Text = allow
+                    ? $"🛡️ Whitelisted '{targetDomain}' in Phone & TV rules (tv-mobile-rules.json)."
+                    : $"🚫 Blocked '{targetDomain}' in Phone & TV rules (tv-mobile-rules.json) — PC is unaffected!";
+            }
+            else
             {
-                UpdateMatchingRows(kv);
+                StatusText.Text = allow
+                    ? $"🛡️ Whitelisted '{targetDomain}' in PC rules (dns-settings.json)."
+                    : $"🚫 Blocked '{targetDomain}' in PC rules (dns-settings.json) — Phone/TV is unaffected!";
             }
-
-            UpdateTvInspectorSelectedQueryUi(TvInspectorRecentGrid?.SelectedItem as DnsRow ?? row);
-
-            StatusText.Text = allow
-                ? $"🛡️ Whitelisted '{targetDomain}' — now allowed on all devices."
-                : $"🚫 Added '{targetDomain}' to custom blocklist — now blocked across DNS & Smart Proxy!";
         }
         catch (Exception ex)
         {
@@ -8033,21 +8083,21 @@ public partial class MainWindow : Window
     {
         var row = GetSelectedTvOrLanQueryRow(sender);
         if (row == null) return;
-        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: false);
+        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: false, forceTvMobileScope: true);
     }
 
     private async void OnTvQueryBlockRootClick(object sender, RoutedEventArgs e)
     {
         var row = GetSelectedTvOrLanQueryRow(sender);
         if (row == null) return;
-        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: true);
+        await BlockOrAllowDomainCoreAsync(row, allow: false, useRootDomain: true, forceTvMobileScope: true);
     }
 
     private async void OnTvQueryAllowClick(object sender, RoutedEventArgs e)
     {
         var row = GetSelectedTvOrLanQueryRow(sender);
         if (row == null) return;
-        await BlockOrAllowDomainCoreAsync(row, allow: true, useRootDomain: false);
+        await BlockOrAllowDomainCoreAsync(row, allow: true, useRootDomain: false, forceTvMobileScope: true);
     }
 
     private async void OnTvQueryRemoveCustomClick(object sender, RoutedEventArgs e)
@@ -8059,15 +8109,16 @@ public partial class MainWindow : Window
 
         try
         {
-            await _sink.RemoveCustomRuleAsync(cleanDomain);
+            await _sink.RemoveTvMobileCustomRuleAsync(cleanDomain);
             if (!string.IsNullOrWhiteSpace(rootDomain) && !string.Equals(rootDomain, cleanDomain, StringComparison.OrdinalIgnoreCase))
             {
-                await _sink.RemoveCustomRuleAsync(rootDomain);
+                await _sink.RemoveTvMobileCustomRuleAsync(rootDomain);
             }
             LoadDnsSettingsIntoUi();
             RefreshDnsUi();
+            RefreshTvMobileUi();
             UpdateTvInspectorSelectedQueryUi(row);
-            StatusText.Text = $"Removed custom rule for '{cleanDomain}'.";
+            StatusText.Text = $"Removed '{cleanDomain}' from Phone & TV rules (tv-mobile-rules.json).";
         }
         catch (Exception ex)
         {
@@ -8082,10 +8133,14 @@ public partial class MainWindow : Window
         await RunDomainAiInvestigationAsync(row);
     }
 
+    private bool _lastInvestigatedDomainIsTvMobile;
+
     private async Task RunDomainAiInvestigationAsync(DnsRow row)
     {
         string cleanDomain = NormalizeDomainFromQueryRow(row.Domain);
         if (string.IsNullOrWhiteSpace(cleanDomain)) return;
+
+        _lastInvestigatedDomainIsTvMobile = IsLanClientString(row.Client) || TvMobileTab.IsChecked == true;
 
         AiTab.IsChecked = true;
         OnViewChanged(AiTab, new RoutedEventArgs());
@@ -8859,10 +8914,19 @@ public partial class MainWindow : Window
             !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
         {
             string dom = _currentAiReport.TargetIdentifier;
-            await _sink.AllowDomainAsync(dom);
+            if (_lastInvestigatedDomainIsTvMobile)
+            {
+                await _sink.AllowTvMobileDomainAsync(dom);
+                StatusText.Text = $"🛡️ Whitelisted domain '{dom}' in Phone & TV rules (tv-mobile-rules.json).";
+            }
+            else
+            {
+                await _sink.AllowDomainAsync(dom);
+                StatusText.Text = $"🛡️ Whitelisted domain '{dom}' in PC rules (dns-settings.json).";
+            }
             LoadDnsSettingsIntoUi();
             RefreshDnsUi();
-            StatusText.Text = $"🛡️ Whitelisted domain '{dom}' in DNS sinkhole.";
+            RefreshTvMobileUi();
             return;
         }
 
@@ -8883,10 +8947,19 @@ public partial class MainWindow : Window
             !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
         {
             string dom = _currentAiReport.TargetIdentifier;
-            await _sink.BlockDomainAsync(dom);
+            if (_lastInvestigatedDomainIsTvMobile)
+            {
+                await _sink.BlockTvMobileDomainAsync(dom);
+                StatusText.Text = $"🚫 Blocked domain '{dom}' in Phone & TV rules (tv-mobile-rules.json) — PC is unaffected!";
+            }
+            else
+            {
+                await _sink.BlockDomainAsync(dom);
+                StatusText.Text = $"🚫 Blocked domain '{dom}' in PC rules (dns-settings.json) — Phone/TV is unaffected!";
+            }
             LoadDnsSettingsIntoUi();
             RefreshDnsUi();
-            StatusText.Text = $"🚫 Blocked domain '{dom}' in DNS sinkhole & Smart Proxy.";
+            RefreshTvMobileUi();
             return;
         }
 

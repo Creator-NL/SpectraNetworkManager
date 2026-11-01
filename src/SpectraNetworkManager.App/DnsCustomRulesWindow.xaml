@@ -1,7 +1,7 @@
-﻿<Window x:Class="SpectraNetworkManager.Ui.DnsCustomRulesWindow"
+<Window x:Class="SpectraNetworkManager.Ui.DnsCustomRulesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="DNS Filter Rules &amp; Blocklists" Width="780" Height="560" MinWidth="600" MinHeight="400"
+        Title="DNS &amp; Mobile Filter Rules &amp; Blocklists" Width="860" Height="620" MinWidth="680" MinHeight="460"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Icon="app.ico"
         Background="{StaticResource Bg}" Foreground="{StaticResource Text}" FontFamily="Segoe UI">
@@ -9,34 +9,62 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+        <DockPanel Grid.Row="0" Margin="0,0,0,10">
             <StackPanel>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="DNS FILTER RULES" FontSize="18" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}"/>
-                    <TextBlock Text="  //  custom block &amp; allow list" FontSize="12" Foreground="{StaticResource Magenta}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+                    <TextBlock Text="FILTER RULES &amp; BLOCKLISTS" FontSize="18" FontWeight="Bold" FontFamily="Bahnschrift" Foreground="{StaticResource Cyan}"/>
+                    <TextBlock Text="  //  separated PC vs. Phone &amp; Smart TV lists" FontSize="12" Foreground="{StaticResource Magenta}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
                 </StackPanel>
-                <TextBlock Text="Manage domains you have manually blocked or whitelisted, or inspect downloaded subscription lists."
+                <TextBlock Text="PC rules and Phone/TV rules are stored in completely separate files so what you block on your phone never affects your PC."
                            FontSize="11" Foreground="{StaticResource Muted}" Margin="0,3,0,0"/>
             </StackPanel>
         </DockPanel>
 
+        <!-- Target Scope Selector (PC vs. Phone & Smart TV) -->
+        <Border Grid.Row="1" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}"
+                BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <DockPanel Grid.Row="0" LastChildFill="False">
+                    <TextBlock Text="RULE TARGET:" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Amber}"
+                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <RadioButton x:Name="ScopePcRadio" Content="💻 PC Rules (0)" GroupName="rule_scope" IsChecked="True"
+                                 Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnScopeChanged"
+                                 ToolTip="Manage custom block &amp; allow rules that apply only to this PC (stored in dns-settings.json)"/>
+                    <RadioButton x:Name="ScopeTvMobileRadio" Content="📱 Phone &amp; Smart TV Rules (0)" GroupName="rule_scope"
+                                 Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnScopeChanged"
+                                 ToolTip="Manage custom block &amp; allow rules that apply only to Phones, Tablets &amp; Smart TVs on your LAN (stored in tv-mobile-rules.json)"/>
+                    <Button DockPanel.Dock="Right" Content="📂 Open Rule File in Explorer" Click="OnOpenActiveRuleFileFolderClick"
+                            Padding="10,2" FontSize="11" ToolTip="Open folder and highlight the active JSON rule file in Windows Explorer"/>
+                </DockPanel>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,5,0,0">
+                    <TextBlock Text="Active Storage File: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                    <TextBlock x:Name="ActiveRuleFileText" FontSize="11" FontFamily="Consolas" Foreground="{StaticResource Cyan}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
         <!-- View Switcher Tabs -->
-        <WrapPanel Grid.Row="1" Margin="0,0,0,12">
+        <WrapPanel Grid.Row="2" Margin="0,0,0,12">
             <RadioButton x:Name="TabBlocked" Content="🚫 Custom Blocked (0)" GroupName="rules_view" IsChecked="True"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnTabChanged"/>
             <RadioButton x:Name="TabAllowed" Content="🛡️ Custom Whitelist (0)" GroupName="rules_view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnTabChanged"/>
-            <RadioButton x:Name="TabSubscriptions" Content="📁 Subscription Lists (0)" GroupName="rules_view"
+            <RadioButton x:Name="TabSubscriptions" Content="📁 Shared Subscription Lists (0)" GroupName="rules_view"
                          Margin="0,0,16,0" VerticalAlignment="Center" Checked="OnTabChanged"/>
         </WrapPanel>
 
         <!-- Main Content Area -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <!-- 1. CUSTOM BLOCKED PANEL -->
             <Grid x:Name="PanelBlocked" Visibility="Visible">
                 <Grid.RowDefinitions>
@@ -47,10 +75,13 @@
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" Margin="8,0,0,0">
+                        <Button x:Name="MoveScopeBlockedBtn" Content="📱 Move Selected to Phone &amp; TV" Click="OnMoveSelectedBlockedBetweenScopesClick"
+                                Margin="0,0,6,0" Padding="8,2" Foreground="{StaticResource Cyan}"
+                                ToolTip="Move selected blocked domains to the other device scope (PC ↔ Phone &amp; TV)"/>
                         <Button Content="🗑️ Remove Selected" Click="OnRemoveSelectedBlockedClick" Margin="0,0,6,0" Padding="8,2"
                                 Foreground="{StaticResource Magenta}" ToolTip="Remove all currently selected rules (or press Delete)"/>
                         <Button Content="💥 Clear All" Click="OnClearAllBlockedClick" Padding="8,2"
-                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom blocked rules"/>
+                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom blocked rules in the active scope"/>
                     </StackPanel>
                     <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
                     <TextBox x:Name="SearchBlockedBox" TextChanged="OnSearchBlockedChanged" VerticalContentAlignment="Center"
@@ -63,6 +94,7 @@
                         <ContextMenu>
                             <MenuItem Header="🗑️ Remove Selected" Click="OnRemoveSelectedBlockedClick" Foreground="{StaticResource Magenta}"/>
                             <MenuItem Header="🛡️ Move Selected to Whitelist" Click="OnMoveSelectedToAllowedClick" Foreground="{StaticResource Cyan}"/>
+                            <MenuItem x:Name="MoveScopeBlockedMenuItem" Header="📱 Move Selected to Phone &amp; TV List" Click="OnMoveSelectedBlockedBetweenScopesClick" Foreground="{StaticResource Amber}"/>
                             <Separator/>
                             <MenuItem Header="🔎 WHOIS Lookup" Click="OnWhoisBlockedContextItem"/>
                             <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnLookupBlockedContextItem"/>
@@ -96,10 +128,10 @@
 
                 <!-- Add new blocked domain bar -->
                 <DockPanel Grid.Row="2" LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Content="+ Add to Blocklist" Click="OnAddBlockClick"
+                    <Button x:Name="AddBlockBtn" DockPanel.Dock="Right" Content="+ Add to PC Blocklist" Click="OnAddBlockClick"
                             Margin="8,0,0,0" Padding="12,4" Foreground="{StaticResource Magenta}"/>
                     <TextBox x:Name="NewBlockBox" VerticalContentAlignment="Center" KeyDown="OnNewBlockKeyDown"
-                             ToolTip="Type a domain (e.g. adserver.com or *.tracker.com) and press Enter to block."/>
+                             ToolTip="Type a domain (e.g. adserver.com or *.tracker.com) and press Enter to block in the selected scope."/>
                 </DockPanel>
             </Grid>
 
@@ -113,10 +145,13 @@
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" Margin="8,0,0,0">
+                        <Button x:Name="MoveScopeAllowedBtn" Content="📱 Move Selected to Phone &amp; TV" Click="OnMoveSelectedAllowedBetweenScopesClick"
+                                Margin="0,0,6,0" Padding="8,2" Foreground="{StaticResource Cyan}"
+                                ToolTip="Move selected whitelisted domains to the other device scope (PC ↔ Phone &amp; TV)"/>
                         <Button Content="🗑️ Remove Selected" Click="OnRemoveSelectedAllowedClick" Margin="0,0,6,0" Padding="8,2"
                                 Foreground="{StaticResource Magenta}" ToolTip="Remove all currently selected rules (or press Delete)"/>
                         <Button Content="💥 Clear All" Click="OnClearAllAllowedClick" Padding="8,2"
-                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom whitelisted rules"/>
+                                Foreground="{StaticResource Amber}" ToolTip="Remove all custom whitelisted rules in the active scope"/>
                     </StackPanel>
                     <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,6,0"/>
                     <TextBox x:Name="SearchAllowedBox" TextChanged="OnSearchAllowedChanged" VerticalContentAlignment="Center"
@@ -129,6 +164,7 @@
                         <ContextMenu>
                             <MenuItem Header="🗑️ Remove Selected" Click="OnRemoveSelectedAllowedClick" Foreground="{StaticResource Magenta}"/>
                             <MenuItem Header="🚫 Move Selected to Blocklist" Click="OnMoveSelectedToBlockedClick" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem x:Name="MoveScopeAllowedMenuItem" Header="📱 Move Selected to Phone &amp; TV List" Click="OnMoveSelectedAllowedBetweenScopesClick" Foreground="{StaticResource Amber}"/>
                             <Separator/>
                             <MenuItem Header="🔎 WHOIS Lookup" Click="OnWhoisAllowedContextItem"/>
                             <MenuItem Header="🌐 Search Online (VirusTotal)" Click="OnLookupAllowedContextItem"/>
@@ -162,10 +198,10 @@
 
                 <!-- Add new allowed domain bar -->
                 <DockPanel Grid.Row="2" LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Content="+ Add to Whitelist" Click="OnAddAllowClick"
+                    <Button x:Name="AddAllowBtn" DockPanel.Dock="Right" Content="+ Add to PC Whitelist" Click="OnAddAllowClick"
                             Margin="8,0,0,0" Padding="12,4" Foreground="{StaticResource Cyan}"/>
                     <TextBox x:Name="NewAllowBox" VerticalContentAlignment="Center" KeyDown="OnNewAllowKeyDown"
-                             ToolTip="Type a domain (e.g. example.com) and press Enter to allow."/>
+                             ToolTip="Type a domain (e.g. example.com) and press Enter to allow in the selected scope."/>
                 </DockPanel>
             </Grid>
 
@@ -245,14 +281,12 @@
         </Grid>
 
         <!-- Footer -->
-        <DockPanel Grid.Row="3" Margin="0,14,0,0">
+        <DockPanel Grid.Row="4" Margin="0,14,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
                 <Button Content="📥 Import List..." Click="OnImportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
-
-                        Foreground="{StaticResource Cyan}" ToolTip="Import domains or wildcard rules from a Hosts file or text list into the active list"/>
-
+                        Foreground="{StaticResource Cyan}" ToolTip="Import domains or wildcard rules from a Hosts file or text list into the active scope"/>
                 <Button Content="💾 Export List..." Click="OnExportBlocklistClick" Margin="0,0,10,0" Padding="14,4"
-                        Foreground="{StaticResource Cyan}" ToolTip="Export domains as a Hosts file (0.0.0.0 domain) or plain domain list"/>
+                        Foreground="{StaticResource Cyan}" ToolTip="Export domains from the active scope as a Hosts file or plain domain list"/>
                 <Button Content="Close" Click="OnCloseClick" Padding="18,4"/>
             </StackPanel>
             <TextBlock x:Name="DialogStatusText" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>

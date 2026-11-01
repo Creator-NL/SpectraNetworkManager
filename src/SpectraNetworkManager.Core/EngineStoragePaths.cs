@@ -34,6 +34,7 @@ public static class EngineStoragePaths
     public static string HashCachePath => GetMigratedPath("hash-cache.json");
     public static string IpIntelCachePath => GetMigratedPath("ip-intel-cache.json");
     public static string DnsSettingsPath => GetMigratedPath("dns-settings.json");
+    public static string TvMobileRulesPath => GetMigratedPath("tv-mobile-rules.json");
     public static string DnsHistoryPath => GetMigratedPath("dns-history.db");
     public static string NetworkHistoryPath => GetMigratedPath("network-history.db");
     public static string DnsBackupPath => GetMigratedPath("dns-backup.json");

@@ -28,10 +28,13 @@ public partial class DnsCustomRulesWindow : Window
     private readonly ObservableCollection<CustomRuleRow> _allowed = new();
     private readonly ObservableCollection<SubscriptionRow> _subscriptions = new();
 
-    private ICollectionView _blockedView;
-    private ICollectionView _allowedView;
+    private readonly ICollectionView _blockedView;
+    private readonly ICollectionView _allowedView;
 
-    public DnsCustomRulesWindow(DnsService sink, Action onChanged)
+    private bool IsTvMobileScope => ScopeTvMobileRadio?.IsChecked == true;
+    private string ScopeDisplayName => IsTvMobileScope ? "Phone & TV" : "PC";
+
+    public DnsCustomRulesWindow(DnsService sink, Action onChanged, bool openTvMobileScope = false)
     {
         InitializeComponent();
         _sink = sink;
@@ -49,25 +52,69 @@ public partial class DnsCustomRulesWindow : Window
 
         StoragePathText.Text = EngineStoragePaths.BlocklistsDirectory;
 
+        if (openTvMobileScope)
+        {
+            ScopeTvMobileRadio.IsChecked = true;
+        }
+        else
+        {
+            ScopePcRadio.IsChecked = true;
+        }
+
         LoadData();
+    }
+
+    private void OnScopeChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        LoadData();
+        DialogStatusText.Text = IsTvMobileScope
+            ? $"Switched to Phone & Smart TV rules ({Path.GetFileName(_sink.TvMobileRulesFilePath)})."
+            : $"Switched to PC rules ({Path.GetFileName(_sink.PcRulesFilePath)}).";
     }
 
     private void LoadData()
     {
+        bool tvScope = IsTvMobileScope;
+        var activeBlocked = tvScope ? _sink.TvMobileRules.CustomBlock : _sink.Settings.CustomBlock;
+        var activeAllowed = tvScope ? _sink.TvMobileRules.CustomAllow : _sink.Settings.CustomAllow;
+
         _blocked.Clear();
-        foreach (var rule in _sink.Settings.CustomBlock)
+        foreach (var rule in activeBlocked)
         {
             _blocked.Add(new CustomRuleRow(rule));
         }
 
         _allowed.Clear();
-        foreach (var rule in _sink.Settings.CustomAllow)
+        foreach (var rule in activeAllowed)
         {
             _allowed.Add(new CustomRuleRow(rule));
         }
 
-        TabBlocked.Content = $"🚫 Custom Blocked ({_blocked.Count})";
-        TabAllowed.Content = $"🛡️ Custom Whitelist ({_allowed.Count})";
+        int pcTotal = _sink.Settings.CustomBlock.Count + _sink.Settings.CustomAllow.Count;
+        int tvTotal = _sink.TvMobileRules.CustomBlock.Count + _sink.TvMobileRules.CustomAllow.Count;
+
+        if (ScopePcRadio != null)
+            ScopePcRadio.Content = $"💻 PC Rules ({pcTotal:N0} in dns-settings.json)";
+        if (ScopeTvMobileRadio != null)
+            ScopeTvMobileRadio.Content = $"📱 Phone & Smart TV Rules ({tvTotal:N0} in tv-mobile-rules.json)";
+
+        if (ActiveRuleFileText != null)
+            ActiveRuleFileText.Text = tvScope ? _sink.TvMobileRulesFilePath : _sink.PcRulesFilePath;
+
+        string targetLabel = tvScope ? "Phone & TV" : "PC";
+        string otherLabel = tvScope ? "💻 Move Selected to PC List" : "📱 Move Selected to Phone & TV List";
+
+        TabBlocked.Content = $"🚫 {targetLabel} Blocked ({_blocked.Count:N0})";
+        TabAllowed.Content = $"🛡️ {targetLabel} Whitelist ({_allowed.Count:N0})";
+
+        if (AddBlockBtn != null) AddBlockBtn.Content = $"+ Add to {targetLabel} Blocklist";
+        if (AddAllowBtn != null) AddAllowBtn.Content = $"+ Add to {targetLabel} Whitelist";
+
+        if (MoveScopeBlockedBtn != null) MoveScopeBlockedBtn.Content = otherLabel;
+        if (MoveScopeBlockedMenuItem != null) MoveScopeBlockedMenuItem.Header = otherLabel;
+        if (MoveScopeAllowedBtn != null) MoveScopeAllowedBtn.Content = otherLabel;
+        if (MoveScopeAllowedMenuItem != null) MoveScopeAllowedMenuItem.Header = otherLabel;
 
         LoadSubscriptions();
     }
@@ -99,8 +146,29 @@ public partial class DnsCustomRulesWindow : Window
             _subscriptions.Add(new SubscriptionRow(list.Name, list.Url, status, size, lastMod, exists));
         }
 
-        TabSubscriptions.Content = $"📁 Subscription Lists ({_subscriptions.Count})";
-        SubscriptionTotalText.Text = $"Total Active Domains on Blocklists: {_sink.BlockedDomainCount:N0}";
+        TabSubscriptions.Content = $"📁 Shared Subscription Lists ({_subscriptions.Count})";
+        SubscriptionTotalText.Text = $"PC Blocked Domains: {_sink.BlockedDomainCount:N0}  •  Phone & TV Blocked Domains: {_sink.TvMobileBlockedDomainCount:N0}";
+    }
+
+    private void OnOpenActiveRuleFileFolderClick(object sender, RoutedEventArgs e)
+    {
+        string file = IsTvMobileScope ? _sink.TvMobileRulesFilePath : _sink.PcRulesFilePath;
+        try
+        {
+            if (File.Exists(file))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true });
+            }
+            else
+            {
+                string? dir = Path.GetDirectoryName(file);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                {
+                    Process.Start(new ProcessStartInfo("explorer.exe", dir) { UseShellExecute = true });
+                }
+            }
+        }
+        catch { }
     }
 
     private static string GetListFilePath(string folder, BlocklistSource list)
@@ -146,6 +214,23 @@ public partial class DnsCustomRulesWindow : Window
 
     // --- Bulk & Multi-Selection Handlers (Blocked Grid) ---
 
+    private async void OnMoveSelectedBlockedBetweenScopesClick(object sender, RoutedEventArgs e)
+    {
+        var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(this, "Please select one or more blocked domains to move to the other list.", "Move Rules", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        bool fromTvToPc = IsTvMobileScope;
+        string destName = fromTvToPc ? "PC Blocklist (dns-settings.json)" : "Phone & TV Blocklist (tv-mobile-rules.json)";
+        await _sink.MoveRulesBetweenScopesAsync(selected, fromTvMobileToPc: fromTvToPc, isAllowList: false, removeFromSource: true);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Moved {selected.Count:N0} blocked rule(s) to {destName}.";
+    }
+
     private async void OnRemoveSelectedBlockedClick(object sender, RoutedEventArgs e)
     {
         var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
@@ -156,34 +241,42 @@ public partial class DnsCustomRulesWindow : Window
         }
 
         string msg = selected.Count == 1
-            ? $"Are you sure you want to remove '{selected[0]}' from your custom blocklist?"
-            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your custom blocklist?";
+            ? $"Are you sure you want to remove '{selected[0]}' from your {ScopeDisplayName} custom blocklist?"
+            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your {ScopeDisplayName} custom blocklist?";
 
         if (MessageBox.Show(this, msg, "Confirm Remove Selected", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        await _sink.RemoveCustomRulesBatchAsync(selected);
+        if (IsTvMobileScope)
+            await _sink.RemoveTvMobileCustomRulesBatchAsync(selected);
+        else
+            await _sink.RemoveCustomRulesBatchAsync(selected);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from custom blocklist.";
+        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from {ScopeDisplayName} blocklist.";
     }
 
     private async void OnClearAllBlockedClick(object sender, RoutedEventArgs e)
     {
-        int count = _sink.Settings.CustomBlock.Count;
+        int count = IsTvMobileScope ? _sink.TvMobileRules.CustomBlock.Count : _sink.Settings.CustomBlock.Count;
         if (count == 0)
         {
-            MessageBox.Show(this, "The custom blocklist is already empty.", "Clear Blocklist", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, $"The {ScopeDisplayName} custom blocklist is already empty.", "Clear Blocklist", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} custom blocked rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} {ScopeDisplayName} custom blocked rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        await _sink.ClearCustomRulesAsync(allow: false);
+        if (IsTvMobileScope)
+            await _sink.ClearTvMobileCustomRulesAsync(allow: false);
+        else
+            await _sink.ClearCustomRulesAsync(allow: false);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Cleared all {count:N0} custom blocked rules.";
+        DialogStatusText.Text = $"Cleared all {count:N0} {ScopeDisplayName} custom blocked rules.";
     }
 
     private void OnBlockedGridKeyDown(object sender, KeyEventArgs e)
@@ -200,10 +293,14 @@ public partial class DnsCustomRulesWindow : Window
         var selected = BlockedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
         if (selected.Count == 0) return;
 
-        await _sink.MoveRulesAsync(selected, toAllow: true);
+        if (IsTvMobileScope)
+            await _sink.MoveTvMobileRulesAsync(selected, toAllow: true);
+        else
+            await _sink.MoveRulesAsync(selected, toAllow: true);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to whitelist.";
+        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to {ScopeDisplayName} whitelist.";
     }
 
     private void OnWhoisBlockedContextItem(object sender, RoutedEventArgs e)
@@ -236,10 +333,14 @@ public partial class DnsCustomRulesWindow : Window
     {
         if ((sender as Button)?.DataContext is CustomRuleRow row)
         {
-            await _sink.RemoveCustomRuleAsync(row.Domain);
+            if (IsTvMobileScope)
+                await _sink.RemoveTvMobileCustomRuleAsync(row.Domain);
+            else
+                await _sink.RemoveCustomRuleAsync(row.Domain);
+
             LoadData();
             _onChanged();
-            DialogStatusText.Text = $"Removed '{row.Domain}' from custom blocklist.";
+            DialogStatusText.Text = $"Removed '{row.Domain}' from {ScopeDisplayName} blocklist.";
         }
     }
 
@@ -247,10 +348,14 @@ public partial class DnsCustomRulesWindow : Window
     {
         if ((sender as Button)?.DataContext is CustomRuleRow row)
         {
-            await _sink.AllowDomainAsync(row.Domain);
+            if (IsTvMobileScope)
+                await _sink.AllowTvMobileDomainAsync(row.Domain);
+            else
+                await _sink.AllowDomainAsync(row.Domain);
+
             LoadData();
             _onChanged();
-            DialogStatusText.Text = $"Moved '{row.Domain}' to custom whitelist.";
+            DialogStatusText.Text = $"Moved '{row.Domain}' to {ScopeDisplayName} whitelist.";
         }
     }
 
@@ -272,7 +377,7 @@ public partial class DnsCustomRulesWindow : Window
 
     private async void OnAddBlockClick(object sender, RoutedEventArgs e) => await AddBlockFromInputAsync();
 
-    private async void OnNewBlockKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    private async void OnNewBlockKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) await AddBlockFromInputAsync();
     }
@@ -282,14 +387,35 @@ public partial class DnsCustomRulesWindow : Window
         string domain = NewBlockBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(domain)) return;
 
-        await _sink.BlockDomainAsync(domain);
+        if (IsTvMobileScope)
+            await _sink.BlockTvMobileDomainAsync(domain);
+        else
+            await _sink.BlockDomainAsync(domain);
+
         NewBlockBox.Clear();
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Added '{domain}' to custom blocklist.";
+        DialogStatusText.Text = $"Added '{domain}' to {ScopeDisplayName} custom blocklist.";
     }
 
     // --- Bulk & Multi-Selection Handlers (Allowed Grid) ---
+
+    private async void OnMoveSelectedAllowedBetweenScopesClick(object sender, RoutedEventArgs e)
+    {
+        var selected = AllowedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show(this, "Please select one or more whitelisted domains to move to the other list.", "Move Rules", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        bool fromTvToPc = IsTvMobileScope;
+        string destName = fromTvToPc ? "PC Whitelist (dns-settings.json)" : "Phone & TV Whitelist (tv-mobile-rules.json)";
+        await _sink.MoveRulesBetweenScopesAsync(selected, fromTvMobileToPc: fromTvToPc, isAllowList: true, removeFromSource: true);
+        LoadData();
+        _onChanged();
+        DialogStatusText.Text = $"Moved {selected.Count:N0} whitelist rule(s) to {destName}.";
+    }
 
     private async void OnRemoveSelectedAllowedClick(object sender, RoutedEventArgs e)
     {
@@ -301,34 +427,42 @@ public partial class DnsCustomRulesWindow : Window
         }
 
         string msg = selected.Count == 1
-            ? $"Are you sure you want to remove '{selected[0]}' from your whitelist?"
-            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your whitelist?";
+            ? $"Are you sure you want to remove '{selected[0]}' from your {ScopeDisplayName} whitelist?"
+            : $"Are you sure you want to remove {selected.Count:N0} selected rules from your {ScopeDisplayName} whitelist?";
 
         if (MessageBox.Show(this, msg, "Confirm Remove Selected", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        await _sink.RemoveCustomRulesBatchAsync(selected);
+        if (IsTvMobileScope)
+            await _sink.RemoveTvMobileCustomRulesBatchAsync(selected);
+        else
+            await _sink.RemoveCustomRulesBatchAsync(selected);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from whitelist.";
+        DialogStatusText.Text = $"Removed {selected.Count:N0} rule(s) from {ScopeDisplayName} whitelist.";
     }
 
     private async void OnClearAllAllowedClick(object sender, RoutedEventArgs e)
     {
-        int count = _sink.Settings.CustomAllow.Count;
+        int count = IsTvMobileScope ? _sink.TvMobileRules.CustomAllow.Count : _sink.Settings.CustomAllow.Count;
         if (count == 0)
         {
-            MessageBox.Show(this, "The whitelist is already empty.", "Clear Whitelist", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, $"The {ScopeDisplayName} whitelist is already empty.", "Clear Whitelist", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} whitelist rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (MessageBox.Show(this, $"Are you sure you want to delete ALL {count:N0} {ScopeDisplayName} whitelist rules?\n\nThis action cannot be undone.", "Confirm Clear All", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        await _sink.ClearCustomRulesAsync(allow: true);
+        if (IsTvMobileScope)
+            await _sink.ClearTvMobileCustomRulesAsync(allow: true);
+        else
+            await _sink.ClearCustomRulesAsync(allow: true);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Cleared all {count:N0} custom whitelist rules.";
+        DialogStatusText.Text = $"Cleared all {count:N0} {ScopeDisplayName} custom whitelist rules.";
     }
 
     private void OnAllowedGridKeyDown(object sender, KeyEventArgs e)
@@ -345,10 +479,14 @@ public partial class DnsCustomRulesWindow : Window
         var selected = AllowedGrid.SelectedItems.OfType<CustomRuleRow>().Select(r => r.Domain).ToList();
         if (selected.Count == 0) return;
 
-        await _sink.MoveRulesAsync(selected, toAllow: false);
+        if (IsTvMobileScope)
+            await _sink.MoveTvMobileRulesAsync(selected, toAllow: false);
+        else
+            await _sink.MoveRulesAsync(selected, toAllow: false);
+
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to custom blocklist.";
+        DialogStatusText.Text = $"Moved {selected.Count:N0} rule(s) to {ScopeDisplayName} custom blocklist.";
     }
 
     private void OnWhoisAllowedContextItem(object sender, RoutedEventArgs e)
@@ -381,10 +519,14 @@ public partial class DnsCustomRulesWindow : Window
     {
         if ((sender as Button)?.DataContext is CustomRuleRow row)
         {
-            await _sink.RemoveCustomRuleAsync(row.Domain);
+            if (IsTvMobileScope)
+                await _sink.RemoveTvMobileCustomRuleAsync(row.Domain);
+            else
+                await _sink.RemoveCustomRuleAsync(row.Domain);
+
             LoadData();
             _onChanged();
-            DialogStatusText.Text = $"Removed '{row.Domain}' from whitelist.";
+            DialogStatusText.Text = $"Removed '{row.Domain}' from {ScopeDisplayName} whitelist.";
         }
     }
 
@@ -392,10 +534,14 @@ public partial class DnsCustomRulesWindow : Window
     {
         if ((sender as Button)?.DataContext is CustomRuleRow row)
         {
-            await _sink.BlockDomainAsync(row.Domain);
+            if (IsTvMobileScope)
+                await _sink.BlockTvMobileDomainAsync(row.Domain);
+            else
+                await _sink.BlockDomainAsync(row.Domain);
+
             LoadData();
             _onChanged();
-            DialogStatusText.Text = $"Moved '{row.Domain}' to custom blocklist.";
+            DialogStatusText.Text = $"Moved '{row.Domain}' to {ScopeDisplayName} custom blocklist.";
         }
     }
 
@@ -417,7 +563,7 @@ public partial class DnsCustomRulesWindow : Window
 
     private async void OnAddAllowClick(object sender, RoutedEventArgs e) => await AddAllowFromInputAsync();
 
-    private async void OnNewAllowKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    private async void OnNewAllowKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) await AddAllowFromInputAsync();
     }
@@ -427,11 +573,15 @@ public partial class DnsCustomRulesWindow : Window
         string domain = NewAllowBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(domain)) return;
 
-        await _sink.AllowDomainAsync(domain);
+        if (IsTvMobileScope)
+            await _sink.AllowTvMobileDomainAsync(domain);
+        else
+            await _sink.AllowDomainAsync(domain);
+
         NewAllowBox.Clear();
         LoadData();
         _onChanged();
-        DialogStatusText.Text = $"Added '{domain}' to whitelist.";
+        DialogStatusText.Text = $"Added '{domain}' to {ScopeDisplayName} whitelist.";
     }
 
     // --- Subscriptions Tab Actions ---
@@ -560,7 +710,7 @@ public partial class DnsCustomRulesWindow : Window
     private async void OnImportBlocklistClick(object sender, RoutedEventArgs e)
     {
         bool isWhitelist = TabAllowed.IsChecked == true;
-        string listTitle = isWhitelist ? "Custom Whitelist" : "Custom Blocklist";
+        string listTitle = $"{ScopeDisplayName} {(isWhitelist ? "Custom Whitelist" : "Custom Blocklist")}";
 
         var ofd = new Microsoft.Win32.OpenFileDialog
         {
@@ -579,7 +729,9 @@ public partial class DnsCustomRulesWindow : Window
         try
         {
             var lines = await File.ReadAllLinesAsync(filePath);
-            var (added, skipped) = await _sink.ImportCustomRulesAsync(lines, allow: isWhitelist);
+            var (added, skipped) = IsTvMobileScope
+                ? await _sink.ImportTvMobileCustomRulesAsync(lines, allow: isWhitelist)
+                : await _sink.ImportCustomRulesAsync(lines, allow: isWhitelist);
 
             LoadData();
             _onChanged();
@@ -605,12 +757,14 @@ public partial class DnsCustomRulesWindow : Window
 
     private void OnExportBlocklistClick(object sender, RoutedEventArgs e)
     {
-        var listToExport = TabAllowed.IsChecked == true
-            ? _sink.Settings.CustomAllow
-            : _sink.Settings.CustomBlock;
+        bool isWhitelist = TabAllowed.IsChecked == true;
+        var listToExport = IsTvMobileScope
+            ? (isWhitelist ? _sink.TvMobileRules.CustomAllow : _sink.TvMobileRules.CustomBlock)
+            : (isWhitelist ? _sink.Settings.CustomAllow : _sink.Settings.CustomBlock);
 
-        string listName = TabAllowed.IsChecked == true ? "custom-allowlist" : "custom-blocklist";
-        string listTitle = TabAllowed.IsChecked == true ? "Custom Whitelist" : "Custom Blocklist";
+        string scopeSlug = IsTvMobileScope ? "phone-tv" : "pc";
+        string listName = isWhitelist ? $"{scopeSlug}-custom-allowlist" : $"{scopeSlug}-custom-blocklist";
+        string listTitle = $"{ScopeDisplayName} {(isWhitelist ? "Custom Whitelist" : "Custom Blocklist")}";
 
         if (listToExport.Count == 0)
         {

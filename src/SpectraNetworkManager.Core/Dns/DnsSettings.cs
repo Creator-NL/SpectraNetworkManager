@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -159,6 +159,8 @@ public sealed class DnsSettingsStore
 
     public DnsSettingsStore(string file) => _file = file;
 
+    public string FilePath => _file;
+
     public static string DefaultPath => SpectraNetworkManager.Core.EngineStoragePaths.DnsSettingsPath;
 
     public DnsSettings Load()
@@ -181,6 +183,57 @@ public sealed class DnsSettingsStore
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         string temp = _file + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(settings, Json));
+        File.Move(temp, _file, overwrite: true);
+    }
+}
+
+/// <summary>
+/// Separate custom blocklist and whitelist rules specifically for Phone, Tablet, and Smart TV LAN devices.
+/// Stored in its own dedicated file (tv-mobile-rules.json) so blocking or allowing domains on mobile/TV
+/// never affects the host PC's custom blocklist (dns-settings.json), and vice versa.
+/// </summary>
+public sealed class TvMobileRulesConfig
+{
+    public List<string> CustomBlock { get; set; } = new();
+    public List<string> CustomAllow { get; set; } = new();
+}
+
+public sealed class TvMobileRulesStore
+{
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    private readonly string _file;
+
+    public TvMobileRulesStore(string file) => _file = file;
+
+    public string FilePath => _file;
+
+    public static string DefaultPath => SpectraNetworkManager.Core.EngineStoragePaths.TvMobileRulesPath;
+
+    public TvMobileRulesConfig Load()
+    {
+        try
+        {
+            if (!File.Exists(_file)) return new TvMobileRulesConfig();
+            return JsonSerializer.Deserialize<TvMobileRulesConfig>(File.ReadAllText(_file), Json) ?? new TvMobileRulesConfig();
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            try { File.Move(_file, _file + ".bad", overwrite: true); } catch (Exception) { }
+            return new TvMobileRulesConfig();
+        }
+    }
+
+    public void Save(TvMobileRulesConfig config)
+    {
+        var dir = Path.GetDirectoryName(_file);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        string temp = _file + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(config, Json));
         File.Move(temp, _file, overwrite: true);
     }
 }

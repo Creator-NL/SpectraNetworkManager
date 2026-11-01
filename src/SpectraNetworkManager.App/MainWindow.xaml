@@ -1800,6 +1800,9 @@
                             Foreground="{StaticResource Magenta}" ToolTip="Apply mobile ad and tracking SDK blocklists to all phones"/>
                     <Button Content="📱 Launch Mobile Companion &amp; QR" Click="OnLaunchMobileCompanion" Margin="0,0,8,0" Padding="12,4"
                             Foreground="{StaticResource Amber}" ToolTip="Start the mobile HTTP companion server and show one-time QR code"/>
+                    <Button x:Name="TvManageBlocklistBtn" Content="📋 Phone &amp; TV Blocklist" Click="OnManageTvMobileRulesClick" Margin="0,0,8,0" Padding="10,4"
+                            Foreground="{StaticResource Cyan}" FontWeight="SemiBold"
+                            ToolTip="Manage the dedicated Phone &amp; Smart TV custom blocklist and whitelist (stored separately in tv-mobile-rules.json)"/>
                     <Button Content="⚙️ DNS Setup Guide" Click="OnShowDnsSetupGuide" Margin="0,0,8,0" Padding="10,4"
                             ToolTip="Step-by-step DNS onboarding instructions for Samsung, LG, Roku, Apple TV, and Android"/>
                     <Button Content="🔄 Refresh Devices" Click="OnRefreshTvMobileDevices" Padding="10,4"/>
@@ -2021,16 +2024,18 @@
                                 <Border x:Name="TvInspectorQueryActionBar" Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,5" Margin="0,0,0,6">
                                     <DockPanel LastChildFill="True">
                                         <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
-                                            <Button x:Name="TvQueryBlockBtn" Content="🚫 Block Domain" Click="OnTvQueryBlockClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Magenta}" FontWeight="SemiBold"
-                                                    ToolTip="Add this exact domain to your custom blocklist and block it immediately on all devices"/>
+                                            <Button x:Name="TvQueryBlockBtn" Content="🚫 Block on Phone/TV" Click="OnTvQueryBlockClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Magenta}" FontWeight="SemiBold"
+                                                    ToolTip="Add this domain to your dedicated Phone &amp; TV blocklist (tv-mobile-rules.json) — your PC is not affected"/>
                                             <Button x:Name="TvQueryBlockRootBtn" Content="🚫 Block Root (*.domain)" Click="OnTvQueryBlockRootClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Magenta}"
-                                                    ToolTip="Block the root domain and all of its subdomains"/>
-                                            <Button x:Name="TvQueryAllowBtn" Content="🛡️ Allow Domain" Click="OnTvQueryAllowClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Cyan}"
-                                                    ToolTip="Whitelist this domain so it is never blocked"/>
+                                                    ToolTip="Block the root domain and all subdomains on Phone &amp; TV (stored in tv-mobile-rules.json)"/>
+                                            <Button x:Name="TvQueryAllowBtn" Content="🛡️ Allow on Phone/TV" Click="OnTvQueryAllowClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Cyan}"
+                                                    ToolTip="Whitelist this domain on Phone &amp; TV (tv-mobile-rules.json) so it is never blocked"/>
                                             <Button x:Name="TvQueryUndoCustomBtn" Content="✕ Undo Rule" Click="OnTvQueryRemoveCustomClick" Visibility="Collapsed" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Amber}"
-                                                    ToolTip="Remove this domain from your custom block/allow list"/>
+                                                    ToolTip="Remove this domain from your Phone &amp; TV custom block/allow list"/>
                                             <Button Content="✨ Investigate with AI" Click="OnTvQueryInvestigateAiClick" Padding="8,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Cyan}" FontWeight="SemiBold"
                                                     ToolTip="Analyze this domain with Spectra AI and Domain Intelligence"/>
+                                            <Button Content="📋 Phone/TV List" Click="OnManageTvMobileRulesClick" Padding="7,2" FontSize="10.5" Margin="0,0,6,0" Foreground="{StaticResource Amber}"
+                                                    ToolTip="Open the Phone &amp; Smart TV custom blocklist manager (tv-mobile-rules.json)"/>
                                             <Button Content="🔎 WHOIS" Click="OnTvQueryWhoisClick" Padding="7,2" FontSize="10.5" Margin="0,0,6,0"
                                                     ToolTip="Open WHOIS registration lookup for this domain"/>
                                             <Button Content="🌐 VirusTotal" Click="OnTvQueryVirusTotalClick" Padding="7,2" FontSize="10.5" Margin="0,0,6,0"
@@ -2039,7 +2044,7 @@
                                                     ToolTip="Copy domain name to clipboard"/>
                                         </WrapPanel>
                                         <TextBlock x:Name="TvInspectorSelectedDomainInfoText"
-                                                   Text="💡 Click or right-click any domain row below to Block Ad Domain, Whitelist, or Investigate with Spectra AI."
+                                                   Text="💡 Click or right-click any domain row below to Block on Phone/TV (saved separately in tv-mobile-rules.json), Whitelist, or Investigate with Spectra AI."
                                                    FontSize="10.5" Foreground="{StaticResource Text}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,10,0"/>
                                     </DockPanel>
                                 </Border>

@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace SpectraNetworkManager.Sinkhole;
@@ -107,7 +107,15 @@ public sealed class BlocklistManager
     }
 
     /// <summary>Builds the filter from the downloaded lists plus your own rules. Lists that were never downloaded are skipped.</summary>
-    public DomainFilter LoadFilter(DnsSettings settings, out FilterLoadInfo info)
+    public DomainFilter LoadFilter(DnsSettings settings, out FilterLoadInfo info) =>
+        LoadFilterWithCustomRules(settings, settings.CustomBlock, settings.CustomAllow, out info);
+
+    /// <summary>Builds a filter from the downloaded subscription lists plus the specified custom block and allow rules.</summary>
+    public DomainFilter LoadFilterWithCustomRules(
+        DnsSettings settings,
+        IEnumerable<string> customBlock,
+        IEnumerable<string> customAllow,
+        out FilterLoadInfo info)
     {
         var builder = new DomainFilterBuilder();
         var notes = new List<string>();
@@ -132,8 +140,8 @@ public sealed class BlocklistManager
             }
         }
 
-        foreach (var rule in settings.CustomBlock) builder.AddCustom(rule, allow: false);
-        foreach (var rule in settings.CustomAllow) builder.AddCustom(rule, allow: true);
+        foreach (var rule in customBlock) builder.AddCustom(rule, allow: false);
+        foreach (var rule in customAllow) builder.AddCustom(rule, allow: true);
         notes.AddRange(builder.Warnings);
 
         var filter = builder.Build();

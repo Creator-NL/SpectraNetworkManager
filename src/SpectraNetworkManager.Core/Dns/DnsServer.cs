@@ -68,7 +68,8 @@ public sealed class DnsServer : IDisposable
         DnsRateLimiter? rateLimiter = null,
         ClientGroupManager? groupManager = null,
         ConditionalForwarder? conditionalForwarder = null,
-        DnsHistoryDatabase? historyDb = null)
+        DnsHistoryDatabase? historyDb = null,
+        Func<DomainFilter>? lanFilter = null)
     {
         _settings = settings;
         _filter = filter;
@@ -78,7 +79,7 @@ public sealed class DnsServer : IDisposable
         _isBlockingPaused = isBlockingPaused;
         _clientAccessPolicy = clientAccessPolicy ?? new ClientAccessPolicy(settings.RestrictClientsToLocalNetwork, settings.AllowedClientRanges);
         _rateLimiter = rateLimiter ?? new DnsRateLimiter(settings.RateLimitPerSecond);
-        _groupManager = groupManager ?? new ClientGroupManager(settings.ClientGroups, filter);
+        _groupManager = groupManager ?? new ClientGroupManager(settings.ClientGroups, filter, lanFilter);
         _conditionalForwarder = conditionalForwarder ?? new ConditionalForwarder(settings.ConditionalForwarding);
         _historyDb = historyDb;
     }
@@ -414,6 +415,19 @@ public sealed class DnsServer : IDisposable
         var cached = _cache.TryGet(key, q.Id, DateTimeOffset.Now);
         if (cached is not null)
         {
+            if (_settings.InspectCnames && effectiveBlocking && decision.Action != FilterAction.Allowed)
+            {
+                foreach (var target in DnsWire.CnameTargets(cached))
+                {
+                    var d = groupFilter.Decide(target);
+                    if (d.Action == FilterAction.Blocked)
+                    {
+                        Log(DnsOutcome.Blocked, $"alias of {target} ({d.Reason})");
+                        return Fit(BlockedAnswer(q, group.BlockModeOverride ?? _settings.BlockMode), q, tcp);
+                    }
+                }
+            }
+
             string? detail = decision.Action == FilterAction.Allowed ? decision.Reason : null;
             if (string.IsNullOrEmpty(detail))
             {
