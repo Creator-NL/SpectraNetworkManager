@@ -583,9 +583,6 @@ public static class StartupManager
                 string id = $"{kind}|{fileName}";
                 string exePath = ExtractExecutablePath(file);
                 bool isEnabled = !disabledByWindows.Contains(fileName);
-                string displayCmd = !string.Equals(exePath, file, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(exePath)
-                    ? $"\"{file}\" -> \"{exePath}\""
-                    : file;
 
                 target[id] = new StartupEntry(
                     Id: id,
@@ -596,7 +593,7 @@ public static class StartupManager
                     SourceKind: kind,
                     IsEnabled: isEnabled,
                     RequiresAdmin: requiresAdmin,
-                    PublisherHint: ResolvePublisherHint(exePath, displayCmd));
+                    PublisherHint: ResolvePublisherHint(exePath, null));
             }
         }
         catch { }
@@ -1117,22 +1114,30 @@ public static class StartupManager
                     string entryId = $"{StartupSourceKind.WindowsService}|{svcName}";
                     bool inVault = vault.Any(v => string.Equals(v.Id, entryId, StringComparison.OrdinalIgnoreCase));
 
-                    // Include Automatic (Start == 2) services, or Manual (Start == 3) services that were disabled in Spectra or belong to packaged WindowsApps (like CodexSandboxService)
+                    // Include Automatic (Start == 2) services, or Manual/Disabled (Start == 3 or 4) services that were disabled in Spectra or belong to packaged WindowsApps (like CodexSandboxService / CoworkVMService)
                     string rawImagePath = svcKey.GetValue("ImagePath")?.ToString()?.Trim() ?? "";
                     if (string.IsNullOrWhiteSpace(rawImagePath)) continue;
 
                     bool isWindowsAppService = rawImagePath.Contains("WindowsApps", StringComparison.OrdinalIgnoreCase)
-                                            || svcName.Contains("Codex", StringComparison.OrdinalIgnoreCase);
+                                            || svcName.Contains("Codex", StringComparison.OrdinalIgnoreCase)
+                                            || (type & 0x200) != 0;
 
-                    if (start != 2 && !inVault && !(start == 3 && isWindowsAppService))
+                    if (start != 2 && !inVault && !(start is 3 or 4 && isWindowsAppService))
                         continue;
 
                     string exePath = ExtractExecutablePath(rawImagePath);
                     if (string.IsNullOrWhiteSpace(exePath)) continue;
 
-                    // Skip built-in Windows OS services hosted in C:\Windows (svchost, System32 OS services, Windows Defender core)
-                    if (exePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
+                    // Skip built-in Windows OS services hosted in C:\Windows or Windows Defender / Security Health core services
+                    if (exePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase) ||
+                        exePath.Contains(@"Microsoft\Windows Defender", StringComparison.OrdinalIgnoreCase) ||
+                        svcName.Equals("WinDefend", StringComparison.OrdinalIgnoreCase) ||
+                        svcName.Equals("MDCoreSvc", StringComparison.OrdinalIgnoreCase) ||
+                        svcName.Equals("WdNisSvc", StringComparison.OrdinalIgnoreCase) ||
+                        svcName.Equals("Sense", StringComparison.OrdinalIgnoreCase))
+                    {
                         continue;
+                    }
 
                     string? publisher = ResolvePublisherHint(exePath, null);
                     if (publisher != null &&
@@ -1183,6 +1188,27 @@ public static class StartupManager
 
     private static async Task<bool> RunScConfigAsync(string serviceName, string startMode)
     {
+        bool enable = string.Equals(startMode, "auto", StringComparison.OrdinalIgnoreCase);
+        int targetStartDword = enable ? 2 : 3; // 2 = SERVICE_AUTO_START, 3 = SERVICE_DEMAND_START (Manual)
+
+        // 1. Try direct Registry update on HKLM\SYSTEM\CurrentControlSet\Services\<serviceName> first.
+        // Packaged MSIX services (Type 0x210 like Claude's CoworkVMService and OpenAI's CodexSandboxService)
+        // reject sc.exe OpenService/ChangeServiceConfig with Access Denied (Error 5), whereas BUILTIN\Administrators
+        // has FullControl on the service registry key.
+        bool regSuccess = false;
+        try
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var svcKey = baseKey.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{serviceName}", writable: true);
+            if (svcKey != null)
+            {
+                svcKey.SetValue("Start", targetStartDword, RegistryValueKind.DWord);
+                regSuccess = true;
+            }
+        }
+        catch { }
+
+        // 2. Also notify Service Control Manager via sc.exe (succeeds for classic Win32 services)
         try
         {
             var psi = new ProcessStartInfo
@@ -1203,7 +1229,13 @@ public static class StartupManager
         }
         catch { }
 
-        return await RunElevatedCmdAsync($"sc config \"{serviceName}\" start= {startMode}");
+        if (regSuccess)
+        {
+            return true;
+        }
+
+        // 3. Fallback when Spectra is running as Standard User (non-elevated): prompt UAC to update registry + sc config
+        return await RunElevatedCmdAsync($"reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\{serviceName}\" /v Start /t REG_DWORD /d {targetStartDword} /f");
     }
 
     private static void ScanScheduledTasks(Dictionary<string, StartupEntry> target)
