@@ -232,7 +232,7 @@ public static class BrowserExtensionHost
                         enabled = guardManager.Config.ExtensionEnabled,
                         blockYouTubeAds = guardManager.Config.BlockYouTubeAds,
                         blockYouTubeAnnotations = guardManager.Config.BlockYouTubeAnnotations,
-                        blockYouTubeShorts = guardManager.Config.BlockYouTubeShorts,
+                        blockYouTubeShorts = guardManager.Config.BlockYouTubeShorts && guardManager.Config.CustomRules.Any(r => r.Id == "yt-shorts" && r.Enabled),
                         placeholder = guardManager.Config.ShowInPagePlaceholder,
                         rulesJson = guardManager.ExportMv3DynamicRulesJson(),
                         customRules = guardManager.Config.CustomRules.Where(r => r.Enabled).Select(r => new

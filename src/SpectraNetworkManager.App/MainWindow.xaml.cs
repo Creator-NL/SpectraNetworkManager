@@ -7532,9 +7532,12 @@ public partial class MainWindow : Window
         _isUpdatingGuardUi = true;
         try
         {
-            if (GuardBlockShortsCheck != null) GuardBlockShortsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeShorts;
-            if (GuardBlockStreamsCheck != null) GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams;
-            if (GuardBlockTikTokCheck != null) GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds;
+            if (GuardBlockShortsCheck != null)
+                GuardBlockShortsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeShorts && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-shorts" && r.Enabled);
+            if (GuardBlockStreamsCheck != null)
+                GuardBlockStreamsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeVideoStreams && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-video-stream" && r.Enabled);
+            if (GuardBlockTikTokCheck != null)
+                GuardBlockTikTokCheck.IsChecked = _browserGuardManager.Config.BlockSocialVideoFeeds && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "tiktok-feed" && r.Enabled);
             if (GuardPlaceholderCheck != null) GuardPlaceholderCheck.IsChecked = _browserGuardManager.Config.ShowInPagePlaceholder;
             if (GuardBlockAdsCheck != null) GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAds && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
             if (GuardBlockAnnotationsCheck != null) GuardBlockAnnotationsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAnnotations;

@@ -40,6 +40,9 @@ public sealed class BrowserGuardManager
                     {
                         Config = cfg;
                         EnsureBuiltInRules();
+                        Config.BlockYouTubeShorts = Config.BlockYouTubeShorts && Config.CustomRules.Any(r => r.Id.Equals("yt-shorts", StringComparison.OrdinalIgnoreCase) && r.Enabled);
+                        Config.BlockYouTubeVideoStreams = Config.BlockYouTubeVideoStreams && Config.CustomRules.Any(r => r.Id.Equals("yt-video-stream", StringComparison.OrdinalIgnoreCase) && r.Enabled);
+                        Config.BlockSocialVideoFeeds = Config.BlockSocialVideoFeeds && Config.CustomRules.Any(r => r.Id.Equals("tiktok-feed", StringComparison.OrdinalIgnoreCase) && r.Enabled);
                         return;
                     }
                 }
@@ -339,6 +342,18 @@ public sealed class BrowserGuardManager
             var r = Config.CustomRules.FirstOrDefault(x => x.Id == id);
             if (r == null) return false;
             r.Enabled = enabled;
+            if (id.Equals("yt-shorts", StringComparison.OrdinalIgnoreCase))
+            {
+                Config.BlockYouTubeShorts = enabled;
+            }
+            else if (id.Equals("yt-video-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                Config.BlockYouTubeVideoStreams = enabled;
+            }
+            else if (id.Equals("tiktok-feed", StringComparison.OrdinalIgnoreCase))
+            {
+                Config.BlockSocialVideoFeeds = enabled;
+            }
             Save();
             return true;
         }
