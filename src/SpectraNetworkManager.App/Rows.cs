@@ -493,6 +493,7 @@ public sealed class TvMobileDeviceRow : INotifyPropertyChanged
 /// <summary>One row in the Browser Guard rules table.</summary>
 public sealed class BrowserGuardRuleRow : INotifyPropertyChanged
 {
+    private readonly Action<BrowserGuardRuleRow, bool>? _onToggled;
     public SpectraNetworkManager.Core.BrowserGuard.BrowserGuardRule Rule { get; }
 
     public string Id => Rule.Id;
@@ -514,14 +515,16 @@ public sealed class BrowserGuardRuleRow : INotifyPropertyChanged
             if (Rule.Enabled != value)
             {
                 Rule.Enabled = value;
+                _onToggled?.Invoke(this, value);
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEnabled)));
             }
         }
     }
 
-    public BrowserGuardRuleRow(SpectraNetworkManager.Core.BrowserGuard.BrowserGuardRule rule)
+    public BrowserGuardRuleRow(SpectraNetworkManager.Core.BrowserGuard.BrowserGuardRule rule, Action<BrowserGuardRuleRow, bool>? onToggled = null)
     {
         Rule = rule;
+        _onToggled = onToggled;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

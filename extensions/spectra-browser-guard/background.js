@@ -214,6 +214,52 @@ api.runtime.onStartup.addListener(() => {
   connectNativeHost();
 });
 
+// Handle popup inquiries and in-browser rule toggling
+if (api.runtime && api.runtime.onMessage) {
+  api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg && msg.type === "get_status") {
+      api.storage.local.get([
+        "blockYouTubeAds",
+        "blockYouTubeAnnotations",
+        "blockYouTubeShorts",
+        "customRules"
+      ], (stored) => {
+        sendResponse({
+          connected: syncedWithNativeHost,
+          blockYouTubeShorts: stored.blockYouTubeShorts === true,
+          blockYouTubeAds: stored.blockYouTubeAds !== false
+        });
+      });
+      return true; // asynchronous response
+    }
+
+    if (msg && msg.type === "toggle_rule") {
+      if (msg.id === "yt-shorts") {
+        const enabled = Boolean(msg.enabled);
+        api.storage.local.set({ blockYouTubeShorts: enabled }).then(() => {
+          if (api.tabs && api.tabs.query) {
+            api.tabs.query({}).then((tabs) => {
+              for (const tab of tabs) {
+                if (tab.id) {
+                  api.tabs.sendMessage(tab.id, {
+                    type: "spectra_rules_updated",
+                    blockYouTubeShorts: enabled
+                  }).catch(() => {});
+                }
+              }
+            });
+          }
+        });
+        if (nativePort) {
+          try {
+            nativePort.postMessage({ type: "toggle_rule", id: "yt-shorts", enabled: enabled });
+          } catch {}
+        }
+      }
+    }
+  });
+}
+
 function requestRulesSync() {
   if (!nativePort) {
     connectNativeHost();

@@ -40,6 +40,7 @@
         if (Array.isArray(res.customRules)) activeCustomRules = res.customRules;
         syncAttributes();
         checkPageBlockRules(true);
+        inspectShortsElements();
       }
     );
 
@@ -53,6 +54,7 @@
       }
       syncAttributes();
       checkPageBlockRules(true);
+      inspectShortsElements();
     });
   }
 
@@ -64,6 +66,7 @@
         if (msg.blockYouTubeAds !== undefined) blockYouTubeAds = msg.blockYouTubeAds;
         syncAttributes();
         checkPageBlockRules(true);
+        inspectShortsElements();
       }
     });
   }
@@ -134,9 +137,8 @@
     for (const rule of activeCustomRules) {
       if (!rule || rule.action === "allow") continue;
 
-      // Do not block Shorts if Shorts blocking is disabled in settings
-      if (rule.id === "yt-shorts" && !blockYouTubeShorts) continue;
-      if (rule.id === "yt-video-stream") continue;
+      // Shorts overlay is handled exclusively by inspectShortsElements; skip here
+      if (rule.id === "yt-shorts" || rule.id === "yt-video-stream") continue;
 
       // Check YouTube Video ID match
       if (isYouTubeHost && currentVid) {
@@ -272,21 +274,39 @@
   }
 
   // Listen to YouTube SPA navigation events & browser history
-  window.addEventListener("yt-navigate-finish", () => checkPageBlockRules(true));
-  window.addEventListener("yt-page-data-updated", () => checkPageBlockRules(true));
-  window.addEventListener("popstate", () => checkPageBlockRules(true));
-  window.addEventListener("hashchange", () => checkPageBlockRules(true));
+  window.addEventListener("yt-navigate-finish", () => {
+    checkPageBlockRules(true);
+    inspectShortsElements();
+  });
+  window.addEventListener("yt-page-data-updated", () => {
+    checkPageBlockRules(true);
+    inspectShortsElements();
+  });
+  window.addEventListener("popstate", () => {
+    checkPageBlockRules(true);
+    inspectShortsElements();
+  });
+  window.addEventListener("hashchange", () => {
+    checkPageBlockRules(true);
+    inspectShortsElements();
+  });
 
   // Hook pushState / replaceState for dynamic client-side URL updates
   const origPush = history.pushState;
   history.pushState = function () {
     origPush.apply(this, arguments);
-    setTimeout(() => checkPageBlockRules(true), 20);
+    setTimeout(() => {
+      checkPageBlockRules(true);
+      inspectShortsElements();
+    }, 20);
   };
   const origReplace = history.replaceState;
   history.replaceState = function () {
     origReplace.apply(this, arguments);
-    setTimeout(() => checkPageBlockRules(true), 20);
+    setTimeout(() => {
+      checkPageBlockRules(true);
+      inspectShortsElements();
+    }, 20);
   };
 
   // ---- Main-World Script Injection for Native YouTube Player API Access ----
@@ -469,28 +489,47 @@
   }
 
   // ---- Blocked Shorts Overlay ----
+  function shouldBlockShorts() {
+    if (!isYouTubeHost || !window.location.href.includes("/shorts/")) return false;
+
+    // 1. If custom rules are loaded from SpectraNetworkManager:
+    // When the user disables the Shorts rule, activeCustomRules will NOT contain 'yt-shorts'.
+    if (activeCustomRules && activeCustomRules.length > 0) {
+      const hasShortsRule = activeCustomRules.some(r => r.id === "yt-shorts" && r.action !== "allow");
+      return Boolean(blockYouTubeShorts && hasShortsRule);
+    }
+
+    // 2. Standalone fallback (before sync or if running without host)
+    return Boolean(blockYouTubeShorts);
+  }
+
   function inspectShortsElements() {
     const isShortsPage = isYouTubeHost && window.location.href.includes("/shorts/");
-    const shortsContainer = document.querySelector("ytd-shorts, #shorts-container");
+    const shortsContainers = document.querySelectorAll("ytd-shorts, #shorts-container, ytd-reel-video-renderer");
 
-    if (blockYouTubeShorts && isShortsPage) {
-      if (shortsContainer && shortsContainer.dataset.spectraGuarded !== "true") {
-        shortsContainer.dataset.spectraGuarded = "true";
-        haltActiveVideo();
-        let overlay = document.getElementById("spectra-shorts-blocked-overlay");
-        if (!overlay) {
-          overlay = document.createElement("div");
-          overlay.id = "spectra-shorts-blocked-overlay";
-          overlay.className = "spectra-media-blocked-overlay spectra-shorts-overlay";
-          overlay.innerHTML = `
-            <div class="spectra-overlay-icon">🛡️</div>
-            <div class="spectra-overlay-title">SHORTS FEED BLOCKED BY SPECTRA GUARD</div>
-            <div class="spectra-overlay-desc">YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.</div>
-          `;
-          if (shortsContainer.parentNode) {
-            shortsContainer.style.display = "none";
-            shortsContainer.parentNode.insertBefore(overlay, shortsContainer);
-          }
+    if (shouldBlockShorts()) {
+      for (const container of shortsContainers) {
+        if (container.dataset.spectraGuarded !== "true") {
+          container.dataset.spectraGuarded = "true";
+          container.style.display = "none";
+        }
+      }
+      haltActiveVideo();
+      let overlay = document.getElementById("spectra-shorts-blocked-overlay");
+      if (!overlay) {
+        overlay = document.createElement("div");
+        overlay.id = "spectra-shorts-blocked-overlay";
+        overlay.className = "spectra-media-blocked-overlay spectra-shorts-overlay";
+        overlay.innerHTML = `
+          <div class="spectra-overlay-icon">🛡️</div>
+          <div class="spectra-overlay-title">SHORTS FEED BLOCKED BY SPECTRA GUARD</div>
+          <div class="spectra-overlay-desc">YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.</div>
+        `;
+        const firstContainer = document.querySelector("ytd-shorts, #shorts-container");
+        if (firstContainer && firstContainer.parentNode) {
+          firstContainer.parentNode.insertBefore(overlay, firstContainer);
+        } else if (document.body) {
+          document.body.appendChild(overlay);
         }
       }
     } else {
@@ -499,13 +538,13 @@
       if (overlay) overlay.remove();
 
       // Clean up any other non-custom overlays
-      const genericOverlays = document.querySelectorAll(".spectra-media-blocked-overlay.spectra-shorts-overlay, .spectra-media-blocked-overlay:not(.spectra-custom-block)");
+      const genericOverlays = document.querySelectorAll(".spectra-media-blocked-overlay.spectra-shorts-overlay, #spectra-shorts-blocked-overlay");
       for (const o of genericOverlays) o.remove();
 
-      if (shortsContainer) {
-        shortsContainer.dataset.spectraGuarded = "false";
-        if (shortsContainer.style.display === "none") {
-          shortsContainer.style.display = "";
+      for (const container of shortsContainers) {
+        container.dataset.spectraGuarded = "false";
+        if (container.style.display === "none") {
+          container.style.display = "";
         }
       }
     }

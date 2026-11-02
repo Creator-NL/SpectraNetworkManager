@@ -7513,7 +7513,7 @@ public partial class MainWindow : Window
         BrowserGuardRuleRow? reselected = null;
         foreach (var rule in _browserGuardManager.Config.CustomRules)
         {
-            var rRow = new BrowserGuardRuleRow(rule);
+            var rRow = new BrowserGuardRuleRow(rule, OnRuleRowToggled);
             BrowserGuardRules.Add(rRow);
             if (rule.Id == prevSelectedId) reselected = rRow;
         }
@@ -8566,15 +8566,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnRuleRowToggled(BrowserGuardRuleRow row, bool isEnabled)
+    {
+        if (_browserGuardManager == null || _isUpdatingGuardUi) return;
+        _browserGuardManager.ToggleRule(row.Id, isEnabled);
+        RefreshBrowserGuardUi();
+        if (BrowserGuardGrid?.SelectedItem is BrowserGuardRuleRow selected && selected.Id == row.Id)
+        {
+            UpdateGuardInspectorUi(selected);
+        }
+        StatusText.Text = $"Rule '{row.Title}' is now {(isEnabled ? "Active" : "Disabled")}.";
+    }
+
     private void OnInspectorToggleGuardRule(object sender, RoutedEventArgs e)
     {
         if (BrowserGuardGrid.SelectedItem is BrowserGuardRuleRow row)
         {
-            bool newState = !row.IsEnabled;
-            row.IsEnabled = newState;
-            _browserGuardManager.ToggleRule(row.Id, newState);
-            UpdateGuardInspectorUi(row);
-            StatusText.Text = $"Rule '{row.Title}' is now {(newState ? "Active" : "Disabled")}.";
+            row.IsEnabled = !row.IsEnabled;
         }
     }
 
