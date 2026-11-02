@@ -501,6 +501,9 @@ public sealed class BrowserGuardRuleRow : INotifyPropertyChanged
     public string Description => Rule.Description;
     public string ResourceType => Rule.ResourceType;
     public string ActionDisplay => Rule.Action == SpectraNetworkManager.Core.BrowserGuard.GuardAction.Block ? "🚫 BLOCK" : "🛡️ ALLOW";
+    public string ActionText => Rule.Action == SpectraNetworkManager.Core.BrowserGuard.GuardAction.Block ? "BLOCK" : "ALLOW";
+    public string RuleTypeText => Rule.IsBuiltIn ? "BUILT-IN RULE" : "CUSTOM RULE";
+    public string DnrFilter => SpectraNetworkManager.Core.BrowserGuard.BrowserGuardManager.ToDnrUrlFilter(Rule.Pattern);
     public bool IsBuiltIn => Rule.IsBuiltIn;
 
     public bool IsEnabled

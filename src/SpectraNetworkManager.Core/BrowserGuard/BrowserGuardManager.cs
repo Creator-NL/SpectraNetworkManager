@@ -215,15 +215,101 @@ public sealed class BrowserGuardManager
         };
     }
 
+    private static readonly System.Text.RegularExpressions.Regex YouTubeVideoRegex = new(
+        @"(?:v=|\/embed\/|\/shorts\/|youtu\.be\/|\/v\/)([a-zA-Z0-9_-]{11})",
+        System.Text.RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromSeconds(1));
+
+    public static bool TryExtractYouTubeVideoId(string input, out string videoId)
+    {
+        videoId = "";
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        var m = YouTubeVideoRegex.Match(input);
+        if (m.Success)
+        {
+            videoId = m.Groups[1].Value;
+            return true;
+        }
+        return false;
+    }
+
+    public static string NormalizePattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return "";
+        string p = pattern.Trim();
+        if (TryExtractYouTubeVideoId(p, out string videoId))
+        {
+            return $"*://*.youtube.com/watch*v={videoId}*";
+        }
+        if (!p.Contains("://", StringComparison.Ordinal) && !p.StartsWith('*') && !p.StartsWith("||", StringComparison.Ordinal))
+        {
+            if (p.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                p = string.Concat("*://*.", p.AsSpan(4), p.EndsWith('*') ? "" : "/*");
+            else
+                p = string.Concat("*://*.", p, p.EndsWith('*') ? "" : "/*");
+        }
+        return p;
+    }
+
+    public static string ToDnrUrlFilter(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return "*";
+        string p = pattern.Trim();
+        if (p.StartsWith("*://*.", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(6));
+        }
+        if (p.StartsWith("*://", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(4));
+        }
+        if (p.StartsWith("https://www.", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(12));
+        }
+        if (p.StartsWith("http://www.", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(11));
+        }
+        if (p.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(8));
+        }
+        if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat("||", p.AsSpan(7));
+        }
+        return p;
+    }
+
     public void AddRule(string title, string pattern, string description, GuardAction action = GuardAction.Block, string resourceType = "all")
     {
         lock (_lock)
         {
+            string cleanPattern = NormalizePattern(pattern);
+            string finalTitle = title?.Trim() ?? "";
+
+            if (TryExtractYouTubeVideoId(pattern, out string videoId))
+            {
+                if (string.IsNullOrWhiteSpace(finalTitle) || finalTitle.Equals(pattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    finalTitle = $"Block YouTube Video: {videoId}";
+                }
+                if (string.IsNullOrWhiteSpace(description) || description.Contains(pattern))
+                {
+                    description = $"Blocks playback and navigation for YouTube video ID {videoId}.";
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(finalTitle))
+            {
+                finalTitle = cleanPattern;
+            }
+
             var rule = new BrowserGuardRule
             {
-                Title = string.IsNullOrWhiteSpace(title) ? pattern : title.Trim(),
-                Pattern = pattern.Trim(),
-                Description = description.Trim(),
+                Title = finalTitle,
+                Pattern = cleanPattern,
+                Description = string.IsNullOrWhiteSpace(description) ? $"Custom rule for {cleanPattern}" : description.Trim(),
                 Action = action,
                 ResourceType = resourceType,
                 Enabled = true,
@@ -302,7 +388,7 @@ public sealed class BrowserGuardManager
                         },
                         ["condition"] = new Dictionary<string, object>
                         {
-                            ["urlFilter"] = rule.Pattern,
+                            ["urlFilter"] = ToDnrUrlFilter(rule.Pattern),
                             ["resourceTypes"] = resourceTypes
                         }
                     };
@@ -323,7 +409,7 @@ public sealed class BrowserGuardManager
             "xmlhttprequest" => new[] { "xmlhttprequest" },
             "script" => new[] { "script" },
             "main_frame" => new[] { "main_frame" },
-            _ => new[] { "main_frame", "sub_frame", "media", "xmlhttprequest", "image", "script" }
+            _ => new[] { "main_frame", "sub_frame", "media", "xmlhttprequest", "image", "script", "stylesheet", "font", "ping", "websocket", "other" }
         };
     }
 }

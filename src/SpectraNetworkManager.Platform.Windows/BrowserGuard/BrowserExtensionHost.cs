@@ -69,16 +69,40 @@ public static class BrowserExtensionHost
                 k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
             }
 
-            // 4. Register in Edge registry
+            // 4. Register in Chromium registry
+            using (var k = Registry.CurrentUser.CreateSubKey($@"Software\Chromium\NativeMessagingHosts\{HostName}"))
+            {
+                k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
+            }
+
+            // 5. Register in Edge registry
             using (var k = Registry.CurrentUser.CreateSubKey($@"Software\Microsoft\Edge\NativeMessagingHosts\{HostName}"))
             {
                 k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
             }
 
-            // 5. Register in Firefox registry
+            // 6. Register in Firefox registry
             using (var k = Registry.CurrentUser.CreateSubKey($@"Software\Mozilla\NativeMessagingHosts\{HostName}"))
             {
                 k?.SetValue("", firefoxManifestPath, RegistryValueKind.String);
+            }
+
+            // 7. Register in Brave registry
+            using (var k = Registry.CurrentUser.CreateSubKey($@"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HostName}"))
+            {
+                k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
+            }
+
+            // 8. Register in Vivaldi registry
+            using (var k = Registry.CurrentUser.CreateSubKey($@"Software\Vivaldi\NativeMessagingHosts\{HostName}"))
+            {
+                k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
+            }
+
+            // 9. Register in Opera registry
+            using (var k = Registry.CurrentUser.CreateSubKey($@"Software\Opera Software\Opera Stable\NativeMessagingHosts\{HostName}"))
+            {
+                k?.SetValue("", chromeManifestPath, RegistryValueKind.String);
             }
 
             return true;
@@ -91,7 +115,7 @@ public static class BrowserExtensionHost
     }
 
     /// <summary>
-    /// Unregisters the Native Messaging Host from Chrome, Edge, and Firefox.
+    /// Unregisters the Native Messaging Host from Chrome, Edge, Firefox, Brave, Vivaldi, and Opera.
     /// </summary>
     public static bool UnregisterHost(out string error)
     {
@@ -99,8 +123,12 @@ public static class BrowserExtensionHost
         try
         {
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Google\Chrome\NativeMessagingHosts\{HostName}", false);
+            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Chromium\NativeMessagingHosts\{HostName}", false);
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Microsoft\Edge\NativeMessagingHosts\{HostName}", false);
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Mozilla\NativeMessagingHosts\{HostName}", false);
+            Registry.CurrentUser.DeleteSubKeyTree($@"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HostName}", false);
+            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Vivaldi\NativeMessagingHosts\{HostName}", false);
+            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Opera Software\Opera Stable\NativeMessagingHosts\{HostName}", false);
             return true;
         }
         catch (Exception ex)
@@ -120,7 +148,10 @@ public static class BrowserExtensionHost
             using var c = Registry.CurrentUser.OpenSubKey($@"Software\Google\Chrome\NativeMessagingHosts\{HostName}");
             using var e = Registry.CurrentUser.OpenSubKey($@"Software\Microsoft\Edge\NativeMessagingHosts\{HostName}");
             using var f = Registry.CurrentUser.OpenSubKey($@"Software\Mozilla\NativeMessagingHosts\{HostName}");
-            return c != null || e != null || f != null;
+            using var b = Registry.CurrentUser.OpenSubKey($@"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HostName}");
+            using var v = Registry.CurrentUser.OpenSubKey($@"Software\Vivaldi\NativeMessagingHosts\{HostName}");
+            using var o = Registry.CurrentUser.OpenSubKey($@"Software\Opera Software\Opera Stable\NativeMessagingHosts\{HostName}");
+            return c != null || e != null || f != null || b != null || v != null || o != null;
         }
         catch
         {
@@ -192,6 +223,7 @@ public static class BrowserExtensionHost
                     return JsonSerializer.Serialize(new { type = "pong", timestamp = DateTime.UtcNow });
 
                 case "get_rules":
+                    guardManager.Load();
                     return JsonSerializer.Serialize(new
                     {
                         type = "rules_update",
@@ -200,7 +232,15 @@ public static class BrowserExtensionHost
                         blockYouTubeAnnotations = guardManager.Config.BlockYouTubeAnnotations,
                         blockYouTubeShorts = guardManager.Config.BlockYouTubeShorts,
                         placeholder = guardManager.Config.ShowInPagePlaceholder,
-                        rulesJson = guardManager.ExportMv3DynamicRulesJson()
+                        rulesJson = guardManager.ExportMv3DynamicRulesJson(),
+                        customRules = guardManager.Config.CustomRules.Where(r => r.Enabled).Select(r => new
+                        {
+                            id = r.Id,
+                            pattern = r.Pattern,
+                            title = r.Title,
+                            action = r.Action.ToString().ToLowerInvariant(),
+                            resourceType = r.ResourceType
+                        }).ToList()
                     });
 
                 case "toggle_rule":

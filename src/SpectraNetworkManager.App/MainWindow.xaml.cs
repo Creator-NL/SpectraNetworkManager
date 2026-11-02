@@ -7508,10 +7508,25 @@ public partial class MainWindow : Window
             BrowserHostStatusText.Foreground = (Brush)FindResource("Amber");
         }
 
+        string? prevSelectedId = (BrowserGuardGrid?.SelectedItem as BrowserGuardRuleRow)?.Id;
         BrowserGuardRules.Clear();
+        BrowserGuardRuleRow? reselected = null;
         foreach (var rule in _browserGuardManager.Config.CustomRules)
         {
-            BrowserGuardRules.Add(new BrowserGuardRuleRow(rule));
+            var rRow = new BrowserGuardRuleRow(rule);
+            BrowserGuardRules.Add(rRow);
+            if (rule.Id == prevSelectedId) reselected = rRow;
+        }
+
+        if (reselected != null && BrowserGuardGrid != null)
+        {
+            BrowserGuardGrid.SelectedItem = reselected;
+            UpdateGuardInspectorUi(reselected);
+            if (GuardInspectorPanel != null) GuardInspectorPanel.Visibility = Visibility.Visible;
+        }
+        else if (GuardInspectorPanel != null && BrowserGuardGrid?.SelectedItem == null)
+        {
+            GuardInspectorPanel.Visibility = Visibility.Collapsed;
         }
 
         _isUpdatingGuardUi = true;
@@ -8437,10 +8452,126 @@ public partial class MainWindow : Window
             if (Confirm($"Remove rule '{row.Title}' ({row.Pattern})?", "Remove Rule"))
             {
                 _browserGuardManager.RemoveRule(row.Id);
+                if (GuardInspectorPanel != null) GuardInspectorPanel.Visibility = Visibility.Collapsed;
                 RefreshBrowserGuardUi();
                 StatusText.Text = $"Removed rule: {row.Title}";
             }
         }
+    }
+
+    private void OnBrowserGuardSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BrowserGuardGrid.SelectedItem is BrowserGuardRuleRow row)
+        {
+            UpdateGuardInspectorUi(row);
+            if (GuardInspectorPanel != null) GuardInspectorPanel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            if (GuardInspectorPanel != null) GuardInspectorPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateGuardInspectorUi(BrowserGuardRuleRow row)
+    {
+        if (GuardInspectorPanel == null || row == null) return;
+
+        GuardInspectorTitle.Text = row.Title;
+
+        if (row.IsEnabled)
+        {
+            GuardInspectorStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x00, 0xE5, 0xFF));
+            GuardInspectorStatusText.Text = "ACTIVE";
+            GuardInspectorStatusText.Foreground = (Brush)FindResource("Cyan");
+            GuardInspectorToggleBtn.Content = "⚡ Disable Rule";
+            GuardInspectorToggleBtn.Foreground = (Brush)FindResource("Amber");
+        }
+        else
+        {
+            GuardInspectorStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x88, 0x88, 0x88));
+            GuardInspectorStatusText.Text = "DISABLED";
+            GuardInspectorStatusText.Foreground = (Brush)FindResource("Muted");
+            GuardInspectorToggleBtn.Content = "⚡ Enable Rule";
+            GuardInspectorToggleBtn.Foreground = (Brush)FindResource("Cyan");
+        }
+
+        if (row.IsBuiltIn)
+        {
+            GuardInspectorTypeBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x00, 0xE5, 0xFF));
+            GuardInspectorTypeText.Text = "BUILT-IN RULE";
+            GuardInspectorTypeText.Foreground = (Brush)FindResource("Cyan");
+            GuardInspectorRemoveBtn.IsEnabled = false;
+            GuardInspectorRemoveBtn.Opacity = 0.4;
+            GuardInspectorRemoveBtn.ToolTip = "Built-in protection rules cannot be deleted. Uncheck 'Active' to disable.";
+        }
+        else
+        {
+            GuardInspectorTypeBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xB8, 0x00));
+            GuardInspectorTypeText.Text = "CUSTOM RULE";
+            GuardInspectorTypeText.Foreground = (Brush)FindResource("Amber");
+            GuardInspectorRemoveBtn.IsEnabled = true;
+            GuardInspectorRemoveBtn.Opacity = 1.0;
+            GuardInspectorRemoveBtn.ToolTip = "Permanently removes this custom rule.";
+        }
+
+        GuardInspectorActionText.Text = row.Rule.Action == GuardAction.Block ? "🚫 BLOCK" : "🛡️ ALLOW";
+        GuardInspectorPatternText.Text = row.Pattern;
+        GuardInspectorDnrText.Text = row.DnrFilter;
+
+        GuardInspectorResourceText.Text = row.ResourceType switch
+        {
+            "main_frame" => "main_frame (intercepts full top-level web page loads / navigation)",
+            "media" => "media (intercepts streaming video / audio data chunks)",
+            "xmlhttprequest" => "xmlhttprequest (intercepts background fetch, AJAX, and API beacons)",
+            "sub_frame" => "sub_frame (intercepts embedded iframes)",
+            "script" => "script (intercepts external JavaScript execution)",
+            _ => "all (intercepts top-level pages, streaming media, XHR, and scripts)"
+        };
+
+        if (BrowserGuardManager.TryExtractYouTubeVideoId(row.Pattern, out string videoId))
+        {
+            GuardInspectorEngineText.Text = $"🎯 YouTube Video Interceptor (Video ID: {videoId}) • Enforced via DeclarativeNetRequest + Spectra DOM Shield";
+            GuardInspectorDescText.Text = string.IsNullOrWhiteSpace(row.Description)
+                ? $"Blocks playback of YouTube video {videoId}. Both direct page requests and client-side SPA navigation are intercepted instantly."
+                : $"{row.Description} (Both direct URL navigation and YouTube SPA player navigation are intercepted.)";
+        }
+        else
+        {
+            GuardInspectorEngineText.Text = "⚡ Enforced via Manifest V3 DeclarativeNetRequest + Spectra In-Page DOM Shield";
+            GuardInspectorDescText.Text = string.IsNullOrWhiteSpace(row.Description) ? $"Intercepts requests matching '{row.Pattern}'." : row.Description;
+        }
+    }
+
+    private void OnInspectorCopyGuardRule(object sender, RoutedEventArgs e)
+    {
+        if (BrowserGuardGrid.SelectedItem is BrowserGuardRuleRow row)
+        {
+            System.Windows.Clipboard.SetText(row.Pattern);
+            StatusText.Text = $"Copied rule pattern: {row.Pattern}";
+        }
+    }
+
+    private void OnInspectorToggleGuardRule(object sender, RoutedEventArgs e)
+    {
+        if (BrowserGuardGrid.SelectedItem is BrowserGuardRuleRow row)
+        {
+            bool newState = !row.IsEnabled;
+            row.IsEnabled = newState;
+            _browserGuardManager.ToggleRule(row.Id, newState);
+            UpdateGuardInspectorUi(row);
+            StatusText.Text = $"Rule '{row.Title}' is now {(newState ? "Active" : "Disabled")}.";
+        }
+    }
+
+    private void OnInspectorRemoveGuardRule(object sender, RoutedEventArgs e)
+    {
+        OnRemoveBrowserRuleClick(sender, e);
+    }
+
+    private void OnInspectorCloseGuardPanel(object sender, RoutedEventArgs e)
+    {
+        BrowserGuardGrid.SelectedItem = null;
+        if (GuardInspectorPanel != null) GuardInspectorPanel.Visibility = Visibility.Collapsed;
     }
 
     private bool Confirm(string message, string title = "SpectraNetworkManager") =>

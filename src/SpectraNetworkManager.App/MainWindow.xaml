@@ -45,7 +45,7 @@
                         ToolTip="Restart SpectraNetworkManager in standard user mode without Administrator privileges."/>
                 <Button x:Name="UpdateBadge" Content="Update Available" Visibility="Collapsed" Margin="0,0,10,0"
                         Foreground="{StaticResource Cyan}" Click="OnUpdateBadgeClick" ToolTip="Click to view update details on GitHub"/>
-                <Button x:Name="HeaderDnsButton" Content="▶ Start DNS" Margin="0,0,10,0" Padding="12,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnHeaderDnsClick" ToolTip="Quickly start or stop the DNS Sinkhole Server from any tab"/>
+                <Button x:Name="HeaderDnsButton" Content="▶ Start DNS" Margin="0,0,0,0" MinWidth="115" HorizontalContentAlignment="Center" Padding="12,4" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Click="OnHeaderDnsClick" ToolTip="Quickly start or stop the DNS Sinkhole Server from any tab"/>
             </StackPanel>
         </DockPanel>
 
@@ -53,7 +53,7 @@
         <DockPanel Grid.Row="1" Margin="0,12,0,6" LastChildFill="True">
             <!-- Settings Cogwheel (Docked to the Right, directly below Stop DNS) -->
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
-                <Button x:Name="SettingsButton" Content="⚙️ Settings" Padding="12,5" FontWeight="SemiBold"
+                <Button x:Name="SettingsButton" Content="⚙️ Settings" MinWidth="115" HorizontalContentAlignment="Center" Padding="12,5" FontWeight="SemiBold"
                         Click="OnToggleSettingsPopup" ToolTip="Application settings, language, and preferences"/>
                 <Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=SettingsButton}"
                        Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
@@ -2295,6 +2295,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Top Status & Registration Banner -->
@@ -2358,7 +2359,7 @@
             </Border>
 
             <!-- Browser Guard Rules DataGrid -->
-            <DataGrid x:Name="BrowserGuardGrid" Grid.Row="3" SelectionMode="Single">
+            <DataGrid x:Name="BrowserGuardGrid" Grid.Row="3" SelectionMode="Single" SelectionChanged="OnBrowserGuardSelectionChanged">
                 <DataGrid.Columns>
                     <DataGridCheckBoxColumn Header="ACTIVE" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                     <DataGridTextColumn Header="RULE TITLE / DESCRIPTION" Binding="{Binding Title}" Width="240" Foreground="{StaticResource Cyan}"/>
@@ -2374,6 +2375,81 @@
                     </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
+
+            <!-- Rule Inspector / Details Panel -->
+            <Border x:Name="GuardInspectorPanel" Grid.Row="4" Visibility="Collapsed"
+                    Background="{StaticResource Panel}" BorderBrush="{StaticResource Cyan}" BorderThickness="1"
+                    CornerRadius="4" Padding="12,10" Margin="0,10,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Top Header Bar of Inspector -->
+                    <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,8">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="GuardInspectorCopyBtn" Content="📋 Copy Pattern" Click="OnInspectorCopyGuardRule" Padding="10,3" Margin="0,0,6,0" FontSize="11"
+                                    ToolTip="Copies the rule pattern to the clipboard"/>
+                            <Button x:Name="GuardInspectorToggleBtn" Content="⚡ Disable Rule" Click="OnInspectorToggleGuardRule" Padding="10,3" Margin="0,0,6,0" FontSize="11"
+                                    Foreground="{StaticResource Amber}" ToolTip="Toggles this rule between Active and Disabled"/>
+                            <Button x:Name="GuardInspectorRemoveBtn" Content="🗑️ Remove Rule" Click="OnInspectorRemoveGuardRule" Padding="10,3" Margin="0,0,6,0" FontSize="11"
+                                    Foreground="{StaticResource Magenta}" ToolTip="Permanently removes this custom rule"/>
+                            <Button Content="✕ Close" Click="OnInspectorCloseGuardPanel" Padding="8,3" FontSize="11" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Muted}"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🎯 RULE INSPECTOR:" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="GuardInspectorTitle" Text="Rule Name" FontWeight="Bold" FontSize="11" Foreground="{StaticResource Text}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            <Border x:Name="GuardInspectorStatusBadge" CornerRadius="3" Padding="6,2" Margin="10,0,0,0" Background="#2200E5FF" VerticalAlignment="Center">
+                                <TextBlock x:Name="GuardInspectorStatusText" Text="ACTIVE" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Cyan}"/>
+                            </Border>
+                            <Border x:Name="GuardInspectorTypeBadge" CornerRadius="3" Padding="6,2" Margin="6,0,0,0" Background="#22FFB800" VerticalAlignment="Center">
+                                <TextBlock x:Name="GuardInspectorTypeText" Text="CUSTOM RULE" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Amber}"/>
+                            </Border>
+                            <Border x:Name="GuardInspectorActionBadge" CornerRadius="3" Padding="6,2" Margin="6,0,0,0" Background="#22FF3366" VerticalAlignment="Center">
+                                <TextBlock x:Name="GuardInspectorActionText" Text="🚫 BLOCK" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"/>
+                            </Border>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Details Columns -->
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left Column: Pattern & Filter Breakdown -->
+                        <Border Grid.Column="0" Background="#0C1425" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,5,0">
+                            <StackPanel>
+                                <TextBlock Text="URL &amp; DECLARATIVE PATTERN" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <DockPanel Margin="0,4,0,2">
+                                    <TextBlock Text="Match Pattern: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="GuardInspectorPatternText" Text="*://*.example.com/*" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,2,0,2">
+                                    <TextBlock Text="MV3 DNR Filter: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="GuardInspectorDnrText" Text="||example.com/*" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource Amber}" TextWrapping="Wrap"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,2,0,0">
+                                    <TextBlock Text="Resource Scope: " FontSize="11" Foreground="{StaticResource Muted}"/>
+                                    <TextBlock x:Name="GuardInspectorResourceText" Text="all (intercepts all network &amp; script requests)" FontSize="11" Foreground="{StaticResource Text}"/>
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Right Column: Enforcement Engine & Description -->
+                        <Border Grid.Column="1" Background="#0C1425" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="5,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="ENFORCEMENT ENGINE &amp; DESCRIPTION" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Muted}" FontFamily="Bahnschrift"/>
+                                <TextBlock x:Name="GuardInspectorEngineText" Text="⚡ Enforced via Manifest V3 DeclarativeNetRequest + Spectra In-Page DOM Shield" FontSize="11" Foreground="{StaticResource Cyan}" Margin="0,4,0,2"/>
+                                <TextBlock x:Name="GuardInspectorDescText" Text="Rule description details." FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- Spectra AI Threat Intelligence & Investigation view -->
