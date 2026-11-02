@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 Set-Location $PSScriptRoot
 
 $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = "1"
@@ -47,8 +48,11 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Publish Engine failed!"; exit $LASTEXITC
 dotnet publish src/SpectraNetworkManager.BrowserHost/SpectraNetworkManager.BrowserHost.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/app
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish BrowserHost failed!"; exit $LASTEXITCODE }
 
-# Copy Browser Guard extension to publish folder
+# Package and copy Browser Guard extension to publish folder
 if (Test-Path "extensions/spectra-browser-guard") {
+    $extFiles = Get-ChildItem "extensions/spectra-browser-guard" -File | Where-Object { $_.Extension -ne '.xpi' -and $_.Extension -ne '.zip' }
+    Compress-Archive -Path $extFiles.FullName -DestinationPath "extensions/spectra-browser-guard/spectra-browser-guard.zip" -Force
+    Copy-Item "extensions/spectra-browser-guard/spectra-browser-guard.zip" "extensions/spectra-browser-guard/spectra-browser-guard.xpi" -Force
     Copy-Item -Recurse -Force "extensions/spectra-browser-guard" "publish/app/extensions/spectra-browser-guard"
 }
 Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green

@@ -8348,7 +8348,7 @@ public partial class MainWindow : Window
             if (BrowserExtensionHost.RegisterHost(hostExe, out string err))
             {
                 RefreshBrowserGuardUi();
-                Info("Spectra Browser Guard Host registered successfully for Chrome, Edge, and Mozilla Firefox!\n\nTo activate the extension in your browser:\n1. Click '📁 Open Extension Folder'\n2. In Chrome / Edge: Navigate to chrome://extensions, enable 'Developer Mode', and click 'Load Unpacked'.\n3. In Firefox: Navigate to about:debugging#/runtime/this-firefox, and click 'Load Temporary Add-on' selecting manifest.json.");
+                Info("Spectra Browser Guard Host registered successfully for Chrome, Edge, and Mozilla Firefox!\n\nTo activate the extension in Firefox:\n1. Click '📁 Open Extension Folder'\n2. In Firefox, go to: about:debugging#/runtime/this-firefox\n3. Click 'Load Temporary Add-on...'\n4. Select 'spectra-browser-guard.xpi' (or manifest.json).\n\nIn Chrome / Edge:\n1. Go to chrome://extensions and enable 'Developer Mode'\n2. Click 'Load Unpacked' and select the extension folder.");
             }
             else
             {
@@ -8371,6 +8371,18 @@ public partial class MainWindow : Window
                 string srcExtDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "extensions", "spectra-browser-guard");
                 if (Directory.Exists(srcExtDir)) extDir = Path.GetFullPath(srcExtDir);
                 else Directory.CreateDirectory(extDir);
+            }
+
+            // Ensure spectra-browser-guard.xpi exists so Firefox's Add-on file dialog shows it immediately
+            string xpiPath = Path.Combine(extDir, "spectra-browser-guard.xpi");
+            string zipPath = Path.Combine(extDir, "spectra-browser-guard.zip");
+            if (!File.Exists(xpiPath) && File.Exists(zipPath))
+            {
+                try { File.Copy(zipPath, xpiPath, true); } catch { }
+            }
+            else if (!File.Exists(zipPath) && File.Exists(xpiPath))
+            {
+                try { File.Copy(xpiPath, zipPath, true); } catch { }
             }
 
             Process.Start(new ProcessStartInfo("explorer.exe", extDir) { UseShellExecute = true });

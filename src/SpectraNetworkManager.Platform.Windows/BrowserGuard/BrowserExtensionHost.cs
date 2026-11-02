@@ -31,9 +31,11 @@ public static class BrowserExtensionHost
         error = "";
         try
         {
-            string hostDir = Path.GetDirectoryName(hostExePath)!;
-            string chromeManifestPath = Path.Combine(hostDir, $"{HostName}.chrome.json");
-            string firefoxManifestPath = Path.Combine(hostDir, $"{HostName}.firefox.json");
+            string manifestDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpectraNetworkManager", "BrowserHost");
+            if (!Directory.Exists(manifestDir)) Directory.CreateDirectory(manifestDir);
+
+            string chromeManifestPath = Path.Combine(manifestDir, $"{HostName}.chrome.json");
+            string firefoxManifestPath = Path.Combine(manifestDir, $"{HostName}.firefox.json");
 
             // 1. Chrome / Edge manifest (uses exact deterministic extension ID derived from manifest.json 'key')
             var chromeManifest = new
