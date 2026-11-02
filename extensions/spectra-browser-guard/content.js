@@ -134,6 +134,10 @@
     for (const rule of activeCustomRules) {
       if (!rule || rule.action === "allow") continue;
 
+      // Do not block Shorts if Shorts blocking is disabled in settings
+      if (rule.id === "yt-shorts" && !blockYouTubeShorts) continue;
+      if (rule.id === "yt-video-stream") continue;
+
       // Check YouTube Video ID match
       if (isYouTubeHost && currentVid) {
         const ruleVid = extractYouTubeVideoId(rule.pattern);
@@ -285,6 +289,77 @@
     setTimeout(() => checkPageBlockRules(true), 20);
   };
 
+  // ---- Main-World Script Injection for Native YouTube Player API Access ----
+  function injectMainWorldAdSkipper() {
+    if (!isYouTubeHost) return;
+    const scriptId = "spectra-yt-main-world-shield";
+    if (document.getElementById(scriptId)) return;
+
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.textContent = `
+      (function() {
+        const SKIP_SELECTORS = [
+          ".ytp-ad-skip-button",
+          ".ytp-ad-skip-button-modern",
+          ".ytp-skip-ad-button",
+          ".ytp-ad-skip-button-slot button",
+          ".ytp-ad-skip-button-container button",
+          "button.ytp-ad-skip-button-modern",
+          "button[aria-label*='Skip']",
+          "button[aria-label*='overslaan']",
+          ".ytp-ad-overlay-close-button",
+          ".ytp-ad-preview-container"
+        ];
+
+        function fastForwardAd() {
+          const player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
+          if (!player) return;
+
+          const isAd = player.classList.contains("ad-showing") ||
+                       player.classList.contains("ad-interrupting") ||
+                       document.querySelector(".ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-player-overlay-layout") !== null;
+
+          if (isAd) {
+            // 1. YouTube internal player API
+            try {
+              if (typeof player.skipAd === "function") player.skipAd();
+              if (typeof player.cancelPlayback === "function") player.cancelPlayback();
+            } catch(e) {}
+
+            // 2. Dispatch trusted-like click on skip buttons
+            for (const sel of SKIP_SELECTORS) {
+              const btns = document.querySelectorAll(sel);
+              for (const b of btns) {
+                try {
+                  b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                  b.click();
+                } catch(e) {}
+              }
+            }
+
+            // 3. Fast forward video
+            const video = player.querySelector("video");
+            if (video) {
+              video.muted = true;
+              if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0.1) {
+                video.currentTime = video.duration - 0.05;
+              } else {
+                video.currentTime = 99999;
+              }
+              try { video.playbackRate = 16; } catch(e) {}
+            }
+          }
+        }
+
+        setInterval(fastForwardAd, 100);
+        document.addEventListener("yt-navigate-finish", fastForwardAd);
+        document.addEventListener("yt-page-data-updated", fastForwardAd);
+      })();
+    `;
+    (document.head || document.documentElement).appendChild(script);
+  }
+
   // ---- YouTube Pre-Roll / Mid-Roll Ad Skipper & Cosmetic Cleaner ----
   const SKIP_BUTTON_SELECTORS = [
     ".ytp-ad-skip-button",
@@ -294,18 +369,35 @@
     ".ytp-ad-skip-button-container button",
     ".ytp-ad-overlay-close-button",
     "button.ytp-ad-skip-button-modern",
-    "button[id^='skip-button']"
+    "button[id^='skip-button']",
+    "button[aria-label*='Skip']",
+    "button[aria-label*='overslaan']",
+    ".ytp-ad-preview-container"
   ];
+
+  function hookVideoEvents(video) {
+    if (!video || video.dataset.spectraHooked === "true") return;
+    video.dataset.spectraHooked = "true";
+    video.addEventListener("timeupdate", () => {
+      if (blockYouTubeAds) neutralizeYouTubeAds();
+    });
+    video.addEventListener("playing", () => {
+      if (blockYouTubeAds) neutralizeYouTubeAds();
+    });
+  }
 
   function neutralizeYouTubeAds() {
     if (!isYouTubeHost || !blockYouTubeAds) return;
 
-    // 1. Click skip / overlay close buttons
+    // 1. Click skip / overlay close buttons immediately
     for (const sel of SKIP_BUTTON_SELECTORS) {
       const btns = document.querySelectorAll(sel);
       for (const btn of btns) {
         if (btn && typeof btn.click === "function") {
-          try { btn.click(); } catch {}
+          try {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            btn.click();
+          } catch {}
         }
       }
     }
@@ -321,6 +413,7 @@
 
     const video = player.querySelector("video.html5-main-video") || player.querySelector("video");
     if (!video) return;
+    hookVideoEvents(video);
 
     if (isAdShowing) {
       if (wasMutedBeforeAd === null) {
@@ -332,20 +425,23 @@
 
       video.muted = true;
 
-      if (Number.isFinite(video.duration) && video.duration > 0.5) {
+      if (Number.isFinite(video.duration) && video.duration > 0.1) {
         try {
-          if (video.currentTime < video.duration - 0.1) {
-            video.currentTime = video.duration;
-          }
+          video.currentTime = video.duration - 0.05;
         } catch {}
+      } else {
+        try { video.currentTime = 99999; } catch {}
       }
 
       try { video.playbackRate = 16; } catch {}
 
       for (const sel of SKIP_BUTTON_SELECTORS) {
         const btn = player.querySelector(sel);
-        if (btn && typeof btn.click === "function") {
-          try { btn.click(); } catch {}
+        if (btn) {
+          try {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            btn.click();
+          } catch {}
         }
       }
     } else if (wasMutedBeforeAd !== null) {
@@ -359,21 +455,43 @@
 
   // ---- Blocked Shorts Overlay ----
   function inspectShortsElements() {
-    if (blockYouTubeShorts && window.location.href.includes("/shorts/")) {
-      const shortsContainer = document.querySelector("ytd-shorts, #shorts-container");
+    const isShortsPage = isYouTubeHost && window.location.href.includes("/shorts/");
+    const shortsContainer = document.querySelector("ytd-shorts, #shorts-container");
+
+    if (blockYouTubeShorts && isShortsPage) {
       if (shortsContainer && shortsContainer.dataset.spectraGuarded !== "true") {
         shortsContainer.dataset.spectraGuarded = "true";
         haltActiveVideo();
-        const overlay = document.createElement("div");
-        overlay.className = "spectra-media-blocked-overlay";
-        overlay.innerHTML = `
-          <div class="spectra-overlay-icon">🛡️</div>
-          <div class="spectra-overlay-title">SHORTS FEED BLOCKED BY SPECTRA GUARD</div>
-          <div class="spectra-overlay-desc">YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.</div>
-        `;
-        if (shortsContainer.parentNode) {
-          shortsContainer.style.display = "none";
-          shortsContainer.parentNode.insertBefore(overlay, shortsContainer);
+        let overlay = document.getElementById("spectra-shorts-blocked-overlay");
+        if (!overlay) {
+          overlay = document.createElement("div");
+          overlay.id = "spectra-shorts-blocked-overlay";
+          overlay.className = "spectra-media-blocked-overlay spectra-shorts-overlay";
+          overlay.innerHTML = `
+            <div class="spectra-overlay-icon">🛡️</div>
+            <div class="spectra-overlay-title">SHORTS FEED BLOCKED BY SPECTRA GUARD</div>
+            <div class="spectra-overlay-desc">YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.</div>
+          `;
+          if (shortsContainer.parentNode) {
+            shortsContainer.style.display = "none";
+            shortsContainer.parentNode.insertBefore(overlay, shortsContainer);
+          }
+        }
+      }
+    } else {
+      // Shorts blocking is DISABLED or not on a shorts page: clean up overlay completely!
+      const overlay = document.getElementById("spectra-shorts-blocked-overlay");
+      if (overlay) overlay.remove();
+
+      const genericOverlays = document.querySelectorAll(".spectra-media-blocked-overlay.spectra-shorts-overlay, .spectra-media-blocked-overlay:not(.spectra-custom-block)");
+      for (const o of genericOverlays) o.remove();
+
+      if (shortsContainer) {
+        if (shortsContainer.dataset.spectraGuarded === "true") {
+          shortsContainer.dataset.spectraGuarded = "false";
+        }
+        if (shortsContainer.style.display === "none") {
+          shortsContainer.style.display = "";
         }
       }
     }
@@ -392,6 +510,7 @@
       requestAnimationFrame(startObserver);
       return;
     }
+    injectMainWorldAdSkipper();
     const observer = new MutationObserver(() => {
       checkPageBlockRules(false);
       neutralizeYouTubeAds();
@@ -401,5 +520,6 @@
   };
 
   startObserver();
-  setInterval(runGuardTick, 250);
+  injectMainWorldAdSkipper();
+  setInterval(runGuardTick, 100);
 })();

@@ -214,8 +214,7 @@ api.runtime.onStartup.addListener(() => {
   connectNativeHost();
 });
 
-// Periodic sync every 15 seconds to pick up new rules from SpectraNetworkManager
-setInterval(() => {
+function requestRulesSync() {
   if (!nativePort) {
     connectNativeHost();
   } else {
@@ -223,9 +222,28 @@ setInterval(() => {
       nativePort.postMessage({ type: "get_rules" });
     } catch {
       nativePort = null;
+      connectNativeHost();
     }
   }
-}, 15000);
+}
+
+// Sync immediately when user switches focus to browser or activates a tab
+if (api.windows && api.windows.onFocusChanged) {
+  api.windows.onFocusChanged.addListener((winId) => {
+    if (winId !== (api.windows.WINDOW_ID_NONE || -1)) {
+      requestRulesSync();
+    }
+  });
+}
+
+if (api.tabs && api.tabs.onActivated) {
+  api.tabs.onActivated.addListener(() => {
+    requestRulesSync();
+  });
+}
+
+// Periodic sync every 2.5 seconds to pick up new rules from SpectraNetworkManager
+setInterval(requestRulesSync, 2500);
 
 ensureDefaultSettingsAndRules();
 connectNativeHost();
