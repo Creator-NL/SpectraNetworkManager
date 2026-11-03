@@ -274,21 +274,29 @@
   }
 
   // Listen to YouTube SPA navigation events & browser history
-  window.addEventListener("yt-navigate-finish", () => {
+  let lastNavTime = Date.now();
+  let pendingAutoplay = true;
+
+  function onWatchNavigation() {
+    lastNavTime = Date.now();
+    pendingAutoplay = true;
     checkPageBlockRules(true);
     inspectShortsElements();
-  });
-  window.addEventListener("yt-page-data-updated", () => {
-    checkPageBlockRules(true);
-    inspectShortsElements();
-  });
-  window.addEventListener("popstate", () => {
-    checkPageBlockRules(true);
-    inspectShortsElements();
-  });
-  window.addEventListener("hashchange", () => {
-    checkPageBlockRules(true);
-    inspectShortsElements();
+  }
+
+  window.addEventListener("yt-navigate-finish", onWatchNavigation);
+  window.addEventListener("yt-page-data-updated", onWatchNavigation);
+  window.addEventListener("popstate", onWatchNavigation);
+  window.addEventListener("hashchange", onWatchNavigation);
+
+  window.addEventListener("focus", () => {
+    const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
+    if (pendingAutoplay && isWatch && (Date.now() - lastNavTime < 10000)) {
+      const v = document.querySelector("video");
+      if (v && v.paused && !currentBlockedRule && !shouldBlockShorts()) {
+        v.play().catch(() => {});
+      }
+    }
   });
 
   // Hook pushState / replaceState for dynamic client-side URL updates
@@ -296,16 +304,14 @@
   history.pushState = function () {
     origPush.apply(this, arguments);
     setTimeout(() => {
-      checkPageBlockRules(true);
-      inspectShortsElements();
+      onWatchNavigation();
     }, 20);
   };
   const origReplace = history.replaceState;
   history.replaceState = function () {
     origReplace.apply(this, arguments);
     setTimeout(() => {
-      checkPageBlockRules(true);
-      inspectShortsElements();
+      onWatchNavigation();
     }, 20);
   };
 
@@ -331,6 +337,19 @@
           ".ytp-ad-overlay-close-button"
         ];
 
+        let adJustFinished = false;
+        let navTime = Date.now();
+        let pendingAutoplay = true;
+
+        function markNav() {
+          navTime = Date.now();
+          pendingAutoplay = true;
+          adJustFinished = false;
+        }
+
+        document.addEventListener("yt-navigate-finish", markNav);
+        window.addEventListener("popstate", markNav);
+
         function isPlayerAd(player) {
           if (!player) return false;
           if (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting")) return true;
@@ -343,43 +362,76 @@
           return false;
         }
 
-        function fastForwardAd() {
+        function handlePlayer() {
           const player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
           if (!player) return;
 
-          // STRICT CHECK: ONLY run if YouTube actually flagged an ad as showing!
-          if (!isPlayerAd(player)) return;
+          const adActive = isPlayerAd(player);
 
-          // 1. YouTube internal player API
-          try {
-            if (typeof player.skipAd === "function") player.skipAd();
-            if (typeof player.cancelPlayback === "function") player.cancelPlayback();
-          } catch(e) {}
+          if (adActive) {
+            adJustFinished = true;
 
-          // 2. Dispatch trusted-like click on skip buttons
-          for (const sel of SKIP_SELECTORS) {
-            const btns = player.querySelectorAll(sel);
-            for (const b of btns) {
-              try {
-                b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                b.click();
-              } catch(e) {}
+            // 1. YouTube internal player API - skip ad cleanly
+            try {
+              if (typeof player.skipAd === "function") player.skipAd();
+            } catch(e) {}
+
+            // 2. Dispatch trusted-like click on skip buttons
+            for (const sel of SKIP_SELECTORS) {
+              const btns = player.querySelectorAll(sel);
+              for (const b of btns) {
+                try {
+                  b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                  b.click();
+                } catch(e) {}
+              }
             }
+
+            // 3. Fast forward ad video ONLY while ad is showing
+            const video = player.querySelector("video");
+            if (video && isPlayerAd(player)) {
+              video.muted = true;
+              if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0.1) {
+                video.currentTime = video.duration - 0.05;
+              }
+              try { video.playbackRate = 16; } catch(e) {}
+            }
+            return;
           }
 
-          // 3. Fast forward ad video ONLY while ad is showing
+          // NO ad is showing right now
           const video = player.querySelector("video");
-          if (video && isPlayerAd(player)) {
-            video.muted = true;
-            if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0.1) {
-              video.currentTime = video.duration - 0.05;
-            }
-            try { video.playbackRate = 16; } catch(e) {}
+
+          // Once video is actively playing past 0.3s, reset autoplay request
+          if (video && !video.paused && video.currentTime > 0.3) {
+            adJustFinished = false;
+            pendingAutoplay = false;
+            return;
+          }
+
+          // Auto-start if an ad was just finished, OR we navigated to a watch page within 4 seconds and the video is paused/unstarted
+          const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
+          const timeSinceNav = Date.now() - navTime;
+          const shouldStart = (adJustFinished || (pendingAutoplay && timeSinceNav < 4000)) && isWatch;
+
+          if (shouldStart && video && video.paused) {
+            try {
+              if (typeof player.playVideo === "function") {
+                const state = typeof player.getPlayerState === "function" ? player.getPlayerState() : -1;
+                // -1: unstarted, 2: paused, 5: cued
+                if (state === -1 || state === 2 || state === 5) {
+                  player.playVideo();
+                }
+              }
+            } catch(e) {}
+            try {
+              video.play().catch(function() {});
+            } catch(e) {}
           }
         }
 
-        setInterval(fastForwardAd, 150);
-        document.addEventListener("yt-navigate-finish", fastForwardAd);
+        setInterval(handlePlayer, 100);
+        document.addEventListener("yt-navigate-finish", handlePlayer);
       })();
     `;
     (document.head || document.documentElement).appendChild(script);
@@ -440,8 +492,23 @@
           if (video.playbackRate > 2) {
             video.playbackRate = userPlaybackRate || 1;
           }
+          if (video.paused && !currentBlockedRule && !shouldBlockShorts()) {
+            video.play().catch(() => {});
+          }
         }
         wasMutedBeforeAd = null;
+      }
+
+      // Check if video is paused right after navigation
+      const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
+      if (pendingAutoplay && isWatch && (Date.now() - lastNavTime < 4000)) {
+        if (video && video.paused && !currentBlockedRule && !shouldBlockShorts()) {
+          video.play().catch(() => {});
+        }
+      }
+
+      if (video && !video.paused && video.currentTime > 0.3) {
+        pendingAutoplay = false;
       }
       return;
     }
