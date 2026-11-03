@@ -371,9 +371,12 @@
           if (adActive) {
             adJustFinished = true;
 
-            // 1. YouTube internal player API - skip ad cleanly
+            // 1. YouTube internal player API - skip and cancel ad
             try {
               if (typeof player.skipAd === "function") player.skipAd();
+            } catch(e) {}
+            try {
+              if (typeof player.cancelPlayback === "function") player.cancelPlayback();
             } catch(e) {}
 
             // 2. Dispatch trusted-like click on skip buttons
@@ -391,10 +394,13 @@
             const video = player.querySelector("video");
             if (video && isPlayerAd(player)) {
               video.muted = true;
-              if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0.1) {
-                video.currentTime = video.duration - 0.05;
+              if (Number.isFinite(video.duration) && video.duration > 0.1) {
+                try { video.currentTime = video.duration; } catch(e) {}
               }
               try { video.playbackRate = 16; } catch(e) {}
+              if (video.paused) {
+                try { video.play().catch(function() {}); } catch(e) {}
+              }
             }
             return;
           }
@@ -402,19 +408,33 @@
           // NO ad is showing right now
           const video = player.querySelector("video");
 
+          if (adJustFinished) {
+            // Ad was just cancelled or skipped! Resume main video playback immediately!
+            try {
+              if (typeof player.playVideo === "function") {
+                player.playVideo();
+              }
+            } catch(e) {}
+            if (video && video.paused) {
+              try { video.play().catch(function() {}); } catch(e) {}
+            }
+            if (video && !video.paused && video.currentTime > 0.1) {
+              adJustFinished = false;
+              pendingAutoplay = false;
+            }
+            return;
+          }
+
           // Once video is actively playing past 0.3s, reset autoplay request
           if (video && !video.paused && video.currentTime > 0.3) {
-            adJustFinished = false;
             pendingAutoplay = false;
             return;
           }
 
-          // Auto-start if an ad was just finished, OR we navigated to a watch page within 4 seconds and the video is paused/unstarted
+          // Auto-start if we navigated to a watch page within 4 seconds and the video is paused/unstarted
           const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
           const timeSinceNav = Date.now() - navTime;
-          const shouldStart = (adJustFinished || (pendingAutoplay && timeSinceNav < 4000)) && isWatch;
-
-          if (shouldStart && video && video.paused) {
+          if (pendingAutoplay && timeSinceNav < 4000 && isWatch && video && video.paused) {
             try {
               if (typeof player.playVideo === "function") {
                 const state = typeof player.getPlayerState === "function" ? player.getPlayerState() : -1;
@@ -538,10 +558,13 @@
 
       if (Number.isFinite(video.duration) && video.duration > 0.1) {
         try {
-          video.currentTime = video.duration - 0.05;
+          video.currentTime = video.duration;
         } catch {}
       }
       try { video.playbackRate = 16; } catch {}
+      if (video.paused) {
+        try { video.play().catch(() => {}); } catch {}
+      }
 
       for (const sel of SKIP_BUTTON_SELECTORS) {
         const btn = player.querySelector(sel);
