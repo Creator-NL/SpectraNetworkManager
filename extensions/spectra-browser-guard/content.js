@@ -219,11 +219,33 @@
 
       const desc = document.createElement("div");
       desc.className = "spectra-overlay-desc";
-      desc.innerHTML = `
-        <div style="font-weight:600; color:#E6EDF3; margin-bottom:4px;">${matchedRule.title || "Custom Blocked Video"}</div>
-        <code style="display:inline-block; background:#1C1936; border:1px solid #FF2BD6; color:#00E5FF; padding:3px 8px; border-radius:4px; font-size:11px; word-break:break-all;">${matchedRule.pattern}</code>
-        <div style="margin-top:10px; font-size:11px; color:#8B949E;">This video matches an active block rule in SpectraNetworkManager Browser Guard.</div>
-      `;
+
+      const titleEl = document.createElement("div");
+      titleEl.style.fontWeight = "600";
+      titleEl.style.color = "#E6EDF3";
+      titleEl.style.marginBottom = "4px";
+      titleEl.textContent = matchedRule.title || "Custom Blocked Video";
+
+      const codeEl = document.createElement("code");
+      codeEl.style.display = "inline-block";
+      codeEl.style.background = "#1C1936";
+      codeEl.style.border = "1px solid #FF2BD6";
+      codeEl.style.color = "#00E5FF";
+      codeEl.style.padding = "3px 8px";
+      codeEl.style.borderRadius = "4px";
+      codeEl.style.fontSize = "11px";
+      codeEl.style.wordBreak = "break-all";
+      codeEl.textContent = matchedRule.pattern || "";
+
+      const noteEl = document.createElement("div");
+      noteEl.style.marginTop = "10px";
+      noteEl.style.fontSize = "11px";
+      noteEl.style.color = "#8B949E";
+      noteEl.textContent = "This video matches an active block rule in SpectraNetworkManager Browser Guard.";
+
+      desc.appendChild(titleEl);
+      desc.appendChild(codeEl);
+      desc.appendChild(noteEl);
 
       overlay.appendChild(icon);
       overlay.appendChild(title);
@@ -240,32 +262,86 @@
     if (document.getElementById("spectra-full-page-block")) return;
     try { window.stop(); } catch {}
 
-    const html = `
-      <head>
-        <meta charset="utf-8">
-        <title>Blocked by Spectra Browser Guard</title>
-        <style>
-          body { background: #0B0F19; color: #E6EDF3; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-          .card { background: #121826; border: 2px solid #FF2BD6; border-radius: 10px; padding: 36px; max-width: 580px; text-align: center; box-shadow: 0 10px 40px rgba(255, 43, 214, 0.3); }
-          .icon { font-size: 48px; margin-bottom: 14px; }
-          h1 { color: #FF2BD6; font-size: 20px; margin: 0 0 12px; font-weight: 700; letter-spacing: 0.5px; }
-          p { color: #8B949E; font-size: 13px; line-height: 1.5; margin: 8px 0; }
-          .pattern { display: inline-block; background: #1C1936; border: 1px solid #FF2BD6; color: #00E5FF; padding: 6px 12px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; margin: 14px 0; word-break: break-all; }
-          .brand { margin-top: 24px; font-size: 11px; color: #00E5FF; font-weight: 600; letter-spacing: 1px; }
-        </style>
-      </head>
-      <body id="spectra-full-page-block">
-        <div class="card">
-          <div class="icon">🚫</div>
-          <h1>WEBPAGE BLOCKED BY SPECTRA BROWSER GUARD</h1>
-          <p>Access to this page has been blocked by your Spectra Browser Guard security policy.</p>
-          <div class="pattern">${matchedRule.pattern}</div>
-          <p>To access this content, remove or uncheck the matching rule in SpectraNetworkManager ➔ Browser Guard.</p>
-          <div class="brand">SPECTRA NETWORKMANAGER // BROWSER DEFENSE SYSTEM</div>
-        </div>
-      </body>
-    `;
-    document.documentElement.innerHTML = html;
+    document.title = "Blocked by Spectra Browser Guard";
+
+    const body = document.body || document.documentElement;
+    while (body.firstChild) {
+      body.removeChild(body.firstChild);
+    }
+    body.id = "spectra-full-page-block";
+    body.style.background = "#0B0F19";
+    body.style.color = "#E6EDF3";
+    body.style.fontFamily = "'Segoe UI', system-ui, sans-serif";
+    body.style.display = "flex";
+    body.style.alignItems = "center";
+    body.style.justifyContent = "center";
+    body.style.height = "100vh";
+    body.style.margin = "0";
+
+    const card = document.createElement("div");
+    card.style.background = "#121826";
+    card.style.border = "2px solid #FF2BD6";
+    card.style.borderRadius = "10px";
+    card.style.padding = "36px";
+    card.style.maxWidth = "580px";
+    card.style.textAlign = "center";
+    card.style.boxShadow = "0 10px 40px rgba(255, 43, 214, 0.3)";
+
+    const icon = document.createElement("div");
+    icon.style.fontSize = "48px";
+    icon.style.marginBottom = "14px";
+    icon.textContent = "🚫";
+
+    const h1 = document.createElement("h1");
+    h1.style.color = "#FF2BD6";
+    h1.style.fontSize = "20px";
+    h1.style.margin = "0 0 12px";
+    h1.style.fontWeight = "700";
+    h1.style.letterSpacing = "0.5px";
+    h1.textContent = "WEBPAGE BLOCKED BY SPECTRA BROWSER GUARD";
+
+    const p1 = document.createElement("p");
+    p1.style.color = "#8B949E";
+    p1.style.fontSize = "13px";
+    p1.style.lineHeight = "1.5";
+    p1.style.margin = "8px 0";
+    p1.textContent = "Access to this page has been blocked by your Spectra Browser Guard security policy.";
+
+    const patternBox = document.createElement("div");
+    patternBox.style.display = "inline-block";
+    patternBox.style.background = "#1C1936";
+    patternBox.style.border = "1px solid #FF2BD6";
+    patternBox.style.color = "#00E5FF";
+    patternBox.style.padding = "6px 12px";
+    patternBox.style.borderRadius = "6px";
+    patternBox.style.fontFamily = "Consolas, monospace";
+    patternBox.style.fontSize = "12px";
+    patternBox.style.margin = "14px 0";
+    patternBox.style.wordBreak = "break-all";
+    patternBox.textContent = matchedRule.pattern || "";
+
+    const p2 = document.createElement("p");
+    p2.style.color = "#8B949E";
+    p2.style.fontSize = "13px";
+    p2.style.lineHeight = "1.5";
+    p2.style.margin = "8px 0";
+    p2.textContent = "To access this content, remove or uncheck the matching rule in SpectraNetworkManager ➔ Browser Guard.";
+
+    const brand = document.createElement("div");
+    brand.style.marginTop = "24px";
+    brand.style.fontSize = "11px";
+    brand.style.color = "#00E5FF";
+    brand.style.fontWeight = "600";
+    brand.style.letterSpacing = "1px";
+    brand.textContent = "SPECTRA NETWORKMANAGER // BROWSER DEFENSE SYSTEM";
+
+    card.appendChild(icon);
+    card.appendChild(h1);
+    card.appendChild(p1);
+    card.appendChild(patternBox);
+    card.appendChild(p2);
+    card.appendChild(brand);
+    body.appendChild(card);
   }
 
   function removeBlockOverlayIfExists() {
@@ -610,11 +686,21 @@
         overlay = document.createElement("div");
         overlay.id = "spectra-shorts-blocked-overlay";
         overlay.className = "spectra-media-blocked-overlay spectra-shorts-overlay";
-        overlay.innerHTML = `
-          <div class="spectra-overlay-icon">🛡️</div>
-          <div class="spectra-overlay-title">SHORTS FEED BLOCKED BY SPECTRA GUARD</div>
-          <div class="spectra-overlay-desc">YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.</div>
-        `;
+        const iconEl = document.createElement("div");
+        iconEl.className = "spectra-overlay-icon";
+        iconEl.textContent = "🛡️";
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "spectra-overlay-title";
+        titleEl.textContent = "SHORTS FEED BLOCKED BY SPECTRA GUARD";
+
+        const descEl = document.createElement("div");
+        descEl.className = "spectra-overlay-desc";
+        descEl.textContent = "YouTube Shorts feeds are blocked by your Spectra Browser Guard settings.";
+
+        overlay.appendChild(iconEl);
+        overlay.appendChild(titleEl);
+        overlay.appendChild(descEl);
         const firstContainer = document.querySelector("ytd-shorts, #shorts-container");
         if (firstContainer && firstContainer.parentNode) {
           firstContainer.parentNode.insertBefore(overlay, firstContainer);

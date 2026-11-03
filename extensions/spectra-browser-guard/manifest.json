@@ -16,8 +16,7 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"],
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
   },
   "declarative_net_request": {
     "rule_resources": [
@@ -40,7 +39,12 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "browserguard@biohazard-corp.nl",
-      "strict_min_version": "109.0"
+      "strict_min_version": "113.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   }
 }
