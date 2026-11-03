@@ -21,7 +21,8 @@ public static class BrowserExtensionHost
 
     public const string HostName = "com.spectranetworkmanager.browser_host";
     public const string ChromeExtensionId = "kndcdcampgmfjgniielafdiblkfhdklk";
-    public const string FirefoxExtensionId = "browserguard@spectranetworkmanager.com";
+    public const string FirefoxExtensionId = "browserguard@biohazard-corp.nl";
+    public const string LegacyFirefoxExtensionId = "browserguard@spectranetworkmanager.com";
 
     /// <summary>
     /// Registers the Native Messaging Host in current user's registry for Chrome, Edge, and Firefox.
@@ -60,7 +61,8 @@ public static class BrowserExtensionHost
                 type = "stdio",
                 allowed_extensions = new[]
                 {
-                    FirefoxExtensionId
+                    FirefoxExtensionId,
+                    LegacyFirefoxExtensionId
                 }
             };
             File.WriteAllText(firefoxManifestPath, JsonSerializer.Serialize(firefoxManifest, IndentedJsonOpts));
