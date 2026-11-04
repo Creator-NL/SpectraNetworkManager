@@ -37,6 +37,22 @@ internal static class NativeMethods
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    public const int SW_RESTORE = 9;
+    public const int SW_SHOW = 5;
+    public const int ASFW_ANY = -1;
+
     /// <summary>Configures a popup window so it does not steal keyboard focus from the active foreground application.</summary>
     public static void SetNoActivate(IntPtr hwnd)
     {

@@ -49,6 +49,35 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // 2.5 Single Instance Enforcement: Prevent duplicate processes and socket conflicts
+        bool isFirstInstance = SingleInstanceManager.InitializeAsFirstInstance(() =>
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (MainWindow is MainWindow mw)
+                {
+                    mw.BringToFront(showNotification: true);
+                }
+                else
+                {
+                    foreach (Window win in Windows)
+                    {
+                        if (win.IsVisible)
+                        {
+                            win.Activate();
+                            win.Focus();
+                        }
+                    }
+                }
+            });
+        });
+
+        if (!isFirstInstance)
+        {
+            Shutdown(0);
+            return;
+        }
+
         // 3. First-Run Wizard check
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var settingsStore = new AppSettingsStore();
@@ -320,5 +349,11 @@ public partial class App : System.Windows.Application
         using var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        SingleInstanceManager.Dispose();
+        base.OnExit(e);
     }
 }

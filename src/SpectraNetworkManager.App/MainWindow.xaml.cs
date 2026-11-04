@@ -4712,11 +4712,55 @@ public partial class MainWindow : Window
         }
     }
 
+    public void BringToFront(bool showNotification = false)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (!IsVisible)
+            {
+                Show();
+            }
+
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
+
+            WindowState = WindowState.Normal;
+            Visibility = Visibility.Visible;
+
+            try
+            {
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                    NativeMethods.SetForegroundWindow(hwnd);
+                }
+            }
+            catch { }
+
+            Activate();
+            Focus();
+
+            try
+            {
+                bool origAlwaysOnTop = _appSettings.Settings.AlwaysOnTop;
+                Topmost = true;
+                Topmost = origAlwaysOnTop;
+            }
+            catch { }
+
+            if (showNotification && _trayIcon != null)
+            {
+                _trayIcon.ShowBalloonTip(3000, "SpectraNetworkManager", "SpectraNetworkManager is already running and has been brought to the front.", System.Windows.Forms.ToolTipIcon.Info);
+            }
+        });
+    }
+
     private void RestoreFromTray()
     {
-        Show();
-        WindowState = WindowState.Normal;
-        Activate();
+        BringToFront(showNotification: false);
     }
 
     private async Task PauseDnsBlockingAsync(int minutes)
