@@ -243,17 +243,158 @@ public sealed class ProgramRow : INotifyPropertyChanged
 /// <summary>One line in the live event list on the right.</summary>
 public sealed record EventLine(string Text, bool Opened, bool Alert = false);
 
-/// <summary>One line in the "Firewall blocks" grid.</summary>
-public sealed record BlockRow(string Time, string Direction, string Protocol, string Source, string Destination, int Pid, string Application)
+/// <summary>One line in the "Firewall blocks" grid, with enriched caller identity, service name, and root-cause diagnostic.</summary>
+public sealed record BlockRow(
+    string Time,
+    string Direction,
+    string Protocol,
+    string Source,
+    string Destination,
+    int Pid,
+    string Application,
+    string CallerDisplayName,
+    string Service,
+    string Category,
+    string DestinationDisplay,
+    string DiagnosticExplanation,
+    bool IsNoise,
+    bool IsSelf,
+    string SourceAddress,
+    int SourcePort,
+    string DestinationAddress,
+    int DestinationPort,
+    BlockEvent RawEvent)
 {
-    public static BlockRow From(BlockEvent e) => new(
-        e.Time.ToString("HH:mm:ss"),
-        e.Inbound ? "IN" : "OUT",
-        e.ProtocolName,
-        $"{e.SourceAddress}:{e.SourcePort}",
-        $"{e.DestinationAddress}:{e.DestinationPort}",
-        e.ProcessId,
-        string.IsNullOrEmpty(e.Application) ? "(unknown)" : e.Application);
+    public static BlockRow From(BlockEvent e)
+    {
+        int targetPort = e.Inbound ? e.SourcePort : e.DestinationPort;
+        string proto = e.ProtocolName;
+
+        // 1. Resolve human-readable service name
+        string service = targetPort switch
+        {
+            137 => "NetBIOS-NS",
+            138 => "NetBIOS-Dgm",
+            139 => "NetBIOS-SSN",
+            5355 => "LLMNR",
+            5353 => "mDNS",
+            1900 => "SSDP / UPnP",
+            53 => "DNS",
+            80 => "HTTP",
+            443 => (e.DestinationAddress.StartsWith("162.159.", StringComparison.OrdinalIgnoreCase) || e.DestinationAddress.StartsWith("1.1.1.", StringComparison.OrdinalIgnoreCase) || e.DestinationAddress.StartsWith("9.9.9.", StringComparison.OrdinalIgnoreCase) || e.DestinationAddress.StartsWith("8.8.8.", StringComparison.OrdinalIgnoreCase))
+                ? "HTTPS (DoH)"
+                : "HTTPS",
+            445 => "SMB / Direct-Host",
+            135 => "MS-RPC",
+            123 => "NTP",
+            67 or 68 => "DHCP",
+            0 when proto.Contains("ICMP", StringComparison.OrdinalIgnoreCase) => "ICMP Ping",
+            _ => WellKnownPorts.GetServiceName(targetPort, e.ProtocolNumber == 17 ? SpectraNetworkManager.Core.Protocol.Udp : SpectraNetworkManager.Core.Protocol.Tcp)
+        };
+
+        // 2. Identify caller / process attribution
+        string app = string.IsNullOrWhiteSpace(e.Application) ? "" : e.Application;
+        string callerName;
+
+        if (string.IsNullOrEmpty(app))
+        {
+            callerName = targetPort switch
+            {
+                137 or 138 or 139 => "Windows Kernel (NetBIOS)",
+                5355 => "Windows Kernel (LLMNR)",
+                1900 or 5353 => "Windows Kernel (SSDP / mDNS)",
+                67 or 68 => "Windows Kernel (DHCP)",
+                _ when proto.Contains("ICMP", StringComparison.OrdinalIgnoreCase) => "Windows Kernel (ICMP Ping)",
+                _ => e.Inbound ? "External Remote Host" : "Windows Kernel / System"
+            };
+        }
+        else if (app.Contains("spectranetworkmanager", StringComparison.OrdinalIgnoreCase))
+        {
+            if (targetPort == 443 || e.DestinationAddress.StartsWith("162.159.", StringComparison.OrdinalIgnoreCase) || e.DestinationAddress.StartsWith("1.1.1.", StringComparison.OrdinalIgnoreCase) || e.DestinationAddress.StartsWith("9.9.9.", StringComparison.OrdinalIgnoreCase))
+            {
+                callerName = "SpectraNetworkManager (Upstream DoH)";
+            }
+            else if (proto.Contains("ICMP", StringComparison.OrdinalIgnoreCase))
+            {
+                callerName = "SpectraNetworkManager (Gateway Ping)";
+            }
+            else
+            {
+                callerName = "SpectraNetworkManager";
+            }
+        }
+        else
+        {
+            callerName = System.IO.Path.GetFileName(app);
+            if (string.IsNullOrEmpty(callerName)) callerName = app;
+        }
+
+        // 3. Categorize event
+        bool isNoise = targetPort is 137 or 138 or 139 or 1900 or 5353 or 5355
+            || e.DestinationAddress == "239.255.255.250"
+            || e.DestinationAddress.StartsWith("224.0.0.", StringComparison.OrdinalIgnoreCase)
+            || e.DestinationAddress.EndsWith(".255", StringComparison.OrdinalIgnoreCase);
+
+        bool isSelf = app.Contains("spectranetworkmanager", StringComparison.OrdinalIgnoreCase);
+
+        string category;
+        if (isNoise)
+        {
+            category = "Local Discovery Noise";
+        }
+        else if (isSelf)
+        {
+            category = "Spectra Self-Traffic";
+        }
+        else if (e.Inbound)
+        {
+            category = "Inbound Drop";
+        }
+        else
+        {
+            category = "Application Block";
+        }
+
+        // 4. Generate plain-English diagnostic explanation
+        string explanation;
+        if (isNoise)
+        {
+            explanation = $"Local subnet discovery: The Windows networking stack ({callerName}) broadcast a {service} probe to {e.DestinationAddress}:{e.DestinationPort}. This is routine Windows background activity for device and name discovery on your local network.";
+        }
+        else if (isSelf)
+        {
+            explanation = $"Spectra internal communication: Spectra forwarded an upstream DNS query via DoH or sent a gateway ping. The operation succeeded; this entry is a transient TCP reset/FIN or ICMP packet dropped by the kernel after socket closure.";
+        }
+        else if (e.Inbound)
+        {
+            explanation = $"Unsolicited inbound traffic: An external host at {e.SourceAddress}:{e.SourcePort} attempted to reach local port {e.DestinationPort} ({service}). It was dropped by Windows Firewall's default inbound security policy.";
+        }
+        else
+        {
+            explanation = $"Outbound connection dropped: Windows Filtering Platform blocked an outbound connection from '{callerName}' to {e.DestinationAddress}:{e.DestinationPort} ({service}). In Strict Mode, this program requires an explicit allow rule to access the internet.";
+        }
+
+        return new BlockRow(
+            e.Time.ToLocalTime().ToString("HH:mm:ss"),
+            e.Inbound ? "IN" : "OUT",
+            proto,
+            $"{e.SourceAddress}:{e.SourcePort}",
+            $"{e.DestinationAddress}:{e.DestinationPort}",
+            e.ProcessId,
+            string.IsNullOrEmpty(app) ? "(unknown)" : app,
+            callerName,
+            service,
+            category,
+            $"{e.DestinationAddress}:{e.DestinationPort}",
+            explanation,
+            isNoise,
+            isSelf,
+            e.SourceAddress,
+            e.SourcePort,
+            e.DestinationAddress,
+            e.DestinationPort,
+            e);
+    }
 }
 
 /// <summary>One line in the "Rules" grid: a stored decision plus whether Windows Firewall really has the matching rules.</summary>

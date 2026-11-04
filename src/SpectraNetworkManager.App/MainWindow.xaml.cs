@@ -99,6 +99,9 @@ public partial class MainWindow : Window
     public ObservableCollection<DnsRow> DnsRows { get; } = new();
     public ObservableCollection<EventLine> Events { get; } = new();
     public ObservableCollection<BlockRow> Blocks { get; } = new();
+    public ObservableCollection<BlockRow> FilteredBlocks { get; } = new();
+    private BlockRow? _selectedBlockRow;
+    private CancellationTokenSource? _blockHostResolveCts;
     public ObservableCollection<TopTalkerViewModel> TopTalkers { get; } = new();
     public ObservableCollection<ConnectionHistoryViewModel> ConnectionHistory { get; } = new();
     public ObservableCollection<DiscoveredDevice> DiscoveredDevices { get; } = new();
@@ -4565,6 +4568,42 @@ public partial class MainWindow : Window
 
     private async void OnRefreshBlocks(object sender, RoutedEventArgs e) => await LoadBlocksAsync();
 
+    private void OnBlocksFilterChanged(object sender, RoutedEventArgs e) => ApplyBlocksFilter();
+
+    private void ApplyBlocksFilter()
+    {
+        string query = BlocksSearchBox?.Text?.Trim() ?? "";
+        bool hideNoise = HideBlockDiscoveryNoiseCheck?.IsChecked == true;
+        bool hideSelf = HideBlockSelfTrafficCheck?.IsChecked == true;
+
+        FilteredBlocks.Clear();
+        foreach (var b in Blocks)
+        {
+            if (hideNoise && b.IsNoise) continue;
+            if (hideSelf && b.IsSelf) continue;
+
+            if (!string.IsNullOrEmpty(query))
+            {
+                bool match = b.CallerDisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Application.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Destination.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Source.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Service.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Protocol.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Category.Contains(query, StringComparison.OrdinalIgnoreCase);
+                if (!match) continue;
+            }
+
+            FilteredBlocks.Add(b);
+        }
+
+        if (BlocksHint != null)
+        {
+            string wfpStatus = _blockLog.IsNativeSubscribed ? " (real-time WFP active)" : "";
+            BlocksHint.Text = $"{FilteredBlocks.Count} of {Blocks.Count} events shown (newest first){wfpStatus}.";
+        }
+    }
+
     private async Task LoadBlocksAsync()
     {
         RefreshBlocksButton.IsEnabled = false;
@@ -4575,12 +4614,7 @@ public partial class MainWindow : Window
             Blocks.Clear();
             foreach (var ev in events) Blocks.Add(BlockRow.From(ev));
 
-            string wfpStatus = _blockLog.IsNativeSubscribed ? " (real-time WFP active)" : "";
-            BlocksHint.Text = events.Count > 0
-                ? $"{events.Count} blocked connections in the last hour (newest first){wfpStatus}."
-                : (_blockLog.IsNativeSubscribed
-                    ? "Nothing blocked in the last hour (real-time WFP active)."
-                    : "Nothing blocked in the last hour. If you expected blocks, enable auditing once: see README, section \"Firewall blocks\".");
+            ApplyBlocksFilter();
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -4593,6 +4627,293 @@ public partial class MainWindow : Window
         finally
         {
             RefreshBlocksButton.IsEnabled = true;
+        }
+    }
+
+    private void OnBlocksGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            ShowBlockInspector(row);
+        }
+    }
+
+    private void OnBlocksGridMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            ShowBlockInspector(row);
+        }
+    }
+
+    private void OnCloseBlockInspector(object sender, RoutedEventArgs e)
+    {
+        _selectedBlockRow = null;
+        BlocksGrid.SelectedItem = null;
+        BlockInspectorDetails.Visibility = Visibility.Collapsed;
+        BlockInspectorPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    private void ShowBlockInspector(BlockRow row)
+    {
+        if (row == null) return;
+        _selectedBlockRow = row;
+
+        BlockInspectorPlaceholder.Visibility = Visibility.Collapsed;
+        BlockInspectorDetails.Visibility = Visibility.Visible;
+
+        // 1. Status Banner
+        BlockInspectorCategoryText.Text = row.Category.ToUpperInvariant();
+        BlockInspectorCategoryBadge.Background = row.Category switch
+        {
+            "Application Block" => new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6)),
+            "Inbound Drop" => new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0x2B, 0x2B)),
+            "Spectra Self-Traffic" => new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0x22, 0xE8, 0xFF)),
+            _ => new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0xB0, 0x20))
+        };
+        BlockInspectorCategoryText.Foreground = row.Category switch
+        {
+            "Application Block" => (SolidColorBrush)FindResource("Magenta"),
+            "Inbound Drop" => (SolidColorBrush)FindResource("Magenta"),
+            "Spectra Self-Traffic" => (SolidColorBrush)FindResource("Cyan"),
+            _ => (SolidColorBrush)FindResource("Amber")
+        };
+
+        BlockInspectorDirText.Text = row.Direction;
+        BlockInspectorDirBadge.Background = row.Direction == "IN"
+            ? new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0x2B, 0xD6))
+            : new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x33, 0x22, 0xE8, 0xFF));
+        BlockInspectorDirText.Foreground = row.Direction == "IN"
+            ? (SolidColorBrush)FindResource("Magenta")
+            : (SolidColorBrush)FindResource("Cyan");
+
+        BlockInspectorTimeProtoText.Text = $"{row.Time}  Â·  {row.Protocol}  Â·  {row.Service}";
+
+        // 2. Caller / Process attribution
+        BlockInspectorAppNameText.Text = row.CallerDisplayName;
+        BlockInspectorPidText.Text = row.Pid > 0 ? row.Pid.ToString() : "0 (System / Kernel Driver)";
+        BlockInspectorPathText.Text = string.IsNullOrEmpty(row.Application) || row.Application == "(unknown)"
+            ? "(None â€” Kernel network subsystem)"
+            : row.Application;
+
+        bool hasExeOnDisk = !string.IsNullOrEmpty(row.Application) && row.Application != "(unknown)" && System.IO.File.Exists(row.Application);
+        if (hasExeOnDisk)
+        {
+            BlockInspectorSignerText.Text = "Checking signature...";
+            Task.Run(() =>
+            {
+                var sig = NativeAuthenticodeVerifier.VerifyFile(row.Application);
+                Dispatcher.Invoke(() =>
+                {
+                    if (_selectedBlockRow == row)
+                    {
+                        BlockInspectorSignerText.Text = sig.Status == SignatureStatus.Valid
+                            ? $"âœ” {sig.Publisher ?? "Valid signature"}"
+                            : (!string.IsNullOrEmpty(sig.Publisher) ? $"âš ï¸ {sig.Publisher} (Unverified)" : "âšª Unsigned executable");
+                    }
+                });
+            });
+        }
+        else
+        {
+            BlockInspectorSignerText.Text = row.CallerDisplayName.StartsWith("Windows", StringComparison.OrdinalIgnoreCase)
+                ? "âœ” Microsoft Windows OS Component"
+                : "N/A (Driver / Remote Host)";
+        }
+
+        // 3. Target and network intelligence
+        BlockInspectorDstText.Text = row.Destination;
+        BlockInspectorServiceText.Text = $"{row.Service} (Port {row.DestinationPort})";
+
+        if (IPAddress.TryParse(row.DestinationAddress, out var dstIp))
+        {
+            var intel = _ipIntel.Inspect(dstIp);
+            BlockInspectorGeoText.Text = intel.ShortDisplay;
+        }
+        else
+        {
+            BlockInspectorGeoText.Text = "Local Network";
+        }
+
+        _blockHostResolveCts?.Cancel();
+        _blockHostResolveCts = new CancellationTokenSource();
+        var token = _blockHostResolveCts.Token;
+
+        if (IPAddress.TryParse(row.DestinationAddress, out _))
+        {
+            if (row.DestinationAddress == "127.0.0.1" || row.DestinationAddress == "::1")
+            {
+                BlockInspectorHostText.Text = "localhost";
+            }
+            else if (row.DestinationAddress == "239.255.255.250")
+            {
+                BlockInspectorHostText.Text = "SSDP Multicast (Local)";
+            }
+            else if (row.DestinationAddress.StartsWith("224.0.0.", StringComparison.OrdinalIgnoreCase))
+            {
+                BlockInspectorHostText.Text = "IPv4 Multicast Group";
+            }
+            else
+            {
+                BlockInspectorHostText.Text = "Resolving hostname...";
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var entry = await Dns.GetHostEntryAsync(row.DestinationAddress, token);
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (_selectedBlockRow == row)
+                            {
+                                BlockInspectorHostText.Text = string.IsNullOrEmpty(entry.HostName) ? "None (Direct IP)" : entry.HostName;
+                            }
+                        });
+                    }
+                    catch
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (_selectedBlockRow == row)
+                            {
+                                BlockInspectorHostText.Text = "None (Direct IP)";
+                            }
+                        });
+                    }
+                }, token);
+            }
+        }
+        else
+        {
+            BlockInspectorHostText.Text = "-";
+        }
+
+        // 4. Diagnostic root-cause explanation
+        BlockInspectorExplanationText.Text = row.DiagnosticExplanation;
+
+        // 5. Button enable states
+        BlockInspectorAllowBtn.IsEnabled = hasExeOnDisk;
+        BlockInspectorOpenLocBtn.IsEnabled = hasExeOnDisk;
+        BlockInspectorAllowBtn.ToolTip = hasExeOnDisk
+            ? $"Creates an Outbound Allow rule for '{row.CallerDisplayName}' in Windows Firewall."
+            : "Only executable files on disk can be added to Windows Firewall rules.";
+    }
+
+    private void OnAllowBlockInspectorProgram(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBlockRow == null) return;
+        AllowBlockRowProgram(_selectedBlockRow);
+    }
+
+    private void OnAllowBlockContextProgram(object sender, RoutedEventArgs e)
+    {
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            AllowBlockRowProgram(row);
+        }
+    }
+
+    private void AllowBlockRowProgram(BlockRow row)
+    {
+        if (string.IsNullOrEmpty(row.Application) || row.Application == "(unknown)" || !System.IO.File.Exists(row.Application))
+        {
+            Info("This event cannot be added as a program rule because it originated from the Windows kernel or an external network host.");
+            return;
+        }
+
+        string name = row.CallerDisplayName;
+        string path = row.Application;
+
+        if (TryAllow(path, name, null))
+        {
+            AfterDecision();
+            Info($"Successfully allowed:\n\n{name}\n({path})\n\nThe application will now be permitted through the firewall.");
+        }
+    }
+
+    private void OnInvestigateBlockInspectorAi(object sender, RoutedEventArgs e)
+    {
+        OnContextMenuInvestigateAi(sender, e);
+    }
+
+    private void OnOpenBlockInspectorLocation(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBlockRow == null) return;
+        OpenBlockRowLocation(_selectedBlockRow);
+    }
+
+    private void OnOpenBlockContextLocation(object sender, RoutedEventArgs e)
+    {
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            OpenBlockRowLocation(row);
+        }
+    }
+
+    private void OpenBlockRowLocation(BlockRow row)
+    {
+        if (string.IsNullOrEmpty(row.Application) || !System.IO.File.Exists(row.Application))
+        {
+            Info("The file was not found on disk or represents a kernel driver.");
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{row.Application}\"");
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open file location", ex);
+        }
+    }
+
+    private void OnCopyBlockInspectorDetails(object sender, RoutedEventArgs e)
+    {
+        if (_selectedBlockRow == null) return;
+        CopyBlockRowDetails(_selectedBlockRow);
+    }
+
+    private void OnCopyBlockContextDetails(object sender, RoutedEventArgs e)
+    {
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            CopyBlockRowDetails(row);
+        }
+    }
+
+    private void CopyBlockRowDetails(BlockRow row)
+    {
+        string text = $"[SpectraNetworkManager Block Event]\n" +
+                      $"Time: {row.Time}\n" +
+                      $"Direction: {row.Direction}\n" +
+                      $"Protocol: {row.Protocol}\n" +
+                      $"Service: {row.Service}\n" +
+                      $"Caller: {row.CallerDisplayName}\n" +
+                      $"PID: {row.Pid}\n" +
+                      $"Path: {row.Application}\n" +
+                      $"Source: {row.Source}\n" +
+                      $"Destination: {row.Destination}\n" +
+                      $"Category: {row.Category}\n" +
+                      $"Explanation: {row.DiagnosticExplanation}\n";
+
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            StatusText.Text = "Copied block details to clipboard.";
+        }
+        catch { }
+    }
+
+    private void OnCopyBlockContextRemoteIp(object sender, RoutedEventArgs e)
+    {
+        if (BlocksGrid.SelectedItem is BlockRow row)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(row.DestinationAddress);
+                StatusText.Text = $"Copied remote address to clipboard: {row.DestinationAddress}";
+            }
+            catch { }
         }
     }
 

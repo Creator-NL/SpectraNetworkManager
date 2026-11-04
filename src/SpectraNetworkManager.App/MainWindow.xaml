@@ -2661,27 +2661,207 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                <Button x:Name="RefreshBlocksButton" Content="Refresh" Padding="16,4" Margin="0,0,14,0" Click="OnRefreshBlocks"/>
+
+            <!-- Blocks Toolbar: Search Box, Filter Checkboxes, Refresh, Count -->
+            <WrapPanel Grid.Row="0" Margin="0,0,0,8" VerticalAlignment="Center">
+                <Button x:Name="RefreshBlocksButton" Content="Refresh" Padding="14,4" Margin="0,0,12,0" Click="OnRefreshBlocks"/>
+
+                <Grid Width="270" Margin="0,0,14,0">
+                    <TextBox x:Name="BlocksSearchBox" VerticalContentAlignment="Center" TextChanged="OnBlocksFilterChanged"
+                             ToolTip="Filter by program, address, port, service, protocol or category"/>
+                    <TextBlock Text="Search blocked app, IP, port, service..." IsHitTestVisible="False"
+                               Foreground="{StaticResource Muted}" Margin="9,0,0,0" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=BlocksSearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+
+                <CheckBox x:Name="HideBlockDiscoveryNoiseCheck" Content="Hide discovery noise (NetBIOS/SSDP)" IsChecked="False"
+                          Margin="0,0,14,0" VerticalAlignment="Center" Checked="OnBlocksFilterChanged" Unchecked="OnBlocksFilterChanged"
+                          ToolTip="Hides routine Windows local subnet broadcasts like NetBIOS Name Service (port 137), SSDP (port 1900), and LLMNR (port 5355)."/>
+
+                <CheckBox x:Name="HideBlockSelfTrafficCheck" Content="Hide Spectra self-traffic" IsChecked="False"
+                          Margin="0,0,14,0" VerticalAlignment="Center" Checked="OnBlocksFilterChanged" Unchecked="OnBlocksFilterChanged"
+                          ToolTip="Hides SpectraNetworkManager internal DoH upstream teardowns and gateway latency pings."/>
+
                 <TextBlock x:Name="BlocksHint" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
-                           Text="Shows connections Windows Firewall blocked in the last hour."/>
-            </StackPanel>
-            <DataGrid x:Name="BlocksGrid" Grid.Row="1" ItemsSource="{Binding Blocks}" SelectionMode="Single">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="90"/>
-                    <DataGridTextColumn Header="DIR" Binding="{Binding Direction, Mode=OneWay}" Width="60"/>
-                    <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="80"/>
-                    <DataGridTextColumn Header="SOURCE" Binding="{Binding Source, Mode=OneWay}" Width="230"/>
-                    <DataGridTextColumn Header="DESTINATION" Binding="{Binding Destination, Mode=OneWay}" Width="230"/>
-                    <DataGridTextColumn Header="PID" Binding="{Binding Pid, Mode=OneWay}" Width="70"/>
-                    <DataGridTextColumn Header="APPLICATION" Binding="{Binding Application, Mode=OneWay}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
+                           Text="Shows connections Windows Firewall blocked in the last hour." Margin="4,0,0,0"/>
+            </WrapPanel>
+
+            <!-- Main Content Area: Side-by-Side Split -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" MinWidth="360"/>
+                    <ColumnDefinition x:Name="BlockSplitterColumn" Width="8"/>
+                    <ColumnDefinition x:Name="BlockInspectorColumn" Width="2*" MinWidth="320"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Blocks Grid -->
+                <DataGrid x:Name="BlocksGrid" Grid.Column="0" ItemsSource="{Binding FilteredBlocks}"
+                          SelectionMode="Single"
+                          SelectionChanged="OnBlocksGridSelectionChanged"
+                          PreviewMouseLeftButtonUp="OnBlocksGridMouseUp">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="âœ¨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                            <Separator/>
+                            <MenuItem x:Name="BlockMenuAllowProgram" Header="ðŸŸ¢ Allow Program in Firewall" Click="OnAllowBlockContextProgram"/>
+                            <MenuItem Header="ðŸ“‚ Open File Location" Click="OnOpenBlockContextLocation"/>
+                            <Separator/>
+                            <MenuItem Header="ðŸ“‹ Copy Details" Click="OnCopyBlockContextDetails"/>
+                            <MenuItem Header="ðŸ“‹ Copy Remote IP" Click="OnCopyBlockContextRemoteIp"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="TIME" Binding="{Binding Time, Mode=OneWay}" Width="75"/>
+                        <DataGridTextColumn Header="DIR" Binding="{Binding Direction, Mode=OneWay}" Width="50"/>
+                        <DataGridTextColumn Header="PROTO" Binding="{Binding Protocol, Mode=OneWay}" Width="65"/>
+                        <DataGridTextColumn Header="CALLER / APPLICATION" Binding="{Binding CallerDisplayName, Mode=OneWay}" Width="190" Foreground="{StaticResource Cyan}"/>
+                        <DataGridTextColumn Header="SERVICE" Binding="{Binding Service, Mode=OneWay}" Width="110"/>
+                        <DataGridTextColumn Header="DESTINATION" Binding="{Binding DestinationDisplay, Mode=OneWay}" Width="180"/>
+                        <DataGridTextColumn Header="CATEGORY" Binding="{Binding Category, Mode=OneWay}" Width="140" Foreground="{StaticResource Amber}"/>
+                        <DataGridTextColumn Header="SOURCE" Binding="{Binding Source, Mode=OneWay}" Width="160"/>
+                        <DataGridTextColumn Header="PATH" Binding="{Binding Application, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Splitter -->
+                <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"/>
+
+                <!-- Right: Block Inspector Drawer -->
+                <Border x:Name="BlockInspectorPanel" Grid.Column="2" Background="{StaticResource PanelAlt}"
+                        BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <!-- Header Bar with Close/Toggle -->
+                            <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                                <Button DockPanel.Dock="Right" Content="âœ•" Click="OnCloseBlockInspector"
+                                        Padding="0" Width="26" Height="22"
+                                        Background="#1A2140" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        Foreground="{StaticResource Cyan}" FontWeight="Bold" FontSize="11"
+                                        Cursor="Hand" ToolTip="Deselect block event"
+                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="BLOCK INTELLIGENCE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="  //  Root-Cause Diagnostics" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Placeholder when no item is selected -->
+                            <Border x:Name="BlockInspectorPlaceholder" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                    BorderThickness="1" CornerRadius="4" Padding="16,24" Margin="0,10,0,0">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="ðŸ”" FontSize="28" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Select a blocked connection" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Click any row in the table to inspect caller attribution, reverse DNS, GeoIP, and root-cause analysis."
+                                               FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,4,0,0" MaxWidth="280"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Active Content Card when row is selected -->
+                            <StackPanel x:Name="BlockInspectorDetails" Visibility="Collapsed">
+                                <!-- Top Status Banner -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <DockPanel LastChildFill="True">
+                                        <Border x:Name="BlockInspectorCategoryBadge" DockPanel.Dock="Right" CornerRadius="3" Padding="6,2" Background="#22FFB020">
+                                            <TextBlock x:Name="BlockInspectorCategoryText" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Amber}"/>
+                                        </Border>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border x:Name="BlockInspectorDirBadge" CornerRadius="2" Padding="4,1" Margin="0,0,6,0" Background="#2222E8FF">
+                                                <TextBlock x:Name="BlockInspectorDirText" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Cyan}"/>
+                                            </Border>
+                                            <TextBlock x:Name="BlockInspectorTimeProtoText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Text}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <!-- 1. CALLER / PROCESS ATTRIBUTION CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="CALLER &amp; PROCESS ATTRIBUTION" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Application:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorAppNameText" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Process ID:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorPidText" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Verified Signer:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorSignerText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Full Path:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorPathText" FontSize="10" FontFamily="Consolas" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 2. REMOTE TARGET & NETWORK INTELLIGENCE CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="TARGET &amp; NETWORK INTELLIGENCE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Destination:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorDstText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Service / Port:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorServiceText" FontSize="11" Foreground="{StaticResource Text}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Hostname:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorHostText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="GeoIP / ASN:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="BlockInspectorGeoText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 3. ROOT CAUSE & DIAGNOSTIC CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,10">
+                                    <StackPanel>
+                                        <TextBlock Text="DIAGNOSTIC &amp; ROOT CAUSE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <TextBlock x:Name="BlockInspectorExplanationText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" LineHeight="16"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 4. ACTION BUTTONS -->
+                                <WrapPanel Margin="0,0,0,4">
+                                    <Button x:Name="BlockInspectorAllowBtn" Content="ðŸŸ¢ Allow Program in Firewall" Click="OnAllowBlockInspectorProgram"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Green}" Padding="10,4"
+                                            ToolTip="Creates an Outbound Allow rule for this program in Windows Firewall."/>
+                                    <Button Content="âœ¨ Investigate with Spectra AI" Click="OnInvestigateBlockInspectorAi"
+                                            Margin="0,0,6,6" Foreground="{StaticResource MenuBlue}" Padding="10,4"
+                                            ToolTip="Performs an instant deep security audit of this event with Spectra AI."/>
+                                    <Button x:Name="BlockInspectorOpenLocBtn" Content="ðŸ“‚ Open File Location" Click="OnOpenBlockInspectorLocation"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Locates and selects this executable in Windows Explorer."/>
+                                    <Button Content="ðŸ“‹ Copy Details" Click="OnCopyBlockInspectorDetails"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Copies complete diagnostic information to the clipboard."/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Status bar -->
