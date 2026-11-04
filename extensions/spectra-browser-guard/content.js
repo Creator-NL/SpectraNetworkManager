@@ -45,6 +45,8 @@
     );
 
     api.storage.onChanged.addListener((changes) => {
+      const relevant = ["showPlaceholder", "blockYouTubeAds", "blockYouTubeAnnotations", "blockYouTubeShorts", "customRules"];
+      if (!relevant.some((k) => changes[k])) return;
       if (changes.showPlaceholder) showPlaceholder = changes.showPlaceholder.newValue;
       if (changes.blockYouTubeAds) blockYouTubeAds = changes.blockYouTubeAds.newValue;
       if (changes.blockYouTubeAnnotations) blockYouTubeAnnotations = changes.blockYouTubeAnnotations.newValue;
@@ -60,6 +62,10 @@
 
   if (typeof api !== "undefined" && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "start_element_picker") {
+        startElementPicker();
+      }
+
       if (msg && msg.type === "spectra_rules_updated") {
         if (Array.isArray(msg.customRules)) activeCustomRules = msg.customRules;
         if (msg.blockYouTubeShorts !== undefined) blockYouTubeShorts = msg.blockYouTubeShorts;
@@ -95,85 +101,74 @@
         if (m) return m[1];
       }
     } catch {}
-
-    const vMatch = urlStr.match(/[?&]v=([a-zA-Z0-9_-]{8,})/);
-    if (vMatch) return vMatch[1];
     return null;
   }
 
-  // --- Pattern Matching Logic ---
+  // --- Rule Matcher Helper ---
   function patternMatchesUrl(pattern, targetUrl) {
     if (!pattern || !targetUrl) return false;
-    const p = pattern.trim();
-    const u = targetUrl.trim();
+    const cleanPattern = pattern.trim().toLowerCase();
+    const cleanUrl = targetUrl.toLowerCase();
 
-    // 1. Literal or clean substring match
-    const cleanPattern = p.replace(/^\*:\/\/\*\./, "").replace(/^\*:\/\//, "").replace(/\*$/, "");
-    if (cleanPattern.length > 3 && u.includes(cleanPattern)) {
-      return true;
+    if (cleanUrl.includes(cleanPattern)) return true;
+
+    // Check if pattern is a bare YouTube Video ID (11 chars)
+    if (/^[a-zA-Z0-9_-]{11}$/.test(cleanPattern)) {
+      const vid = extractYouTubeVideoId(targetUrl);
+      if (vid && vid === cleanPattern) return true;
     }
 
-    // 2. Wildcard to Regex conversion
     try {
-      let regexStr = p
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, ".*");
-
-      if (!regexStr.startsWith(".*")) regexStr = ".*" + regexStr;
-      if (!regexStr.endsWith(".*")) regexStr = regexStr + ".*";
-
-      const rx = new RegExp("^" + regexStr + "$", "i");
-      if (rx.test(u)) return true;
+      const rxStr = "^" + cleanPattern
+        .replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&")
+        .replace(/\*/g, ".*") + "$";
+      const rx = new RegExp(rxStr);
+      if (rx.test(cleanUrl)) return true;
     } catch {}
 
     return false;
   }
 
   function findMatchingBlockRule(currentUrl) {
-    if (!activeCustomRules || activeCustomRules.length === 0) return null;
+    if (!Array.isArray(activeCustomRules) || activeCustomRules.length === 0) return null;
 
-    const currentVid = isYouTubeHost ? extractYouTubeVideoId(currentUrl) : null;
+    const currentVid = extractYouTubeVideoId(currentUrl);
 
     for (const rule of activeCustomRules) {
-      if (!rule || rule.action === "allow") continue;
+      if (rule.action === "allow" || rule.enabled === false) continue;
 
-      // Shorts overlay is handled exclusively by inspectShortsElements; skip here
-      if (rule.id === "yt-shorts" || rule.id === "yt-video-stream") continue;
-
-      // Check YouTube Video ID match
-      if (isYouTubeHost && currentVid) {
-        const ruleVid = extractYouTubeVideoId(rule.pattern);
-        if (ruleVid && ruleVid === currentVid) {
-          return rule;
-        }
-        if (rule.pattern && rule.pattern.includes(currentVid)) {
-          return rule;
-        }
-      }
-
-      // Check URL pattern match
-      if (patternMatchesUrl(rule.pattern, currentUrl)) {
+      if (rule.videoId && currentVid && rule.videoId === currentVid) {
         return rule;
       }
-    }
 
+      if (rule.url && patternMatchesUrl(rule.url, currentUrl)) {
+        return rule;
+      }
+
+      if (rule.domain) {
+        try {
+          const u = new URL(currentUrl);
+          if (u.hostname.toLowerCase() === rule.domain.toLowerCase() || u.hostname.toLowerCase().endsWith("." + rule.domain.toLowerCase())) {
+            return rule;
+          }
+        } catch {}
+      }
+    }
     return null;
   }
 
-  // --- Enforce Blocking on Matched Rule ---
+  // --- Active Enforcement & Video Halting ---
   function checkPageBlockRules(force = false) {
     const currentUrl = window.location.href;
-    if (!force && currentUrl === lastCheckedUrl && currentBlockedRule) {
-      haltActiveVideo();
-      return;
-    }
+    if (!force && currentUrl === lastCheckedUrl) return;
     lastCheckedUrl = currentUrl;
 
     const matchedRule = findMatchingBlockRule(currentUrl);
-
     if (matchedRule) {
       currentBlockedRule = matchedRule;
-      if (isYouTubeHost) {
+      haltActiveVideo();
+
+      if (isYouTubeHost && (currentUrl.includes("/watch") || currentUrl.includes("/embed/"))) {
         blockYouTubeVideoPlayer(matchedRule);
       } else {
         blockEntireWebPage(matchedRule);
@@ -188,165 +183,119 @@
     const videos = document.querySelectorAll("video");
     for (const v of videos) {
       try {
-        if (!v.paused) v.pause();
-        v.muted = true;
+        v.pause();
         v.currentTime = 0;
+        v.playbackRate = 0;
+        v.muted = true;
       } catch {}
     }
   }
 
   function blockYouTubeVideoPlayer(matchedRule) {
-    haltActiveVideo();
-
-    const player = document.querySelector("#movie_player, .html5-video-player, #player-container, ytd-watch-flexy #player");
+    const player = document.querySelector("#movie_player, .html5-video-player");
     if (!player) return;
 
-    let overlay = document.getElementById("spectra-yt-blocked-overlay");
+    haltActiveVideo();
+
+    let overlay = document.getElementById("spectra-player-block-overlay");
     if (!overlay) {
       overlay = document.createElement("div");
-      overlay.id = "spectra-yt-blocked-overlay";
-      overlay.className = "spectra-media-blocked-overlay spectra-custom-block";
+      overlay.id = "spectra-player-block-overlay";
+      overlay.className = "spectra-media-blocked-overlay";
+      overlay.style.position = "absolute";
+      overlay.style.inset = "0";
+      overlay.style.zIndex = "2147483647";
+      overlay.style.background = "linear-gradient(135deg, rgba(13, 17, 23, 0.96) 0%, rgba(21, 28, 40, 0.98) 100%)";
 
-      const icon = document.createElement("div");
-      icon.className = "spectra-overlay-icon";
-      icon.textContent = "🚫";
-
-      const title = document.createElement("div");
-      title.className = "spectra-overlay-title";
-      title.style.color = "#FF2BD6";
-      title.style.fontSize = "17px";
-      title.textContent = "YOUTUBE VIDEO BLOCKED BY SPECTRA GUARD";
-
-      const desc = document.createElement("div");
-      desc.className = "spectra-overlay-desc";
+      const iconEl = document.createElement("div");
+      iconEl.className = "spectra-overlay-icon";
+      iconEl.textContent = "🛡️";
 
       const titleEl = document.createElement("div");
-      titleEl.style.fontWeight = "600";
-      titleEl.style.color = "#E6EDF3";
-      titleEl.style.marginBottom = "4px";
-      titleEl.textContent = matchedRule.title || "Custom Blocked Video";
+      titleEl.className = "spectra-overlay-title";
+      titleEl.textContent = "ACCESS RESTRICTED BY SPECTRA NETWORK MANAGER";
 
-      const codeEl = document.createElement("code");
-      codeEl.style.display = "inline-block";
-      codeEl.style.background = "#1C1936";
-      codeEl.style.border = "1px solid #FF2BD6";
-      codeEl.style.color = "#00E5FF";
-      codeEl.style.padding = "3px 8px";
-      codeEl.style.borderRadius = "4px";
-      codeEl.style.fontSize = "11px";
-      codeEl.style.wordBreak = "break-all";
-      codeEl.textContent = matchedRule.pattern || "";
+      const descEl = document.createElement("div");
+      descEl.className = "spectra-overlay-desc";
+      const ruleLabel = matchedRule.title || matchedRule.name || matchedRule.url || matchedRule.videoId || "Spectra Security Policy";
+      descEl.textContent = `This content is blocked by Spectra Browser Guard (${ruleLabel}).`;
 
-      const noteEl = document.createElement("div");
-      noteEl.style.marginTop = "10px";
-      noteEl.style.fontSize = "11px";
-      noteEl.style.color = "#8B949E";
-      noteEl.textContent = "This video matches an active block rule in SpectraNetworkManager Browser Guard.";
+      const allowBtn = document.createElement("button");
+      allowBtn.className = "spectra-allow-once-btn";
+      allowBtn.textContent = "Allow Once for this Session";
+      allowBtn.onclick = () => {
+        matchedRule.action = "allow";
+        overlay.remove();
+        const v = player.querySelector("video");
+        if (v) {
+          v.playbackRate = 1;
+          v.play().catch(() => {});
+        }
+      };
 
-      desc.appendChild(titleEl);
-      desc.appendChild(codeEl);
-      desc.appendChild(noteEl);
+      overlay.appendChild(iconEl);
+      overlay.appendChild(titleEl);
+      overlay.appendChild(descEl);
+      overlay.appendChild(allowBtn);
 
-      overlay.appendChild(icon);
-      overlay.appendChild(title);
-      overlay.appendChild(desc);
-
-      if (player.parentNode) {
-        player.style.position = "relative";
-        player.appendChild(overlay);
-      }
+      player.appendChild(overlay);
     }
   }
 
   function blockEntireWebPage(matchedRule) {
-    if (document.getElementById("spectra-full-page-block")) return;
-    try { window.stop(); } catch {}
+    if (document.getElementById("spectra-page-block-overlay")) return;
 
-    document.title = "Blocked by Spectra Browser Guard";
+    haltActiveVideo();
 
-    const body = document.body || document.documentElement;
-    while (body.firstChild) {
-      body.removeChild(body.firstChild);
-    }
-    body.id = "spectra-full-page-block";
-    body.style.background = "#0B0F19";
-    body.style.color = "#E6EDF3";
-    body.style.fontFamily = "'Segoe UI', system-ui, sans-serif";
-    body.style.display = "flex";
-    body.style.alignItems = "center";
-    body.style.justifyContent = "center";
-    body.style.height = "100vh";
-    body.style.margin = "0";
+    const overlay = document.createElement("div");
+    overlay.id = "spectra-page-block-overlay";
+    overlay.className = "spectra-media-blocked-overlay";
+    overlay.style.position = "fixed";
+    overlay.style.top = "0";
+    overlay.style.left = "0";
+    overlay.style.width = "100vw";
+    overlay.style.height = "100vh";
+    overlay.style.zIndex = "2147483647";
+    overlay.style.display = "flex";
+    overlay.style.flexDirection = "column";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.background = "#0D1117";
 
-    const card = document.createElement("div");
-    card.style.background = "#121826";
-    card.style.border = "2px solid #FF2BD6";
-    card.style.borderRadius = "10px";
-    card.style.padding = "36px";
-    card.style.maxWidth = "580px";
-    card.style.textAlign = "center";
-    card.style.boxShadow = "0 10px 40px rgba(255, 43, 214, 0.3)";
+    const iconEl = document.createElement("div");
+    iconEl.className = "spectra-overlay-icon";
+    iconEl.textContent = "🛡️";
 
-    const icon = document.createElement("div");
-    icon.style.fontSize = "48px";
-    icon.style.marginBottom = "14px";
-    icon.textContent = "🚫";
+    const titleEl = document.createElement("div");
+    titleEl.className = "spectra-overlay-title";
+    titleEl.textContent = "WEBSITE BLOCKED BY SPECTRA BROWSER GUARD";
 
-    const h1 = document.createElement("h1");
-    h1.style.color = "#FF2BD6";
-    h1.style.fontSize = "20px";
-    h1.style.margin = "0 0 12px";
-    h1.style.fontWeight = "700";
-    h1.style.letterSpacing = "0.5px";
-    h1.textContent = "WEBPAGE BLOCKED BY SPECTRA BROWSER GUARD";
+    const descEl = document.createElement("div");
+    descEl.className = "spectra-overlay-desc";
+    const ruleLabel = matchedRule.title || matchedRule.name || matchedRule.url || matchedRule.domain || "Spectra Security Policy";
+    descEl.textContent = `Access to this website is restricted (${ruleLabel}).`;
 
-    const p1 = document.createElement("p");
-    p1.style.color = "#8B949E";
-    p1.style.fontSize = "13px";
-    p1.style.lineHeight = "1.5";
-    p1.style.margin = "8px 0";
-    p1.textContent = "Access to this page has been blocked by your Spectra Browser Guard security policy.";
+    const backBtn = document.createElement("button");
+    backBtn.className = "spectra-allow-once-btn";
+    backBtn.textContent = "Go Back";
+    backBtn.onclick = () => {
+      window.history.back();
+    };
 
-    const patternBox = document.createElement("div");
-    patternBox.style.display = "inline-block";
-    patternBox.style.background = "#1C1936";
-    patternBox.style.border = "1px solid #FF2BD6";
-    patternBox.style.color = "#00E5FF";
-    patternBox.style.padding = "6px 12px";
-    patternBox.style.borderRadius = "6px";
-    patternBox.style.fontFamily = "Consolas, monospace";
-    patternBox.style.fontSize = "12px";
-    patternBox.style.margin = "14px 0";
-    patternBox.style.wordBreak = "break-all";
-    patternBox.textContent = matchedRule.pattern || "";
+    overlay.appendChild(iconEl);
+    overlay.appendChild(titleEl);
+    overlay.appendChild(descEl);
+    overlay.appendChild(backBtn);
 
-    const p2 = document.createElement("p");
-    p2.style.color = "#8B949E";
-    p2.style.fontSize = "13px";
-    p2.style.lineHeight = "1.5";
-    p2.style.margin = "8px 0";
-    p2.textContent = "To access this content, remove or uncheck the matching rule in SpectraNetworkManager ➔ Browser Guard.";
-
-    const brand = document.createElement("div");
-    brand.style.marginTop = "24px";
-    brand.style.fontSize = "11px";
-    brand.style.color = "#00E5FF";
-    brand.style.fontWeight = "600";
-    brand.style.letterSpacing = "1px";
-    brand.textContent = "SPECTRA NETWORKMANAGER // BROWSER DEFENSE SYSTEM";
-
-    card.appendChild(icon);
-    card.appendChild(h1);
-    card.appendChild(p1);
-    card.appendChild(patternBox);
-    card.appendChild(p2);
-    card.appendChild(brand);
-    body.appendChild(card);
+    const target = document.body || document.documentElement;
+    if (target) target.appendChild(overlay);
   }
 
   function removeBlockOverlayIfExists() {
-    const overlay = document.getElementById("spectra-yt-blocked-overlay");
-    if (overlay) overlay.remove();
+    const playerOverlay = document.getElementById("spectra-player-block-overlay");
+    if (playerOverlay && typeof playerOverlay.remove === "function") playerOverlay.remove();
+    const pageOverlay = document.getElementById("spectra-page-block-overlay");
+    if (pageOverlay && typeof pageOverlay.remove === "function") pageOverlay.remove();
   }
 
   // Listen to YouTube SPA navigation events & browser history
@@ -360,6 +309,7 @@
     inspectShortsElements();
   }
 
+  window.addEventListener("yt-navigate-start", onWatchNavigation);
   window.addEventListener("yt-navigate-finish", onWatchNavigation);
   window.addEventListener("yt-page-data-updated", onWatchNavigation);
   window.addEventListener("popstate", onWatchNavigation);
@@ -369,7 +319,7 @@
     const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
     if (pendingAutoplay && isWatch && (Date.now() - lastNavTime < 10000)) {
       const v = document.querySelector("video");
-      if (v && v.paused && !currentBlockedRule && !shouldBlockShorts()) {
+      if (v && v.paused && !v.ended && !currentBlockedRule && !shouldBlockShorts()) {
         v.play().catch(() => {});
       }
     }
@@ -408,9 +358,18 @@
           ".ytp-ad-skip-button-slot button",
           ".ytp-ad-skip-button-container button",
           "button.ytp-ad-skip-button-modern",
+          "button.ytp-skip-ad-button",
+          "button[id^='skip-button']",
+          "button[class*='skip-button']",
+          "button[class*='skip-ad']",
           "button[aria-label*='Skip']",
+          "button[aria-label*='skip']",
+          "button[aria-label*='Overslaan']",
           "button[aria-label*='overslaan']",
-          ".ytp-ad-overlay-close-button"
+          ".ytp-ad-overlay-close-button",
+          ".ytp-ad-preview-container button",
+          ".video-ads .ytp-ad-skip-button-slot button",
+          ".ytp-ad-action-interstitial button"
         ];
 
         let adJustFinished = false;
@@ -423,6 +382,7 @@
           adJustFinished = false;
         }
 
+        document.addEventListener("yt-navigate-start", markNav);
         document.addEventListener("yt-navigate-finish", markNav);
         window.addEventListener("popstate", markNav);
 
@@ -435,12 +395,20 @@
               if (s === 1 || s === 2) return true;
             } catch(e) {}
           }
+          if (player.querySelector && player.querySelector(".ytp-ad-text, .ytp-ad-badge, [class*='ytp-ad-badge'], .ytp-ad-player-overlay, .ytp-ad-player-overlay-layout")) {
+            return true;
+          }
           return false;
         }
 
         function handlePlayer() {
           const player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
           if (!player) return;
+
+          const video = player.querySelector("video");
+          const isShorts = location.pathname.includes("/shorts/");
+          if (isShorts) return;
+          if (video && (!Number.isFinite(video.duration) || video.duration === Infinity)) return;
 
           const adActive = isPlayerAd(player);
 
@@ -457,7 +425,7 @@
 
             // 2. Dispatch trusted-like click on skip buttons
             for (const sel of SKIP_SELECTORS) {
-              const btns = player.querySelectorAll(sel);
+              const btns = player.querySelectorAll ? player.querySelectorAll(sel) : [];
               for (const b of btns) {
                 try {
                   b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
@@ -467,14 +435,12 @@
             }
 
             // 3. Fast forward ad video ONLY while ad is showing
-            const video = player.querySelector("video");
             if (video && isPlayerAd(player)) {
-              video.muted = true;
               if (Number.isFinite(video.duration) && video.duration > 0.1) {
                 try { video.currentTime = video.duration; } catch(e) {}
               }
               try { video.playbackRate = 16; } catch(e) {}
-              if (video.paused) {
+              if (video.paused && !video.ended) {
                 try { video.play().catch(function() {}); } catch(e) {}
               }
             }
@@ -482,8 +448,6 @@
           }
 
           // NO ad is showing right now
-          const video = player.querySelector("video");
-
           if (adJustFinished) {
             // Ad was just cancelled or skipped! Resume main video playback immediately!
             try {
@@ -491,7 +455,7 @@
                 player.playVideo();
               }
             } catch(e) {}
-            if (video && video.paused) {
+            if (video && video.paused && !video.ended) {
               try { video.play().catch(function() {}); } catch(e) {}
             }
             if (video && !video.paused && video.currentTime > 0.1) {
@@ -510,7 +474,7 @@
           // Auto-start if we navigated to a watch page within 4 seconds and the video is paused/unstarted
           const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
           const timeSinceNav = Date.now() - navTime;
-          if (pendingAutoplay && timeSinceNav < 4000 && isWatch && video && video.paused) {
+          if (pendingAutoplay && timeSinceNav < 4000 && isWatch && video && video.paused && !video.ended) {
             try {
               if (typeof player.playVideo === "function") {
                 const state = typeof player.getPlayerState === "function" ? player.getPlayerState() : -1;
@@ -538,15 +502,37 @@
     ".ytp-ad-skip-button",
     ".ytp-ad-skip-button-modern",
     ".ytp-skip-ad-button",
+    "button.ytp-ad-skip-button-modern",
+    "button.ytp-skip-ad-button",
     ".ytp-ad-skip-button-slot button",
     ".ytp-ad-skip-button-container button",
     ".ytp-ad-overlay-close-button",
-    "button.ytp-ad-skip-button-modern",
     "button[id^='skip-button']",
+    "button[class*='skip-button']",
+    "button[class*='skip-ad']",
     "button[aria-label*='Skip']",
+    "button[aria-label*='skip']",
+    "button[aria-label*='Overslaan']",
     "button[aria-label*='overslaan']",
-    ".ytp-ad-preview-container"
+    ".ytp-ad-preview-container button",
+    ".video-ads .ytp-ad-skip-button-slot button",
+    ".ytp-ad-action-interstitial button"
   ];
+
+  function isAdSkipPage() {
+    const p = location.pathname;
+    return !p.includes("/shorts/") && (p.startsWith("/watch") || p.startsWith("/embed") || p.startsWith("/live"));
+  }
+
+  function setAdActiveAttr(on) {
+    const root = document.documentElement;
+    if (!root) return;
+    if (on) {
+      if (root.getAttribute("data-spectra-ad-active") !== "1") root.setAttribute("data-spectra-ad-active", "1");
+    } else if (root.hasAttribute("data-spectra-ad-active")) {
+      root.removeAttribute("data-spectra-ad-active");
+    }
+  }
 
   function isPlayerAd(player) {
     if (!player) return false;
@@ -556,6 +542,15 @@
         const s = player.getAdState();
         if (s === 1 || s === 2) return true;
       } catch(e) {}
+    }
+    if (player.wrappedJSObject && typeof player.wrappedJSObject.getAdState === "function") {
+      try {
+        const s = player.wrappedJSObject.getAdState();
+        if (s === 1 || s === 2) return true;
+      } catch(e) {}
+    }
+    if (player.querySelector && player.querySelector(".ytp-ad-text, .ytp-ad-badge, [class*='ytp-ad-badge'], .ytp-ad-player-overlay, .ytp-ad-player-overlay-layout")) {
+      return true;
     }
     return false;
   }
@@ -571,16 +566,44 @@
     });
   }
 
+  let adSessionActive = false;
+  let adSessionStartedAt = 0;
+
+  function reportAdSkipped() {
+    try {
+      const p = api.runtime.sendMessage({ type: "ad_skipped" });
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {}
+  }
+
   function neutralizeYouTubeAds() {
     if (!isYouTubeHost || !blockYouTubeAds) return;
+    if (!isAdSkipPage()) {
+      setAdActiveAttr(false);
+      adSessionActive = false;
+      return;
+    }
 
     const player = document.querySelector("#movie_player, .html5-video-player");
-    if (!player) return;
+    if (!player) {
+      setAdActiveAttr(false);
+      return;
+    }
 
     const video = player.querySelector("video.html5-main-video") || player.querySelector("video");
     if (video) hookVideoEvents(video);
 
+    if (video && (!Number.isFinite(video.duration) || video.duration === Infinity)) {
+      setAdActiveAttr(false);
+      return;
+    }
+
     if (!isPlayerAd(player)) {
+      if (adSessionActive) {
+        adSessionActive = false;
+      }
+      setAdActiveAttr(false);
+
       // Normal video playing! Restore original playback rate and mute state if needed
       if (wasMutedBeforeAd !== null) {
         if (video) {
@@ -588,17 +611,27 @@
           if (video.playbackRate > 2) {
             video.playbackRate = userPlaybackRate || 1;
           }
-          if (video.paused && !currentBlockedRule && !shouldBlockShorts()) {
+          if (video.paused && !video.ended && !currentBlockedRule && !shouldBlockShorts()) {
             video.play().catch(() => {});
           }
         }
         wasMutedBeforeAd = null;
+      } else if (video && video.muted) {
+        video.muted = false;
+      }
+
+      if (video) {
+        if (video.playbackRate > 2) {
+          video.playbackRate = userPlaybackRate || 1;
+        } else if (!video.paused && video.playbackRate > 0 && video.playbackRate <= 2) {
+          userPlaybackRate = video.playbackRate;
+        }
       }
 
       // Check if video is paused right after navigation
       const isWatch = location.pathname.includes("/watch") || location.pathname.includes("/shorts/");
       if (pendingAutoplay && isWatch && (Date.now() - lastNavTime < 4000)) {
-        if (video && video.paused && !currentBlockedRule && !shouldBlockShorts()) {
+        if (video && video.paused && !video.ended && !currentBlockedRule && !shouldBlockShorts()) {
           video.play().catch(() => {});
         }
       }
@@ -609,10 +642,30 @@
       return;
     }
 
-    // AD is showing!
-    // 1. Click skip / overlay close buttons immediately
+    // ---------------- AD IS SHOWING ----------------
+    const now = Date.now();
+    if (!adSessionActive) {
+      adSessionActive = true;
+      adSessionStartedAt = now;
+      reportAdSkipped();
+    }
+    setAdActiveAttr(true);
+
+    // 1. YouTube internal player API - skip and cancel ad
+    try {
+      if (player && player.wrappedJSObject && typeof player.wrappedJSObject.skipAd === "function") {
+        player.wrappedJSObject.skipAd();
+      }
+    } catch(e) {}
+    try {
+      if (player && player.wrappedJSObject && typeof player.wrappedJSObject.cancelPlayback === "function") {
+        player.wrappedJSObject.cancelPlayback();
+      }
+    } catch(e) {}
+
+    // 2. Click skip / overlay close buttons immediately
     for (const sel of SKIP_BUTTON_SELECTORS) {
-      const btns = player.querySelectorAll(sel);
+      const btns = player.querySelectorAll ? player.querySelectorAll(sel) : [];
       for (const btn of btns) {
         try {
           btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
@@ -621,7 +674,7 @@
       }
     }
 
-    // 2. Fast-forward AD video only
+    // 3. Fast-forward AD video only
     if (video) {
       if (wasMutedBeforeAd === null) {
         wasMutedBeforeAd = video.muted;
@@ -632,18 +685,19 @@
 
       video.muted = true;
 
-      if (Number.isFinite(video.duration) && video.duration > 0.1) {
+      const d = video.duration;
+      if (Number.isFinite(d) && d > 0.1) {
         try {
-          video.currentTime = video.duration;
+          video.currentTime = Math.max(0, d - 0.05);
         } catch {}
       }
       try { video.playbackRate = 16; } catch {}
-      if (video.paused) {
+      if (video.paused && !video.ended) {
         try { video.play().catch(() => {}); } catch {}
       }
 
       for (const sel of SKIP_BUTTON_SELECTORS) {
-        const btn = player.querySelector(sel);
+        const btn = player.querySelector ? player.querySelector(sel) : null;
         if (btn) {
           try {
             btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
@@ -659,9 +713,8 @@
     if (!isYouTubeHost || !window.location.href.includes("/shorts/")) return false;
 
     // 1. If custom rules are loaded from SpectraNetworkManager:
-    // When the user disables the Shorts rule, activeCustomRules will NOT contain 'yt-shorts'.
     if (activeCustomRules && activeCustomRules.length > 0) {
-      const hasShortsRule = activeCustomRules.some(r => r.id === "yt-shorts" && r.action !== "allow");
+      const hasShortsRule = activeCustomRules.some(r => r.id === "yt-shorts" && r.enabled !== false && r.action !== "allow");
       return Boolean(blockYouTubeShorts && hasShortsRule);
     }
 
@@ -713,7 +766,6 @@
       const overlay = document.getElementById("spectra-shorts-blocked-overlay");
       if (overlay) overlay.remove();
 
-      // Clean up any other non-custom overlays
       const genericOverlays = document.querySelectorAll(".spectra-media-blocked-overlay.spectra-shorts-overlay, #spectra-shorts-blocked-overlay");
       for (const o of genericOverlays) o.remove();
 
@@ -726,10 +778,43 @@
     }
   }
 
+  // Feed & In-Page Sponsored Ad Purger
+  function purgeFeedAds() {
+    if (!blockYouTubeAds) return;
+    try {
+      const selectors = [
+        "#masthead-ad",
+        "ytd-ad-slot-renderer",
+        "ytd-in-feed-ad-layout-renderer",
+        "ytd-banner-promo-renderer",
+        "ytd-statement-banner-renderer",
+        "ytd-promoted-sparkles-web-renderer",
+        "ytd-promoted-sparkles-text-search-renderer",
+        "ytd-promoted-video-renderer",
+        "ytd-compact-promoted-video-renderer",
+        "ytd-video-masthead-ad-v3-renderer",
+        "ytd-primetime-promo-renderer",
+        ".badge-shape-wiz--ad",
+        "[class*='badge-shape-wiz--ad']",
+        ".badge-style-type-ad"
+      ];
+      const elements = document.querySelectorAll(selectors.join(", "));
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        if (el.closest("#movie_player, .html5-video-player")) continue;
+        const container = el.closest("ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-ad-slot-renderer") || el;
+        if (container && container.style.display !== "none") {
+          container.style.display = "none";
+        }
+      }
+    } catch {}
+  }
+
   function runGuardTick() {
     syncAttributes();
     checkPageBlockRules(false);
     neutralizeYouTubeAds();
+    purgeFeedAds();
     inspectShortsElements();
   }
 
@@ -743,10 +828,188 @@
     const observer = new MutationObserver(() => {
       checkPageBlockRules(false);
       neutralizeYouTubeAds();
+      purgeFeedAds();
       inspectShortsElements();
     });
     observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   };
+
+  // --- Element Picker Mode (Interactive Visual Rule Creator) ---
+  let isPickerActive = false;
+  let hoveredTarget = null;
+  let pickerHud = null;
+  let prevOutline = "";
+  let prevCursor = "";
+
+  function showPickerToast(message) {
+    const existing = document.getElementById("spectra-picker-toast");
+    if (existing) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.id = "spectra-picker-toast";
+    toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#151C28;border:1px solid #00E5FF;color:#E6EDF3;padding:10px 22px;border-radius:6px;font:13px 'Segoe UI',sans-serif;font-weight:600;z-index:2147483647;box-shadow:0 6px 20px rgba(0,0,0,0.7);pointer-events:none;";
+    toast.textContent = message;
+    document.documentElement.appendChild(toast);
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.4s ease";
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 400);
+    }, 3200);
+  }
+
+  function startElementPicker() {
+    if (isPickerActive) return;
+    isPickerActive = true;
+
+    pickerHud = document.createElement("div");
+    pickerHud.id = "spectra-picker-hud";
+    pickerHud.style.cssText = "position:fixed;top:16px;left:50%;transform:translateX(-50%);background:rgba(13,17,23,0.95);border:1px solid #FF2BD6;color:#FFF;padding:10px 20px;border-radius:8px;font:13px 'Segoe UI',sans-serif;z-index:2147483647;display:flex;align-items:center;gap:14px;box-shadow:0 8px 30px rgba(255,43,214,0.35);backdrop-filter:blur(6px);pointer-events:auto;";
+
+    const textWrap = document.createElement("div");
+    textWrap.innerHTML = "<strong style='color:#00E5FF;'>🛡️ Spectra Element Picker Active:</strong> Click any video or card to block it.";
+    const sub = document.createElement("div");
+    sub.style.cssText = "font-size:11px;color:#8B949E;margin-top:2px;";
+    sub.textContent = "Hover over content to highlight. Press ESC to cancel.";
+    textWrap.appendChild(sub);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.style.cssText = "background:rgba(255,43,214,0.15)!important;border:1px solid #FF2BD6!important;color:#FF2BD6!important;padding:6px 14px!important;border-radius:4px!important;font-weight:700!important;font-size:11px!important;cursor:pointer!important;transition:all 0.15s ease!important;";
+    cancelBtn.textContent = "✕ Cancel (ESC)";
+    cancelBtn.addEventListener("click", stopElementPicker);
+
+    pickerHud.appendChild(textWrap);
+    pickerHud.appendChild(cancelBtn);
+    document.documentElement.appendChild(pickerHud);
+
+    document.addEventListener("mousemove", onPickerMouseMove, true);
+    document.addEventListener("click", onPickerClick, true);
+    document.addEventListener("keydown", onPickerKeyDown, true);
+  }
+
+  function stopElementPicker() {
+    if (!isPickerActive) return;
+    isPickerActive = false;
+    if (pickerHud) {
+      pickerHud.remove();
+      pickerHud = null;
+    }
+    if (hoveredTarget) {
+      hoveredTarget.style.outline = prevOutline;
+      hoveredTarget.style.cursor = prevCursor;
+      hoveredTarget = null;
+    }
+    document.removeEventListener("mousemove", onPickerMouseMove, true);
+    document.removeEventListener("click", onPickerClick, true);
+    document.removeEventListener("keydown", onPickerKeyDown, true);
+  }
+
+  function onPickerKeyDown(e) {
+    if (e.key === "Escape") {
+      stopElementPicker();
+    }
+  }
+
+  function onPickerMouseMove(e) {
+    if (!isPickerActive) return;
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (!target || target.closest("#spectra-picker-hud") || target.closest("#spectra-picker-toast")) return;
+
+    if (hoveredTarget !== target) {
+      if (hoveredTarget) {
+        hoveredTarget.style.outline = prevOutline;
+        hoveredTarget.style.cursor = prevCursor;
+      }
+      hoveredTarget = target;
+      prevOutline = target.style.outline;
+      prevCursor = target.style.cursor;
+      target.style.outline = "3px dashed #FF2BD6";
+      target.style.cursor = "crosshair";
+    }
+  }
+
+  function onPickerClick(e) {
+    if (!isPickerActive) return;
+    const target = e.target;
+    if (!target || target.closest("#spectra-picker-hud")) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let pickedUrl = "";
+    let pickedTitle = "";
+    let pickedVideoId = null;
+
+    // 1. YouTube video card detection
+    const ytCard = target.closest("ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer");
+    if (ytCard) {
+      const link = ytCard.querySelector("a#thumbnail, a#video-title-link, a[href*='/watch?v=']");
+      if (link && link.href) {
+        pickedUrl = link.href;
+        pickedVideoId = extractYouTubeVideoId(pickedUrl);
+      }
+      const titleEl = ytCard.querySelector("#video-title, #title");
+      if (titleEl) pickedTitle = titleEl.textContent.trim();
+    }
+
+    // 2. Direct link or video element
+    if (!pickedUrl) {
+      const link = target.closest("a[href]");
+      if (link && link.href) {
+        pickedUrl = link.href;
+        pickedVideoId = extractYouTubeVideoId(pickedUrl);
+        pickedTitle = link.textContent.trim() || link.title;
+      }
+    }
+
+    // 3. Iframe / embedded video
+    if (!pickedUrl) {
+      const iframe = target.closest("iframe[src]");
+      if (iframe && iframe.src) {
+        pickedUrl = iframe.src;
+        pickedVideoId = extractYouTubeVideoId(pickedUrl);
+      }
+    }
+
+    // 4. YouTube player on watch page
+    if (!pickedUrl && isYouTubeHost && location.pathname.includes("/watch")) {
+      pickedUrl = location.href;
+      pickedVideoId = extractYouTubeVideoId(pickedUrl);
+      pickedTitle = document.title;
+    }
+
+    // 5. Fallback
+    if (!pickedUrl) {
+      pickedUrl = location.href;
+      pickedTitle = (target.tagName.toLowerCase()) + (target.id ? '#' + target.id : '');
+    }
+
+    const elementToAnimate = ytCard || target;
+    stopElementPicker();
+
+    // Visual disintegration
+    elementToAnimate.style.transition = "all 0.4s ease";
+    elementToAnimate.style.opacity = "0.2";
+    elementToAnimate.style.filter = "grayscale(100%)";
+
+    showPickerToast("🎯 Sending to SpectraNetworkManager: " + (pickedTitle || pickedUrl));
+
+    if (typeof api !== "undefined" && api.runtime && api.runtime.sendMessage) {
+      api.runtime.sendMessage({
+        type: "element_picked",
+        url: pickedUrl,
+        title: pickedTitle,
+        videoId: pickedVideoId,
+        domain: location.hostname
+      }, (res) => {
+        if (res && res.autoApproved) {
+          elementToAnimate.style.display = "none";
+          showPickerToast("🛡️ Auto-Approved & Blocked: " + (pickedTitle || pickedUrl));
+        } else {
+          showPickerToast("⏳ Sent to SpectraNetworkManager Confirmation Queue");
+        }
+      });
+    }
+  }
 
   startObserver();
   injectMainWorldAdSkipper();

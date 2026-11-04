@@ -130,6 +130,8 @@ function connectNativeHost() {
       if (msg && msg.type === "rules_update") {
         syncedWithNativeHost = true;
         applyDynamicRules(msg);
+      } else if (msg && msg.type === "element_picked_ack" && msg.autoApproved) {
+        nativePort.postMessage({ type: "get_rules" });
       }
     });
 
@@ -179,6 +181,7 @@ async function applyDynamicRules(payload) {
       blockYouTubeAds: payload.blockYouTubeAds !== false,
       blockYouTubeAnnotations: payload.blockYouTubeAnnotations !== false,
       blockYouTubeShorts: payload.blockYouTubeShorts === true,
+      autoApprovePicker: payload.autoApprovePicker === true,
       activeRulesCount: addRules.length,
       customRules: customRulesList
     });
@@ -222,15 +225,59 @@ if (api.runtime && api.runtime.onMessage) {
         "blockYouTubeAds",
         "blockYouTubeAnnotations",
         "blockYouTubeShorts",
-        "customRules"
+        "customRules",
+        "adsSkipped"
       ], (stored) => {
         sendResponse({
           connected: syncedWithNativeHost,
           blockYouTubeShorts: stored.blockYouTubeShorts === true,
-          blockYouTubeAds: stored.blockYouTubeAds !== false
+          blockYouTubeAds: stored.blockYouTubeAds !== false,
+          adsSkipped: stored.adsSkipped || 0
         });
       });
       return true; // asynchronous response
+    }
+
+    // Content script reports every ad it fast-forwarded / skipped (shown in the popup)
+    if (msg && msg.type === "ad_skipped") {
+      api.storage.local.get(["adsSkipped"], (st) => {
+        api.storage.local.set({ adsSkipped: (st.adsSkipped || 0) + 1 });
+      });
+      return false;
+    }
+
+    if (msg && msg.type === "element_picked") {
+      if (nativePort) {
+        try {
+          nativePort.postMessage({
+            type: "element_picked",
+            url: msg.url,
+            title: msg.title,
+            domain: msg.domain,
+            videoId: msg.videoId
+          });
+        } catch (e) {
+          console.warn("[Spectra Browser Guard] Native host element picker post error:", e);
+        }
+      }
+
+      api.storage.local.get(["customRules", "autoApprovePicker"], (res) => {
+        const autoApproved = res.autoApprovePicker === true;
+        if (autoApproved) {
+          const rules = Array.isArray(res.customRules) ? res.customRules : [];
+          rules.push({
+            id: "picker-" + Date.now(),
+            pattern: msg.url,
+            title: msg.title || msg.url,
+            action: "block",
+            resourceType: "all",
+            enabled: true
+          });
+          api.storage.local.set({ customRules: rules });
+        }
+        sendResponse({ ok: true, autoApproved: autoApproved });
+      });
+      return true;
     }
 
     if (msg && msg.type === "toggle_rule") {
@@ -253,6 +300,29 @@ if (api.runtime && api.runtime.onMessage) {
         if (nativePort) {
           try {
             nativePort.postMessage({ type: "toggle_rule", id: "yt-shorts", enabled: enabled });
+          } catch {}
+        }
+      }
+
+      if (msg.id === "yt-ads") {
+        const enabled = Boolean(msg.enabled);
+        api.storage.local.set({ blockYouTubeAds: enabled }).then(() => {
+          if (api.tabs && api.tabs.query) {
+            api.tabs.query({}).then((tabs) => {
+              for (const tab of tabs) {
+                if (tab.id) {
+                  api.tabs.sendMessage(tab.id, {
+                    type: "spectra_rules_updated",
+                    blockYouTubeAds: enabled
+                  }).catch(() => {});
+                }
+              }
+            });
+          }
+        });
+        if (nativePort) {
+          try {
+            nativePort.postMessage({ type: "toggle_rule", id: "yt-ads", enabled: enabled });
           } catch {}
         }
       }

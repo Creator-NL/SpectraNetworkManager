@@ -236,6 +236,7 @@ public static class BrowserExtensionHost
                         blockYouTubeAnnotations = guardManager.Config.BlockYouTubeAnnotations,
                         blockYouTubeShorts = guardManager.Config.BlockYouTubeShorts && guardManager.Config.CustomRules.Any(r => r.Id == "yt-shorts" && r.Enabled),
                         placeholder = guardManager.Config.ShowInPagePlaceholder,
+                        autoApprovePicker = guardManager.Config.AutoApproveElementPickerBlocks,
                         rulesJson = guardManager.ExportMv3DynamicRulesJson(),
                         customRules = guardManager.Config.CustomRules.Where(r => r.Enabled).Select(r => new
                         {
@@ -250,9 +251,32 @@ public static class BrowserExtensionHost
                 case "toggle_rule":
                     if (root.TryGetProperty("id", out var idProp) && root.TryGetProperty("enabled", out var enProp))
                     {
-                        guardManager.ToggleRule(idProp.GetString()!, enProp.GetBoolean());
+                        string toggleId = idProp.GetString() ?? "";
+                        bool toggleOn = enProp.GetBoolean();
+                        if (toggleId == "yt-ads")
+                            guardManager.ToggleYouTubeAdRules(toggleOn);
+                        else
+                            guardManager.ToggleRule(toggleId, toggleOn);
                     }
                     return JsonSerializer.Serialize(new { type = "ok" });
+
+                case "element_picked":
+                    string pUrl = root.TryGetProperty("url", out var uP) ? uP.GetString() ?? "" : "";
+                    string pTitle = root.TryGetProperty("title", out var tP) ? tP.GetString() ?? "" : "";
+                    string pDomain = root.TryGetProperty("domain", out var dP) ? dP.GetString() ?? "" : "";
+
+                    guardManager.Load();
+                    bool autoApproved = guardManager.HandleElementPickerRequest(pUrl, pTitle, pDomain, out string rId);
+
+                    return JsonSerializer.Serialize(new
+                    {
+                        type = "element_picked_ack",
+                        autoApproved = autoApproved,
+                        ruleId = rId,
+                        url = pUrl,
+                        title = pTitle,
+                        pendingCount = guardManager.Config.PendingBlockRequests.Count
+                    });
 
                 default:
                     return JsonSerializer.Serialize(new { type = "unknown", received = type });

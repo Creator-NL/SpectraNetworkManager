@@ -28,8 +28,13 @@
       padding-bottom: 10px;
       margin-bottom: 12px;
     }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       color: var(--cyan);
       letter-spacing: 0.5px;
@@ -42,6 +47,39 @@
     }
     .badge-on { background: rgba(0, 229, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan); }
     .badge-off { background: rgba(255, 43, 214, 0.15); color: var(--magenta); border: 1px solid var(--magenta); }
+    .picker-box {
+      margin-bottom: 12px;
+    }
+    .btn-picker {
+      width: 100%;
+      padding: 9px 12px;
+      background: linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(255, 43, 214, 0.15));
+      border: 1px solid var(--cyan);
+      border-radius: 6px;
+      color: var(--cyan);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all .15s ease;
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+    }
+    .btn-picker:hover {
+      background: linear-gradient(135deg, rgba(0, 229, 255, 0.3), rgba(255, 43, 214, 0.3));
+      border-color: #fff;
+      color: #fff;
+      box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+    }
+    .picker-tip {
+      font-size: 9.5px;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 4px;
+    }
     .rule-item {
       display: flex;
       justify-content: space-between;
@@ -79,11 +117,23 @@
 </head>
 <body>
   <div class="header">
-    <div>
-      <div class="title">SPECTRA GUARD</div>
-      <div style="font-size: 10px; color: var(--muted);">Native URL & Video Shield</div>
+    <div class="header-left">
+      <img src="icon32.png" width="20" height="20" alt="Spectra Logo"/>
+      <div>
+        <div class="title">SPECTRA GUARD</div>
+        <div style="font-size: 10px; color: var(--muted);">Native URL & Video Shield</div>
+      </div>
     </div>
     <div id="statusBadge" class="badge badge-on">CONNECTED</div>
+  </div>
+
+  <div class="picker-box">
+    <button type="button" id="btnElementPicker" class="btn-picker">
+      🎯 ZUIGNAP / PICK ELEMENT TO BLOCK
+    </button>
+    <div class="picker-tip">
+      Click any video, ad, or element on page to block
+    </div>
   </div>
 
   <div class="rule-item">
@@ -110,8 +160,8 @@
 
   <div class="rule-item">
     <div>
-      <div class="rule-title">In-Player Ad Beacons</div>
-      <div class="rule-desc">YouTube stats/ads telemetry</div>
+      <div class="rule-title">YouTube Ad Shield</div>
+      <div class="rule-desc">Skips video ads &amp; blocks ad beacons &middot; <span style="color: var(--cyan);">🛡️ <span id="adsSkippedCount">0</span> ads skipped</span></div>
     </div>
     <label class="switch">
       <input type="checkbox" id="toggleAds" checked>

@@ -2294,6 +2294,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -2302,11 +2303,12 @@
             <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="14,10" Margin="0,0,0,10">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="InstallExtensionsButton" Content="📦 Install Extensions ▾" Click="OnInstallExtensionsDropdown" Margin="0,0,8,0" Padding="12,5"
+                                Foreground="{StaticResource Cyan}" ToolTip="Install the Spectra Browser Guard extension in your web browser (Firefox, Chrome, Edge) or open extension files"/>
                         <Button x:Name="BrowserRegisterHostButton" Content="🛡️ Register Native Host for Browsers" Click="OnRegisterBrowserHost" Margin="0,0,8,0" Padding="12,5"
-                                Foreground="{StaticResource Cyan}" ToolTip="Registers Native Messaging Host in Windows Registry for Chrome, Edge &amp; Firefox"/>
-                        <Button Content="📁 Open Extension Folder" Click="OnOpenExtensionFolder" Margin="0,0,8,0" Padding="12,5"
-                                ToolTip="Opens the extension directory so you can load unpacked in chrome://extensions or about:debugging"/>
-                        <Button Content="🔄 Reload Dynamic Rules" Click="OnReloadBrowserRules" Padding="10,5"/>
+                                Foreground="{StaticResource Cyan}" ToolTip="Registers the Native Messaging Host in Windows Registry so browsers can synchronize rules and block requests with SpectraNetworkManager"/>
+                        <Button Content="🔄 Reload Dynamic Rules" Click="OnReloadBrowserRules" Padding="10,5"
+                                ToolTip="Reloads all active declarative blocking rules and immediately pushes them to running browser sessions via Native Messaging"/>
                     </StackPanel>
                     <StackPanel VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
@@ -2343,23 +2345,84 @@
                               Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Blocks Instagram Reels video page navigation"/>
                     <CheckBox x:Name="GuardPlaceholderCheck" Content="🛡️ Show In-Page Dark Overlay on Blocked Videos"
-                              VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              Margin="0,0,18,0" VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
                               ToolTip="Replaces blocked video players with sleek cybernetic overlay and 'Allow Once' button"/>
+                    <CheckBox x:Name="GuardAutoApprovePickerCheck" Content="🎯 Auto-Approve Zuignap Element Blocks"
+                              VerticalAlignment="Center" Checked="OnGuardToggleChanged" Unchecked="OnGuardToggleChanged"
+                              ToolTip="When checked, elements picked in Firefox using the Zuignap suction picker are automatically approved and saved as permanent blocking rules without prompting for manual confirmation"/>
                 </WrapPanel>
             </Border>
 
+            <!-- Pending Element Picker Confirmation Queue -->
+            <Border x:Name="GuardPendingQueuePanel" Grid.Row="2" Visibility="Collapsed"
+                    Background="#191322" BorderBrush="{StaticResource Magenta}" BorderThickness="1.5"
+                    CornerRadius="5" Padding="12,10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,8">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="✅ Approve All" Click="OnApproveAllPickerRequests" Padding="10,4" Margin="0,0,8,0"
+                                    Foreground="{StaticResource Cyan}" FontWeight="SemiBold"
+                                    ToolTip="Approve all pending items and activate them as permanent blocking rules"/>
+                            <Button Content="✕ Dismiss All" Click="OnDismissAllPickerRequests" Padding="10,4"
+                                    Foreground="{StaticResource Amber}"
+                                    ToolTip="Dismiss all pending items without creating block rules"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🎯 PENDING ELEMENT PICKER QUEUE" FontWeight="Bold" FontSize="12" Foreground="{StaticResource Magenta}" FontFamily="Bahnschrift" VerticalAlignment="Center"/>
+                            <Border CornerRadius="10" Padding="8,2" Margin="10,0,0,0" Background="#33FF0055" VerticalAlignment="Center">
+                                <TextBlock x:Name="GuardPendingCountText" Text="1 Item Awaiting Review" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Magenta}"/>
+                            </Border>
+                            <TextBlock Text="— Elements selected in your browser using the Zuignap suction picker awaiting approval" FontSize="11" Foreground="{StaticResource Muted}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Items list / DataGrid -->
+                    <DataGrid x:Name="GuardPendingGrid" Grid.Row="1" MaxHeight="180" AutoGenerateColumns="False" CanUserAddRows="False"
+                              IsReadOnly="True" SelectionMode="Single" Background="Transparent" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="TIME" Binding="{Binding TimestampDisplay}" Width="85"/>
+                            <DataGridTextColumn Header="TITLE / ELEMENT" Binding="{Binding Title}" Width="280" Foreground="{StaticResource Cyan}"/>
+                            <DataGridTextColumn Header="URL / PATTERN" Binding="{Binding Url}" Width="*" FontFamily="Consolas"/>
+                            <DataGridTextColumn Header="DOMAIN" Binding="{Binding Domain}" Width="140"/>
+                            <DataGridTemplateColumn Header="ACTIONS" Width="170">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button Content="✅ Approve" Click="OnApproveSinglePendingClick" Padding="6,2" Margin="0,0,6,0"
+                                                    Foreground="{StaticResource Cyan}" ToolTip="Approve and activate this block rule"/>
+                                            <Button Content="✕ Dismiss" Click="OnDismissSinglePendingClick" Padding="6,2"
+                                                    Foreground="{StaticResource Amber}" ToolTip="Dismiss this request"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+
             <!-- Custom Rule Adder Form -->
-            <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+            <Border Grid.Row="3" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
                 <DockPanel LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Content="+ Add Block Rule" Click="OnAddBrowserGuardRule" Padding="14,4" Foreground="{StaticResource Magenta}" Margin="8,0,0,0"/>
-                    <ComboBox x:Name="GuardResourceTypeCombo" DockPanel.Dock="Right" Width="130" Margin="8,0,0,0" VerticalContentAlignment="Center" ToolTip="Resource type to intercept"/>
-                    <TextBox x:Name="GuardTitleBox" DockPanel.Dock="Right" Width="180" Margin="8,0,0,0" VerticalContentAlignment="Center" ToolTip="Friendly name / title"/>
-                    <TextBox x:Name="GuardPatternBox" VerticalContentAlignment="Center" ToolTip="URL match pattern (e.g. *://*.youtube.com/shorts/* or *://*.example.com/*)"/>
+                    <Button DockPanel.Dock="Right" Content="+ Add Block Rule" Click="OnAddBrowserGuardRule" Padding="14,4" Foreground="{StaticResource Magenta}" Margin="8,0,0,0"
+                            ToolTip="Creates a new declarative browser rule with your specified pattern and resource type, activating it immediately"/>
+                    <ComboBox x:Name="GuardResourceTypeCombo" DockPanel.Dock="Right" Width="130" Margin="8,0,0,0" VerticalContentAlignment="Center"
+                              ToolTip="Select what type of browser network request to intercept (e.g. main page, script, image, media stream, or all types)"/>
+                    <TextBox x:Name="GuardTitleBox" DockPanel.Dock="Right" Width="180" Margin="8,0,0,0" VerticalContentAlignment="Center"
+                             ToolTip="Enter a descriptive label or title for this custom rule (e.g. 'Block Floating Sponsor Banner')"/>
+                    <TextBox x:Name="GuardPatternBox" VerticalContentAlignment="Center"
+                             ToolTip="Enter a URL match pattern using wildcards (e.g. *://*.youtube.com/shorts/* or *://*.example.com/*)"/>
                 </DockPanel>
             </Border>
 
             <!-- Browser Guard Rules DataGrid -->
-            <DataGrid x:Name="BrowserGuardGrid" Grid.Row="3" SelectionMode="Single" SelectionChanged="OnBrowserGuardSelectionChanged">
+            <DataGrid x:Name="BrowserGuardGrid" Grid.Row="4" SelectionMode="Single" SelectionChanged="OnBrowserGuardSelectionChanged">
                 <DataGrid.Columns>
                     <DataGridCheckBoxColumn Header="ACTIVE" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                     <DataGridTextColumn Header="RULE TITLE / DESCRIPTION" Binding="{Binding Title}" Width="240" Foreground="{StaticResource Cyan}"/>
@@ -2369,7 +2432,8 @@
                     <DataGridTemplateColumn Header="ACTIONS" Width="*">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Button Content="✕ Remove" Click="OnRemoveBrowserRuleClick" Padding="6,1" Foreground="{StaticResource Amber}"/>
+                                <Button Content="✕ Remove" Click="OnRemoveBrowserRuleClick" Padding="6,1" Foreground="{StaticResource Amber}"
+                                        ToolTip="Permanently delete this declarative browser rule"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -2377,7 +2441,7 @@
             </DataGrid>
 
             <!-- Rule Inspector / Details Panel -->
-            <Border x:Name="GuardInspectorPanel" Grid.Row="4" Visibility="Collapsed"
+            <Border x:Name="GuardInspectorPanel" Grid.Row="5" Visibility="Collapsed"
                     Background="{StaticResource Panel}" BorderBrush="{StaticResource Cyan}" BorderThickness="1"
                     CornerRadius="4" Padding="12,10" Margin="0,10,0,0">
                 <Grid>

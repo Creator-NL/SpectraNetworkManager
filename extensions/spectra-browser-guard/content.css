@@ -1,6 +1,6 @@
 /* Spectra Browser Guard & YouTube AdShield - Cosmetic & Overlay Styles */
 
-/* 1. YouTube In-Page Feed, Banner, Companion & Masthead Ad Hiding */
+/* 1. YouTube Home Page, In-Feed, Banner, Companion & Masthead Ad Hiding */
 html:not([data-spectra-yt-ads="off"]) ytd-ad-slot-renderer,
 html:not([data-spectra-yt-ads="off"]) ytd-in-feed-ad-layout-renderer,
 html:not([data-spectra-yt-ads="off"]) ytd-banner-promo-renderer,
@@ -30,7 +30,17 @@ html:not([data-spectra-yt-ads="off"]) .ytp-ad-Message-container,
 html:not([data-spectra-yt-ads="off"]) .ytp-ad-action-interstitial,
 html:not([data-spectra-yt-ads="off"]) .ytd-merch-shelf-renderer,
 html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has(.badge-shape-wiz--ad),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has([class*="badge-shape-wiz--ad"]),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has(.badge-style-type-ad),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has([aria-label*="Sponsored"]),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-item-renderer:has([aria-label*="Gesponsord"]),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has(#masthead-ad),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has(.badge-shape-wiz--ad),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has([class*="badge-shape-wiz--ad"]),
 html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has(ytd-statement-banner-renderer),
+html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has(ytd-promoted-sparkles-web-renderer),
 html:not([data-spectra-yt-ads="off"]) ytd-rich-section-renderer:has(ytd-brand-video-singleton-renderer),
 html:not([data-spectra-yt-ads="off"]) tp-yt-paper-dialog:has(ytd-mealbar-promo-renderer),
 html:not([data-spectra-yt-ads="off"]) .ytp-ad-player-overlay,
@@ -43,7 +53,7 @@ html:not([data-spectra-yt-ads="off"]) ytd-engagement-panel-section-list-renderer
     display: none !important;
 }
 
-/* Hide black ad screen flash while fast-forwarding pre-roll/mid-roll ads */
+/* Hide ad video frames completely while fast-forwarding pre-roll/mid-roll ads */
 html:not([data-spectra-yt-ads="off"]) .html5-video-player.ad-showing video,
 html:not([data-spectra-yt-ads="off"]) .html5-video-player.ad-interrupting video {
     opacity: 0 !important;

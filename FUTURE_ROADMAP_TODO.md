@@ -46,10 +46,44 @@ This document tracks future features and advanced packet forensic capabilities i
 
 ---
 
+## 🤖 AI-Powered Ad & Countermeasure Investigator (Target: v2.1 Release)
+
+An intelligent, on-demand assistant integrated into Spectra Browser Guard and SpectraNetworkManager that inspects stubborn, unknown, or obfuscated ads, anti-adblock overlays, and trackers, analyzes them with AI, and generates tailored blocking rules on the fly.
+
+### 1. In-Browser "Investigate with AI" Picker
+- [ ] **Context Menu & Popup Trigger:** Add an "Investigate Element with AI" option to the extension popup and right-click context menu.
+- [ ] **Diagnostic Bundle Collector:** When the user clicks an unblockable ad or annoying overlay:
+  - Captures the selected element's DOM subtree, tag hierarchy, attributes, and surrounding parent container classes.
+  - Inspects applied CSS rules, z-indexes, fixed positions, and body lock styles (e.g. `overflow: hidden` or `pointer-events: none` caused by adblock walls).
+  - Collects recent network requests and third-party script URLs initiated by the active tab.
+
+### 2. High-Speed Native Messaging Telemetry Pipe
+- [ ] **Zero-Overhead Transfer:** Pipe the diagnostic bundle from the browser extension directly to `SpectraNetworkManager.BrowserHost` using the established Native Messaging connection.
+- [ ] **Privacy & Security First:** No API keys are stored in the browser extension; all network queries and reasoning execute on the local desktop application.
+
+### 3. Dual AI Reasoning Engine (Local Ollama & Cloud Gemini)
+- [ ] **Local LLM Support (Ollama):** Run lightweight local models (e.g., Llama 3, Phi-3, Mistral) for 100% offline and private ad analysis.
+- [ ] **Cloud AI Support (Gemini API):** Optional fast cloud reasoning for deep analysis of complex anti-adblock scripts and obfuscated DOM traps.
+- [ ] **Heuristic Pattern Synthesis:** AI determines:
+  - Is the element a cosmetic ad container, a sponsored feed tile, or an anti-adblock detection modal?
+  - What is the most resilient, non-fragile CSS selector (e.g. leveraging `:has()`, attribute wildcards, or structural paths) that removes the ad without breaking site functionality?
+  - What network domain or script endpoint should be added to network filter rules?
+
+### 4. Live Rule Injection & User Report
+- [ ] **Instant Rule Push:** Deliver the AI-generated rule dynamically to the active browser tab via the existing `spectra_rules_updated` event — blocking the ad immediately without requiring a page refresh.
+- [ ] **Custom Rule Database:** Save the validated rule in SpectraNetworkManager's custom user rules database with metadata (e.g., `"AI-generated for [domain] on [date]"`).
+- [ ] **Friendly Diagnostic Summary:** Provide the user with a concise pop-up or notification:
+  - What was identified (e.g., *"Detected obfuscated promotional banner from adservice.example"*).
+  - Action taken (e.g., *"Generated CSS filter `div[class*='sponsored-tile']:has(a[href*='ad'])`"*).
+  - Layout repair status (e.g., *"Restored page scrolling by clearing `overflow: hidden` from `<body>`"*).
+
+---
+
 ## 📌 Status Tracker
 
 | Feature | Category | Complexity | Target Release |
 | :--- | :--- | :--- | :--- |
+| **AI Ad Investigator & Neutralizer** | Smart Ad Blocking | Medium | v2.1 |
 | **Follow TCP Stream** | Packet Forensics | Medium | Backlog (Future) |
 | **File Carving & Export** | Packet Forensics | Medium | Backlog (Future) |
 | **SSLKEYLOGFILE Decryption** | Advanced Forensics | High | Backlog (Future) |

@@ -25,7 +25,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 # 1. Run all tests
 if (-not $SkipTests) {
     Write-Host "`n[1/4] Running automated test suite..." -ForegroundColor Yellow
-    dotnet test SpectraNetworkManager.sln -c $Configuration
+    dotnet test SpectraNetworkManager.sln -c $Configuration --no-restore --disable-build-servers -m:1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tests failed! Aborting package build."
         exit $LASTEXITCODE
@@ -41,18 +41,21 @@ if (Test-Path "publish") {
     Remove-Item -Recurse -Force "publish"
 }
 
-dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/app
+dotnet publish src/SpectraNetworkManager.App/SpectraNetworkManager.App.csproj -c $Configuration -r win-x64 --self-contained true --no-restore --disable-build-servers -m:1 -o publish/app
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish App failed!"; exit $LASTEXITCODE }
-dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/engine
+dotnet publish src/SpectraNetworkManager.Engine/SpectraNetworkManager.Engine.csproj -c $Configuration -r win-x64 --self-contained true --no-restore --disable-build-servers -m:1 -o publish/engine
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish Engine failed!"; exit $LASTEXITCODE }
-dotnet publish src/SpectraNetworkManager.BrowserHost/SpectraNetworkManager.BrowserHost.csproj -c $Configuration -r win-x64 --self-contained true --disable-build-servers -m:1 -o publish/app
+dotnet publish src/SpectraNetworkManager.BrowserHost/SpectraNetworkManager.BrowserHost.csproj -c $Configuration -r win-x64 --self-contained true --no-restore --disable-build-servers -m:1 -o publish/app
 if ($LASTEXITCODE -ne 0) { Write-Error "Publish BrowserHost failed!"; exit $LASTEXITCODE }
 
 # Package and copy Browser Guard extension to publish folder
 if (Test-Path "extensions/spectra-browser-guard") {
     $extFiles = Get-ChildItem "extensions/spectra-browser-guard" -File | Where-Object { $_.Extension -ne '.xpi' -and $_.Extension -ne '.zip' }
     Compress-Archive -Path $extFiles.FullName -DestinationPath "extensions/spectra-browser-guard/spectra-browser-guard.zip" -Force
-    Copy-Item "extensions/spectra-browser-guard/spectra-browser-guard.zip" "extensions/spectra-browser-guard/spectra-browser-guard.xpi" -Force
+    # Keep the official signed XPI if present; only copy unsigned zip if no XPI exists
+    if (-not (Test-Path "extensions/spectra-browser-guard/spectra-browser-guard.xpi")) {
+        Copy-Item "extensions/spectra-browser-guard/spectra-browser-guard.zip" "extensions/spectra-browser-guard/spectra-browser-guard.xpi" -Force
+    }
     Copy-Item -Recurse -Force "extensions/spectra-browser-guard" "publish/app/extensions/spectra-browser-guard"
 }
 Write-Host "Published self-contained win-x64 binaries to publish/." -ForegroundColor Green

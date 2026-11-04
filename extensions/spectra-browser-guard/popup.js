@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const toggleShorts = document.getElementById("toggleShorts");
   const toggleStreams = document.getElementById("toggleStreams");
   const toggleAds = document.getElementById("toggleAds");
+  const btnElementPicker = document.getElementById("btnElementPicker");
 
   api.runtime.sendMessage({ type: "get_status" }, (res) => {
     if (res) {
@@ -18,8 +19,36 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (toggleAds && res.blockYouTubeAds !== undefined) {
         toggleAds.checked = res.blockYouTubeAds;
       }
+      const adsCounter = document.getElementById("adsSkippedCount");
+      if (adsCounter) {
+        adsCounter.textContent = String(res.adsSkipped || 0);
+      }
     }
   });
+
+  if (btnElementPicker) {
+    btnElementPicker.addEventListener("click", async () => {
+      try {
+        const queryTabs = api.tabs.query ? api.tabs.query({ active: true, currentWindow: true }) : null;
+        if (queryTabs && typeof queryTabs.then === "function") {
+          const tabs = await queryTabs;
+          if (tabs && tabs[0] && tabs[0].id) {
+            api.tabs.sendMessage(tabs[0].id, { type: "start_element_picker" }).catch(() => {});
+            window.close();
+          }
+        } else if (api.tabs && api.tabs.query) {
+          api.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0] && tabs[0].id) {
+              api.tabs.sendMessage(tabs[0].id, { type: "start_element_picker" });
+              window.close();
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("Element picker start note:", err);
+      }
+    });
+  }
 
   if (toggleShorts) {
     toggleShorts.addEventListener("change", () => {

@@ -1,16 +1,33 @@
 {
   "manifest_version": 3,
   "name": "Spectra Browser Guard & YouTube AdShield",
-  "version": "2.0.0",
-  "description": "High-performance YouTube video ad & annotation blocker, Shorts suppressor, and declarative stream guard powered by SpectraNetworkManager.",
+  "version": "2.0.2",
+  "description": "High-performance YouTube video ad & annotation blocker, Shorts suppressor, element picker, and declarative stream guard powered by SpectraNetworkManager.",
   "author": "Biohazard Corp (Creator-NL)",
   "homepage_url": "https://biohazard-corp.nl/spectranetworkmanager.html",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc/BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ/2W+5JsGY4Hc5n9yBXArwl93lqt7/RN5w6Cf0h4QyQ5v+65YGjQR0/FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt+bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ+G/xBniIqbw0Ls1jF44+csFCur+kEgU8awapJzKnqDKgwIDAQAB",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    },
+    "default_title": "Spectra Browser Guard & YouTube AdShield"
+  },
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "activeTab"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -41,9 +58,7 @@
       "id": "browserguard@biohazard-corp.nl",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": [
-          "none"
-        ]
+        "required": ["none"]
       }
     }
   }

@@ -529,3 +529,22 @@ public sealed class BrowserGuardRuleRow : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }
+
+/// <summary>One row in the Browser Guard pending element picker confirmation queue.</summary>
+public sealed class ElementPickerBlockRequestRow
+{
+    public SpectraNetworkManager.Core.BrowserGuard.ElementPickerBlockRequest Request { get; }
+
+    public string Id => Request.Id;
+    public string Title => Request.Title;
+    public string Url => Request.Url;
+    public string Pattern => Request.Pattern;
+    public string Domain => Request.Domain;
+    public string Description => Request.Description;
+    public string TimestampDisplay => Request.Timestamp.ToLocalTime().ToString("HH:mm:ss");
+
+    public ElementPickerBlockRequestRow(SpectraNetworkManager.Core.BrowserGuard.ElementPickerBlockRequest request)
+    {
+        Request = request;
+    }
+}

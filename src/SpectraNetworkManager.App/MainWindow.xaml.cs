@@ -110,6 +110,8 @@ public partial class MainWindow : Window
     public ObservableCollection<DnsRow> TvDeviceRecentQueries { get; } = new();
     private readonly Dictionary<string, List<DnsRow>> _lanQueriesByClient = new(StringComparer.OrdinalIgnoreCase);
     public ObservableCollection<BrowserGuardRuleRow> BrowserGuardRules { get; } = new();
+    public ObservableCollection<ElementPickerBlockRequestRow> GuardPendingRequests { get; } = new();
+    private readonly HashSet<string> _shownPendingRequestIds = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
     public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
     private readonly BrowserGuardManager _browserGuardManager;
@@ -149,6 +151,7 @@ public partial class MainWindow : Window
         TvMobileGrid.ItemsSource = TvMobileDevices;
         TvInspectorRecentGrid.ItemsSource = TvDeviceRecentQueries;
         BrowserGuardGrid.ItemsSource = BrowserGuardRules;
+        GuardPendingGrid.ItemsSource = GuardPendingRequests;
         InitPacketCaptureInterfaces();
         InitTvMobileAndBrowserGuardUi();
         DataContext = this;
@@ -6511,6 +6514,8 @@ public partial class MainWindow : Window
         }
 
         TryAutoRegisterBrowserHost();
+        _browserGuardManager.ElementPickerRequestReceived += OnElementPickerBlockRequestReceived;
+        SetupBrowserGuardWatcher();
         RefreshBrowserGuardUi();
     }
 
@@ -7518,6 +7523,22 @@ public partial class MainWindow : Window
             if (rule.Id == prevSelectedId) reselected = rRow;
         }
 
+        GuardPendingRequests.Clear();
+        foreach (var req in _browserGuardManager.Config.PendingBlockRequests)
+        {
+            GuardPendingRequests.Add(new ElementPickerBlockRequestRow(req));
+        }
+
+        if (GuardPendingQueuePanel != null)
+        {
+            GuardPendingQueuePanel.Visibility = GuardPendingRequests.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (GuardPendingCountText != null)
+        {
+            int pCount = GuardPendingRequests.Count;
+            GuardPendingCountText.Text = pCount == 1 ? "1 Item Awaiting Review" : $"{pCount} Items Awaiting Review";
+        }
+
         if (reselected != null && BrowserGuardGrid != null)
         {
             BrowserGuardGrid.SelectedItem = reselected;
@@ -7542,6 +7563,7 @@ public partial class MainWindow : Window
             if (GuardBlockAdsCheck != null) GuardBlockAdsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAds && _browserGuardManager.Config.CustomRules.Any(r => r.Id == "yt-ads" && r.Enabled);
             if (GuardBlockAnnotationsCheck != null) GuardBlockAnnotationsCheck.IsChecked = _browserGuardManager.Config.BlockYouTubeAnnotations;
             if (GuardBlockReelsCheck != null) GuardBlockReelsCheck.IsChecked = _browserGuardManager.Config.CustomRules.Any(r => r.Id == "ig-reels" && r.Enabled);
+            if (GuardAutoApprovePickerCheck != null) GuardAutoApprovePickerCheck.IsChecked = _browserGuardManager.Config.AutoApproveElementPickerBlocks;
         }
         finally
         {
@@ -8336,6 +8358,215 @@ public partial class MainWindow : Window
 
     // ---- Browser Guard Event Handlers ----------------------------------------
 
+    private void OnElementPickerBlockRequestReceived(ElementPickerBlockRequest pending)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            RefreshBrowserGuardUi();
+            StatusText.Text = $"🎯 Element picker block request received: {pending.Title}";
+
+            if (!_browserGuardManager.Config.AutoApproveElementPickerBlocks)
+            {
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Activate();
+
+                var result = System.Windows.MessageBox.Show(
+                    this,
+                    $"🎯 Block request received from Browser Guard Element Picker:\n\nTitle: {pending.Title}\nURL: {pending.Url}\n\nWould you like to approve and block this element now?",
+                    "Spectra Browser Guard — Element Picker Block Request",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    _browserGuardManager.ApprovePendingRequest(pending.Id);
+                    RefreshBrowserGuardUi();
+                    StatusText.Text = $"Approved and activated block rule: {pending.Title}";
+                }
+            }
+        });
+    }
+
+    private void OnApproveSinglePendingClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ElementPickerBlockRequestRow row })
+        {
+            _browserGuardManager.ApprovePendingRequest(row.Id);
+            RefreshBrowserGuardUi();
+            StatusText.Text = $"Approved and activated block rule: {row.Title}";
+        }
+    }
+
+    private void OnDismissSinglePendingClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ElementPickerBlockRequestRow row })
+        {
+            _browserGuardManager.DismissPendingRequest(row.Id);
+            RefreshBrowserGuardUi();
+            StatusText.Text = $"Dismissed element picker block request: {row.Title}";
+        }
+    }
+
+    private void SetupBrowserGuardWatcher()
+    {
+        try
+        {
+            string path = EngineStoragePaths.BrowserGuardRulesPath;
+            string dir = System.IO.Path.GetDirectoryName(path) ?? EngineStoragePaths.BaseDirectory;
+            string fileName = System.IO.Path.GetFileName(path);
+
+            if (!System.IO.Directory.Exists(dir))
+            {
+                System.IO.Directory.CreateDirectory(dir);
+            }
+
+            foreach (var req in _browserGuardManager.Config.PendingBlockRequests)
+            {
+                _shownPendingRequestIds.Add(req.Id);
+            }
+
+            var watcher = new System.IO.FileSystemWatcher(dir, fileName)
+            {
+                NotifyFilter = System.IO.NotifyFilters.LastWrite | System.IO.NotifyFilters.Size | System.IO.NotifyFilters.FileName,
+                EnableRaisingEvents = true
+            };
+            watcher.Changed += (s, e) =>
+            {
+                Dispatcher.BeginInvoke(async () =>
+                {
+                    await System.Threading.Tasks.Task.Delay(150);
+                    _browserGuardManager.Load();
+                    RefreshBrowserGuardUi();
+
+                    var newRequests = _browserGuardManager.Config.PendingBlockRequests
+                        .Where(r => _shownPendingRequestIds.Add(r.Id))
+                        .ToList();
+
+                    foreach (var pending in newRequests)
+                    {
+                        OnElementPickerBlockRequestReceived(pending);
+                    }
+                });
+            };
+        }
+        catch { }
+    }
+
+    private void OnInstallExtensionsDropdown(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+
+        var menu = new ContextMenu();
+        var darkPrimaryBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x3D, 0x82)); // Deep Navy Blue for high contrast on light menu background
+        var darkSecondaryBrush = new SolidColorBrush(Color.FromRgb(0x1F, 0x29, 0x37)); // Slate Dark Charcoal
+
+        var firefoxItem = new MenuItem
+        {
+            Header = "🦊 Mozilla Firefox (1-Click Install Signed Extension)",
+            Foreground = darkPrimaryBrush,
+            FontWeight = FontWeights.Bold,
+            ToolTip = "Click to install the official signed Spectra Browser Guard add-on in Firefox with 1 click"
+        };
+        firefoxItem.Click += (s, args) =>
+        {
+            try
+            {
+                // 1. Look for the local Mozilla-signed XPI in the installation directory
+                string localXpi = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "extensions", "spectra-browser-guard", "spectra-browser-guard.xpi");
+                if (File.Exists(localXpi))
+                {
+                    string[] firefoxCandidates = new[]
+                    {
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Mozilla Firefox", "firefox.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Mozilla Firefox", "firefox.exe"),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Mozilla Firefox", "firefox.exe")
+                    };
+                    string? fxExe = firefoxCandidates.FirstOrDefault(File.Exists);
+
+                    if (fxExe != null)
+                    {
+                        Process.Start(new ProcessStartInfo(fxExe, $"\"{localXpi}\"") { UseShellExecute = true });
+                    }
+                    else
+                    {
+                        Process.Start(new ProcessStartInfo(localXpi) { UseShellExecute = true });
+                    }
+                    StatusText.Text = "Opened Firefox installation prompt for Spectra Browser Guard & YouTube AdShield.";
+                    return;
+                }
+
+                // 2. Fallback to web link if local file is missing
+                string xpiUrl = "https://addons.mozilla.org/firefox/downloads/file/5207291/4f3218a9228640cd957b-2.0.2.xpi";
+                Process.Start(new ProcessStartInfo(xpiUrl) { UseShellExecute = true });
+                StatusText.Text = "Opened Firefox installation prompt for Spectra Browser Guard & YouTube AdShield.";
+            }
+            catch (Exception ex)
+            {
+                Error("Failed to open browser", ex);
+            }
+        };
+        menu.Items.Add(firefoxItem);
+
+        var chromeItem = new MenuItem
+        {
+            Header = "🌐 Google Chrome / Chromium (Developer Mode / Unpacked)",
+            Foreground = darkSecondaryBrush,
+            ToolTip = "Step-by-step instructions to load the extension folder in Chrome, Brave, Opera, or Vivaldi"
+        };
+        chromeItem.Click += (s, args) =>
+        {
+            OnOpenExtensionFolder(sender, e);
+            Info("To install in Google Chrome / Brave / Edge:\n\n1. Open chrome://extensions (or brave://extensions)\n2. Turn ON 'Developer Mode' (top-right)\n3. Click 'Load Unpacked'\n4. Select the opened 'spectra-browser-guard' folder.\n\n(Official Chrome Web Store package coming soon!)");
+        };
+        menu.Items.Add(chromeItem);
+
+        var edgeItem = new MenuItem
+        {
+            Header = "🧭 Microsoft Edge (Developer Mode / Unpacked)",
+            Foreground = darkSecondaryBrush,
+            ToolTip = "Step-by-step instructions to load the extension folder in Microsoft Edge"
+        };
+        edgeItem.Click += (s, args) =>
+        {
+            OnOpenExtensionFolder(sender, e);
+            Info("To install in Microsoft Edge:\n\n1. Open edge://extensions\n2. Turn ON 'Developer Mode' (left sidebar)\n3. Click 'Load Unpacked'\n4. Select the opened 'spectra-browser-guard' folder.");
+        };
+        menu.Items.Add(edgeItem);
+
+        menu.Items.Add(new Separator());
+
+        var openFolderItem = new MenuItem
+        {
+            Header = "📁 Open Extension Folder on Disk",
+            Foreground = darkPrimaryBrush,
+            FontWeight = FontWeights.SemiBold,
+            ToolTip = "Opens the unpacked extension folder in Windows Explorer so you can inspect files or load into Chromium browsers"
+        };
+        openFolderItem.Click += (s, args) =>
+        {
+            OnOpenExtensionFolder(sender, e);
+        };
+        menu.Items.Add(openFolderItem);
+
+        menu.PlacementTarget = fe;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void OnApproveAllPickerRequests(object sender, RoutedEventArgs e)
+    {
+        _browserGuardManager.ApproveAllPendingRequests();
+        RefreshBrowserGuardUi();
+        StatusText.Text = "Approved and activated all pending element picker block rules.";
+    }
+
+    private void OnDismissAllPickerRequests(object sender, RoutedEventArgs e)
+    {
+        _browserGuardManager.DismissAllPendingRequests();
+        RefreshBrowserGuardUi();
+        StatusText.Text = "Dismissed all pending element picker block requests.";
+    }
+
     private void OnRegisterBrowserHost(object sender, RoutedEventArgs e)
     {
         try
@@ -8417,6 +8648,8 @@ public partial class MainWindow : Window
             _browserGuardManager.Config.BlockYouTubeAnnotations = GuardBlockAnnotationsCheck.IsChecked == true;
         _browserGuardManager.Config.BlockSocialVideoFeeds = GuardBlockTikTokCheck.IsChecked == true || GuardBlockReelsCheck.IsChecked == true;
         _browserGuardManager.Config.ShowInPagePlaceholder = GuardPlaceholderCheck.IsChecked == true;
+        if (GuardAutoApprovePickerCheck != null)
+            _browserGuardManager.Config.AutoApproveElementPickerBlocks = GuardAutoApprovePickerCheck.IsChecked == true;
 
         _browserGuardManager.ToggleRule("yt-shorts", GuardBlockShortsCheck.IsChecked == true);
         _browserGuardManager.ToggleRule("yt-video-stream", GuardBlockStreamsCheck.IsChecked == true);

@@ -19,6 +19,7 @@ public sealed class BrowserGuardManager
     public BrowserGuardConfig Config { get; private set; } = new();
 
     public event Action? RulesChanged;
+    public event Action<ElementPickerBlockRequest>? ElementPickerRequestReceived;
 
     public BrowserGuardManager(string? configPath = null)
     {
@@ -373,6 +374,136 @@ public sealed class BrowserGuardManager
             {
                 r.Enabled = enabled;
             }
+            Save();
+        }
+    }
+
+    public bool HandleElementPickerRequest(string url, string title, string domain, out string ruleId)
+    {
+        lock (_lock)
+        {
+            ruleId = "";
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            string pattern = NormalizePattern(url);
+            string finalTitle = title?.Trim() ?? "";
+            string desc;
+
+            if (TryExtractYouTubeVideoId(url, out string videoId))
+            {
+                if (string.IsNullOrWhiteSpace(finalTitle) || finalTitle.Equals(url, StringComparison.OrdinalIgnoreCase))
+                {
+                    finalTitle = $"Block YouTube Video: {videoId}";
+                }
+                desc = $"Selected via Browser Guard Element Picker on {DateTime.Now:g}. Blocks YouTube video {videoId}.";
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(finalTitle))
+                    finalTitle = !string.IsNullOrWhiteSpace(domain) ? $"Block Element on {domain}" : $"Block {pattern}";
+                desc = $"Selected via Browser Guard Element Picker on {DateTime.Now:g}. Intercepts {pattern}.";
+            }
+
+            if (Config.AutoApproveElementPickerBlocks)
+            {
+                var rule = new BrowserGuardRule
+                {
+                    Id = "picker-" + Guid.NewGuid().ToString("N")[..8],
+                    Title = finalTitle,
+                    Pattern = pattern,
+                    Description = desc,
+                    Action = GuardAction.Block,
+                    ResourceType = "all",
+                    Enabled = true,
+                    IsBuiltIn = false
+                };
+                Config.CustomRules.Add(rule);
+                ruleId = rule.Id;
+                Save();
+                return true;
+            }
+            else
+            {
+                var pending = new ElementPickerBlockRequest
+                {
+                    Id = "req-" + Guid.NewGuid().ToString("N")[..8],
+                    Url = url,
+                    Pattern = pattern,
+                    Title = finalTitle,
+                    Domain = domain,
+                    Description = desc,
+                    Timestamp = DateTime.UtcNow
+                };
+                Config.PendingBlockRequests.Insert(0, pending);
+                Save();
+                ElementPickerRequestReceived?.Invoke(pending);
+                return false;
+            }
+        }
+    }
+
+    public void ApprovePendingRequest(string id)
+    {
+        lock (_lock)
+        {
+            var req = Config.PendingBlockRequests.FirstOrDefault(x => x.Id == id);
+            if (req == null) return;
+            Config.PendingBlockRequests.Remove(req);
+
+            var rule = new BrowserGuardRule
+            {
+                Id = "picker-" + Guid.NewGuid().ToString("N")[..8],
+                Title = req.Title,
+                Pattern = req.Pattern,
+                Description = req.Description,
+                Action = GuardAction.Block,
+                ResourceType = "all",
+                Enabled = true,
+                IsBuiltIn = false
+            };
+            Config.CustomRules.Add(rule);
+            Save();
+        }
+    }
+
+    public void DismissPendingRequest(string id)
+    {
+        lock (_lock)
+        {
+            Config.PendingBlockRequests.RemoveAll(x => x.Id == id);
+            Save();
+        }
+    }
+
+    public void ApproveAllPendingRequests()
+    {
+        lock (_lock)
+        {
+            foreach (var req in Config.PendingBlockRequests)
+            {
+                var rule = new BrowserGuardRule
+                {
+                    Id = "picker-" + Guid.NewGuid().ToString("N")[..8],
+                    Title = req.Title,
+                    Pattern = req.Pattern,
+                    Description = req.Description,
+                    Action = GuardAction.Block,
+                    ResourceType = "all",
+                    Enabled = true,
+                    IsBuiltIn = false
+                };
+                Config.CustomRules.Add(rule);
+            }
+            Config.PendingBlockRequests.Clear();
+            Save();
+        }
+    }
+
+    public void DismissAllPendingRequests()
+    {
+        lock (_lock)
+        {
+            Config.PendingBlockRequests.Clear();
             Save();
         }
     }
