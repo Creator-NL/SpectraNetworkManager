@@ -539,6 +539,9 @@
                 <Button x:Name="BlockStartupButton" Content="🚫 Block in Firewall..." Margin="0,0,8,0" Click="OnBlockStartupItem"
                         Foreground="{StaticResource Magenta}"
                         ToolTip="Blocks the startup executable from accessing the network using Windows Firewall."/>
+                <Button x:Name="QuarantineStartupButton" Content="🛡️ 5-Stage Quarantine..." Margin="0,0,8,0" Click="OnQuarantineStartupItem"
+                        Foreground="{StaticResource Magenta}"
+                        ToolTip="Active Defense: Safely neutralizes this program across 5 defense layers (process/socket termination, IFEO lockout, service disabling, startup disabling, and firewall block). Reversible at any time."/>
                 <Button x:Name="OpenStartupLocationButton" Content="📂 Open File Location" Margin="0,0,8,0" Click="OnOpenStartupLocation"
                         ToolTip="Opens Windows Explorer and selects the startup executable on disk."/>
                 <Button x:Name="RefreshStartupButton" Content="🔄 Refresh" Margin="0,0,8,0" Click="OnRefreshStartupItems"
@@ -547,45 +550,236 @@
                         Foreground="{StaticResource Magenta}"
                         ToolTip="Permanently deletes this auto-start entry from the Registry or Startup folder."/>
             </DockPanel>
-            <DataGrid x:Name="StartupGrid" Grid.Row="2" ItemsSource="{Binding StartupItems}" SelectionMode="Single">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
-                        <Separator/>
-                        <MenuItem Header="⏸ Turn Off (Disable)" Click="OnDisableStartupItem"/>
-                        <MenuItem Header="▶ Turn On (Enable)" Click="OnEnableStartupItem"/>
-                        <Separator/>
-                        <MenuItem Header="🚫 Block Executable in Firewall..." Click="OnBlockStartupItem" Foreground="{StaticResource Magenta}"/>
-                        <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckStartupVirusTotal" Foreground="{StaticResource MenuBlue}"/>
-                        <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyStartupSha256"/>
-                        <MenuItem Header="📂 Open File Location" Click="OnOpenStartupLocation"/>
-                        <MenuItem Header="📋 Copy Command / Path" Click="OnCopyStartupCommand"/>
-                        <Separator/>
-                        <MenuItem Header="🗑️ Remove Entry Permanently..." Click="OnDeleteStartupItem" Foreground="{StaticResource Magenta}"/>
-                        <MenuItem Header="🔄 Refresh List" Click="OnRefreshStartupItems"/>
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.RowStyle>
-                    <Style TargetType="DataGridRow">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsDisabled}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource Muted}"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsUnsigned}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource Amber}"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </DataGrid.RowStyle>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="STATUS" Binding="{Binding Status, Mode=OneWay}" Width="115"/>
-                    <DataGridTextColumn Header="NAME" Binding="{Binding Name, Mode=OneWay}" Width="210"/>
-                    <DataGridTextColumn Header="PUBLISHER" Binding="{Binding Publisher, Mode=OneWay}" Width="220"/>
-                    <DataGridTextColumn Header="FIREWALL" Binding="{Binding FirewallStatus, Mode=OneWay}" Width="110"/>
-                    <DataGridTextColumn Header="LOCATION" Binding="{Binding Location, Mode=OneWay}" Width="230"/>
-                    <DataGridTextColumn Header="COMMAND / PATH" Binding="{Binding Command, Mode=OneWay}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="380" MinWidth="280" MaxWidth="600"/>
+                </Grid.ColumnDefinitions>
+
+                <DataGrid x:Name="StartupGrid" Grid.Column="0" ItemsSource="{Binding StartupItems}" SelectionMode="Single"
+                          SelectionChanged="OnStartupSelectionChanged"
+                          MouseUp="OnStartupGridMouseUp"
+                          PreviewMouseRightButtonDown="OnStartupGridPreviewMouseRightButtonDown"
+                          ContextMenuOpening="OnStartupContextMenuOpening">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                            <Separator/>
+                            <MenuItem Header="⏸ Turn Off (Disable)" Click="OnDisableStartupItem"/>
+                            <MenuItem Header="▶ Turn On (Enable)" Click="OnEnableStartupItem"/>
+                            <Separator/>
+                            <MenuItem x:Name="StartupMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineStartupItem" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem x:Name="StartupMenuRestoreQuarantine" Header="🔄 Restore from Quarantine..." Click="OnRestoreStartupItemQuarantine" Foreground="{StaticResource MenuBlue}" Visibility="Collapsed"/>
+                            <MenuItem Header="🚫 Block Executable in Firewall..." Click="OnBlockStartupItem" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckStartupVirusTotal" Foreground="{StaticResource MenuBlue}"/>
+                            <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyStartupSha256"/>
+                            <MenuItem Header="📂 Open File Location" Click="OnOpenStartupLocation"/>
+                            <MenuItem Header="📋 Copy Command / Path" Click="OnCopyStartupCommand"/>
+                            <Separator/>
+                            <MenuItem Header="🗑️ Remove Entry Permanently..." Click="OnDeleteStartupItem" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem Header="🔄 Refresh List" Click="OnRefreshStartupItems"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDisabled}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsUnsigned}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource Amber}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="STATUS" Binding="{Binding Status, Mode=OneWay}" Width="115"/>
+                        <DataGridTextColumn Header="NAME" Binding="{Binding Name, Mode=OneWay}" Width="210"/>
+                        <DataGridTextColumn Header="PUBLISHER" Binding="{Binding Publisher, Mode=OneWay}" Width="220"/>
+                        <DataGridTextColumn Header="FIREWALL" Binding="{Binding FirewallStatus, Mode=OneWay}" Width="110">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="VerticalAlignment" Value="Center"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="Text" Value="Blocked">
+                                            <Setter Property="Foreground" Value="{StaticResource Red}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Trigger>
+                                        <Trigger Property="Text" Value="Allowed">
+                                            <Setter Property="Foreground" Value="{StaticResource Green}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Trigger>
+                                        <Trigger Property="Text" Value="No rule">
+                                            <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="LOCATION" Binding="{Binding Location, Mode=OneWay}" Width="230"/>
+                        <DataGridTextColumn Header="COMMAND / PATH" Binding="{Binding Command, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" Cursor="SizeWE"/>
+
+                <!-- Right: Startup Intelligence & Situation Inspector Card -->
+                <Border Grid.Column="2" Background="{StaticResource Bg}" BorderBrush="{StaticResource Line}"
+                        BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="4,0,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <!-- Panel Header -->
+                            <DockPanel Margin="0,0,0,8" LastChildFill="True">
+                                <Button Content="✕" DockPanel.Dock="Right" Click="OnDeselectStartupItem"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{StaticResource Cyan}" FontWeight="Bold" FontSize="11"
+                                        Cursor="Hand" ToolTip="Deselect startup item"
+                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="STARTUP INTELLIGENCE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="  //  Situation &amp; Security" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Placeholder when no item is selected -->
+                            <Border x:Name="StartupInspectorPlaceholder" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                    BorderThickness="1" CornerRadius="4" Padding="16,24" Margin="0,10,0,0">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="🚀" FontSize="28" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Select an auto-start program" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Click any row in the startup list to inspect digital signature validity, launch location, live process state, network rules, and security situation."
+                                               FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,4,0,0" MaxWidth="280"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Active Content Card when row is selected -->
+                            <StackPanel x:Name="StartupInspectorDetails" Visibility="Collapsed">
+                                <!-- Top Status & Identity Banner -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                                <Border x:Name="StartupInspectorQuarantineBadge" CornerRadius="3" Padding="6,2" Margin="0,0,4,0" Background="#2EFA2A55" Visibility="Collapsed">
+                                                    <TextBlock Text="🛡️ QUARANTINED" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Magenta}"/>
+                                                </Border>
+                                                <Border x:Name="StartupInspectorStatusBadge" CornerRadius="3" Padding="6,2" Background="#222DF598">
+                                                    <TextBlock x:Name="StartupInspectorStatusText" Text="ENABLED" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock x:Name="StartupInspectorNameText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <TextBlock x:Name="StartupInspectorPublisherText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 1. LAUNCH MECHANISM & LOCATION CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="LAUNCH MECHANISM &amp; LOCATION" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Source Type:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorSourceText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Registration:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorLocationText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Admin Rights:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorAdminText" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Command:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorCommandText" FontSize="10" FontFamily="Consolas" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 2. EXECUTABLE FILE & DIGITAL SIGNATURE CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="EXECUTABLE &amp; DIGITAL SIGNATURE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="File Status:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorFileStatusText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="File Size / Date:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorFileInfoText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Digital Signer:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorSignerText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Full Path:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorPathText" FontSize="10" FontFamily="Consolas" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 3. LIVE SITUATION & RUNTIME STATE CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="LIVE SITUATION &amp; RUNTIME STATE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Running Now:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorRunningText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Firewall Rule:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorFirewallText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Quarantine:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorQuarantineStatusText" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Situation:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="StartupInspectorSituationCommentText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" LineHeight="16"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 4. ACTION "SWITCHBOARD" BUTTONS -->
+                                <WrapPanel Margin="0,0,0,4">
+                                    <Button x:Name="StartupInspectorQuarantineBtn" Content="🛡️ 5-Stage Quarantine..." Click="OnQuarantineStartupItem"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Magenta}" FontWeight="SemiBold" Padding="10,4"
+                                            ToolTip="Safely neutralizes this program across 5 defense layers (IFEO execution lockout, process/socket kill, service and startup disable, bidirectional firewall block)."/>
+                                    <Button x:Name="StartupInspectorRestoreQuarantineBtn" Content="🔄 Restore from Quarantine..." Click="OnRestoreStartupItemQuarantine"
+                                            Margin="0,0,6,6" Foreground="{StaticResource MenuBlue}" FontWeight="SemiBold" Padding="10,4" Visibility="Collapsed"
+                                            ToolTip="Reverses all 5 quarantine stages and restores the program to normal standing."/>
+                                    <Button x:Name="StartupInspectorToggleBtn" Content="⏸ Turn Off (Disable)" Click="OnToggleStartupInspector"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Amber}" Padding="10,4"
+                                            ToolTip="Toggle whether this program starts automatically on Windows boot."/>
+                                    <Button x:Name="StartupInspectorFirewallBtn" Content="🚫 Block in Firewall..." Click="OnToggleStartupInspectorFirewall"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Magenta}" Padding="10,4"
+                                            ToolTip="Toggle Windows Firewall network access for this executable."/>
+                                    <Button Content="✨ Investigate with Spectra AI" Click="OnInvestigateStartupInspectorAi"
+                                            Margin="0,0,6,6" Foreground="{StaticResource MenuBlue}" Padding="10,4"
+                                            ToolTip="Performs an instant deep forensic analysis of this startup program with Spectra AI."/>
+                                    <Button Content="🛡️ Check on VirusTotal" Click="OnCheckStartupVirusTotal"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Opens VirusTotal report for this file's SHA-256 hash."/>
+                                    <Button Content="📂 Open File Location" Click="OnOpenStartupLocation"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Locates and selects this executable in Windows Explorer."/>
+                                    <Button Content="📋 Copy Details" Click="OnCopyStartupInspectorDetails"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Copies complete diagnostic information to the clipboard."/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Traffic & Bandwidth view -->
@@ -1139,28 +1333,210 @@
                 <Button x:Name="RulesPanicButton" Content="PANIC: undo all SpectraNetworkManager changes" Click="OnPanic" Foreground="{StaticResource Magenta}"/>
             </StackPanel>
             </StackPanel>
-            <DataGrid x:Name="RulesGrid" Grid.Row="2" ItemsSource="{Binding RuleRows}" SelectionMode="Single">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
-                        <Separator/>
-                        <MenuItem Header="Edit block..." Click="OnRulesEdit"/>
-                        <MenuItem Header="Allow" Click="OnRulesAllow"/>
-                        <MenuItem Header="Forget decision" Click="OnRulesForget"/>
-                        <Separator/>
-                        <MenuItem Header="🔄 Restore from Quarantine..." Click="OnRestoreSelectedQuarantine" Foreground="{StaticResource MenuBlue}"/>
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="PROGRAM" Binding="{Binding Name, Mode=OneWay}" Width="220"/>
-                    <DataGridTextColumn Header="DECISION" Binding="{Binding Decision, Mode=OneWay}" Width="110"/>
-                    <DataGridTextColumn Header="TRAFFIC" Binding="{Binding Direction, Mode=OneWay}" Width="150"/>
-                    <DataGridTextColumn Header="BLOCKS" Binding="{Binding Scope, Mode=OneWay}" Width="260"/>
-                    <DataGridTextColumn Header="FIREWALL" Binding="{Binding Firewall, Mode=OneWay}" Width="120"/>
-                    <DataGridTextColumn Header="SINCE" Binding="{Binding Since, Mode=OneWay}" Width="150"/>
-                    <DataGridTextColumn Header="PATH" Binding="{Binding Path, Mode=OneWay}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="380" MinWidth="280" MaxWidth="600"/>
+                </Grid.ColumnDefinitions>
+
+                <DataGrid x:Name="RulesGrid" Grid.Column="0" ItemsSource="{Binding RuleRows}" SelectionMode="Single"
+                          SelectionChanged="OnRulesSelectionChanged"
+                          MouseUp="OnRulesGridMouseUp"
+                          PreviewMouseRightButtonDown="OnRulesGridPreviewMouseRightButtonDown"
+                          ContextMenuOpening="OnRulesContextMenuOpening">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="✨ Investigate with Spectra AI" Click="OnContextMenuInvestigateAi" FontWeight="SemiBold" Foreground="{StaticResource MenuBlue}"/>
+                            <Separator/>
+                            <MenuItem Header="✏️ Edit Rule / Block..." Click="OnRulesEdit"/>
+                            <MenuItem x:Name="RulesMenuAllow" Header="🟢 Switch to Allow" Click="OnRulesAllow" Foreground="{StaticResource Green}"/>
+                            <MenuItem x:Name="RulesMenuBlock" Header="🚫 Block Program..." Click="OnRulesBlock" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem Header="🗑️ Forget Decision (Remove Rule)" Click="OnRulesForget"/>
+                            <Separator/>
+                            <MenuItem x:Name="RulesMenuQuarantine" Header="🛡️ 5-Stage Quarantine Program..." Click="OnQuarantineRuleProgram" Foreground="{StaticResource Magenta}"/>
+                            <MenuItem x:Name="RulesMenuRestoreQuarantine" Header="🔄 Restore from Quarantine..." Click="OnRestoreSelectedQuarantine" Foreground="{StaticResource MenuBlue}" Visibility="Collapsed"/>
+                            <Separator/>
+                            <MenuItem Header="🛡️ Check File Hash on VirusTotal" Click="OnCheckRuleVirusTotal" Foreground="{StaticResource MenuBlue}"/>
+                            <MenuItem Header="📋 Copy SHA-256 Hash" Click="OnCopyRuleSha256"/>
+                            <MenuItem Header="📂 Open File Location" Click="OnOpenRuleLocation"/>
+                            <MenuItem Header="📋 Copy Executable Path" Click="OnCopyRulePath"/>
+                            <MenuItem Header="📋 Copy Rule Details" Click="OnCopyRuleDetails"/>
+                            <Separator/>
+                            <MenuItem Header="🔄 Refresh Rules List" Click="OnRefreshRules"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="PROGRAM" Binding="{Binding Name, Mode=OneWay}" Width="220"/>
+                        <DataGridTextColumn Header="DECISION" Binding="{Binding Decision, Mode=OneWay}" Width="110"/>
+                        <DataGridTextColumn Header="TRAFFIC" Binding="{Binding Direction, Mode=OneWay}" Width="150"/>
+                        <DataGridTextColumn Header="BLOCKS" Binding="{Binding Scope, Mode=OneWay}" Width="260"/>
+                        <DataGridTextColumn Header="FIREWALL" Binding="{Binding Firewall, Mode=OneWay}" Width="120"/>
+                        <DataGridTextColumn Header="SINCE" Binding="{Binding Since, Mode=OneWay}" Width="150"/>
+                        <DataGridTextColumn Header="PATH" Binding="{Binding Path, Mode=OneWay}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"
+                              ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" Cursor="SizeWE"/>
+
+                <!-- Right: Rule Intelligence & Security Inspector Card -->
+                <Border Grid.Column="2" Background="{StaticResource Bg}" BorderBrush="{StaticResource Line}"
+                        BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="4,0,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <!-- Panel Header -->
+                            <DockPanel Margin="0,0,0,8" LastChildFill="True">
+                                <Button Content="✕" DockPanel.Dock="Right" Click="OnDeselectRuleItem"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{StaticResource Cyan}" FontWeight="Bold" FontSize="11"
+                                        Cursor="Hand" ToolTip="Deselect rule"
+                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="RULE INTELLIGENCE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" FontFamily="Bahnschrift"/>
+                                    <TextBlock Text="  //  Decision &amp; Standing" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Placeholder when no item is selected -->
+                            <Border x:Name="RuleInspectorPlaceholder" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+                                    BorderThickness="1" CornerRadius="4" Padding="16,24" Margin="0,10,0,0">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="⚖️" FontSize="28" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Select a program rule" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Click any program decision in the table to inspect rule enforcement, Windows Firewall sync standing, digital certificate, live runtime activity, and security situation."
+                                               FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,4,0,0" MaxWidth="280"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Active Content Card when row is selected -->
+                            <StackPanel x:Name="RuleInspectorDetails" Visibility="Collapsed">
+                                <!-- Top Status & Identity Banner -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                                <Border x:Name="RuleInspectorFirewallBadge" CornerRadius="3" Padding="6,2" Margin="0,0,4,0" Background="#222DF598">
+                                                    <TextBlock x:Name="RuleInspectorFirewallBadgeText" Text="ACTIVE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                                </Border>
+                                                <Border x:Name="RuleInspectorDecisionBadge" CornerRadius="3" Padding="6,2" Background="#222DF598">
+                                                    <TextBlock x:Name="RuleInspectorDecisionText" Text="ALLOWED" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock x:Name="RuleInspectorNameText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <TextBlock x:Name="RuleInspectorSignerText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 1. FIREWALL & DECISION PARAMETERS CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="DECISION &amp; FIREWALL PARAMETERS" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Decision:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorStandingText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Cyan}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Traffic Scope:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorDirectionText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Target / Ports:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorScopeText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Firewall Sync:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorFirewallSyncText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Rule Since:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorSinceText" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Decision Note:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorNoteText" FontSize="10" FontFamily="Consolas" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 2. EXECUTABLE FILE & DIGITAL SIGNATURE CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="EXECUTABLE &amp; DIGITAL SIGNATURE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="File Status:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorFileStatusText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="File Size / Date:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorFileInfoText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Full Path:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorPathText" FontSize="10" FontFamily="Consolas" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 3. LIVE RUNTIME & NETWORK SITUATION CARD -->
+                                <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="LIVE RUNTIME &amp; SECURITY POSTURE" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Muted}" Margin="0,0,0,5"/>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Running Now:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorRunningText" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,3">
+                                            <TextBlock Text="Quarantine:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorQuarantineStatusText" FontSize="11" Foreground="{StaticResource Text}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,0,0,2">
+                                            <TextBlock Text="Situation:" FontSize="11" Foreground="{StaticResource Muted}" Width="85"/>
+                                            <TextBlock x:Name="RuleInspectorCommentText" FontSize="11" Foreground="{StaticResource Text}" TextWrapping="Wrap" LineHeight="16"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 4. ACTION "SWITCHBOARD" BUTTONS -->
+                                <WrapPanel Margin="0,0,0,4">
+                                    <Button Content="✏️ Edit Rule / Block..." Click="OnRulesEdit"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Modify block direction, specific ports, or IP scopes."/>
+                                    <Button x:Name="RuleInspectorToggleDecisionBtn" Content="🟢 Switch to Allow" Click="OnToggleRuleInspectorDecision"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Green}" Padding="10,4"
+                                            ToolTip="Toggle between Allow and Block for this application."/>
+                                    <Button x:Name="RuleInspectorQuarantineBtn" Content="🛡️ 5-Stage Quarantine..." Click="OnQuarantineRuleProgram"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Magenta}" FontWeight="SemiBold" Padding="10,4"
+                                            ToolTip="Neutralize this application across all 5 defense layers (IFEO execution lockout, process/socket kill, service and startup disable, bidirectional firewall block)."/>
+                                    <Button x:Name="RuleInspectorRestoreQuarantineBtn" Content="🔄 Restore from Quarantine..." Click="OnRestoreSelectedQuarantine"
+                                            Margin="0,0,6,6" Foreground="{StaticResource MenuBlue}" FontWeight="SemiBold" Padding="10,4" Visibility="Collapsed"
+                                            ToolTip="Reverses all 5 quarantine stages and restores the program to normal standing."/>
+                                    <Button Content="🗑️ Forget Decision" Click="OnRulesForget"
+                                            Margin="0,0,6,6" Foreground="{StaticResource Amber}" Padding="10,4"
+                                            ToolTip="Removes this rule and its corresponding Windows Firewall entries."/>
+                                    <Button Content="✨ Investigate with Spectra AI" Click="OnInvestigateRuleInspectorAi"
+                                            Margin="0,0,6,6" Foreground="{StaticResource MenuBlue}" Padding="10,4"
+                                            ToolTip="Performs an instant deep forensic analysis of this program with Spectra AI."/>
+                                    <Button Content="🛡️ Check on VirusTotal" Click="OnCheckRuleVirusTotal"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Checks the file's SHA-256 hash on VirusTotal."/>
+                                    <Button Content="📂 Open File Location" Click="OnOpenRuleLocation"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Locates and selects this executable in Windows Explorer."/>
+                                    <Button Content="📋 Copy Details" Click="OnCopyRuleDetails"
+                                            Margin="0,0,6,6" Padding="10,4"
+                                            ToolTip="Copies complete diagnostic information to the clipboard."/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
             <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,8">
                 <TextBlock Text="TRUSTED PUBLISHERS" FontWeight="SemiBold" Foreground="{StaticResource Magenta}"
                            VerticalAlignment="Center" Margin="0,0,16,0"/>
@@ -1659,6 +2035,9 @@
                                 <Button Content="Refresh adapters" Click="OnDnsRefreshAdapters" Margin="0,0,8,6"/>
                             </WrapPanel>
 
+                            <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when SpectraNetworkManager starts" Margin="0,0,0,10" Checked="OnAutoStartDnsChanged" Unchecked="OnAutoStartDnsChanged"
+                                      ToolTip="Automatically starts Spectra's DNS server whenever SpectraNetworkManager launches."/>
+
                             <TextBlock Text="BROWSER SECURE DNS (DoH) NOTICE" FontWeight="SemiBold" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,0,0,2"/>
                             <TextBlock Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,12"
                                        Text="Browsers (Chrome, Edge) sometimes bypass Windows DNS with built-in DNS-over-HTTPS. In Chrome/Edge settings under Privacy &amp; Security -> Use secure DNS, select 'With your current service provider' (or disable it)."/>
@@ -1711,7 +2090,6 @@
                                     </StackPanel>
                                 </DockPanel>
                             </Border>
-                            <CheckBox x:Name="AutoStartDnsBox" Content="Start the DNS server when SpectraNetworkManager starts" Margin="0,2,0,4" Checked="OnAutoStartDnsChanged" Unchecked="OnAutoStartDnsChanged"/>
                             <CheckBox x:Name="RestrictClientsBox" Content="Only answer queries from local / private networks" Margin="0,2,0,4"
                                       ToolTip="Protects your PC from acting as an open resolver on the internet if listening on 0.0.0.0."/>
                             <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
@@ -2424,7 +2802,15 @@
             <!-- Browser Guard Rules DataGrid -->
             <DataGrid x:Name="BrowserGuardGrid" Grid.Row="4" SelectionMode="Single" SelectionChanged="OnBrowserGuardSelectionChanged">
                 <DataGrid.Columns>
-                    <DataGridCheckBoxColumn Header="ACTIVE" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                    <DataGridTemplateColumn Header="ACTIVE" Width="70">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Click="OnBrowserRuleCheckboxClick"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                     <DataGridTextColumn Header="RULE TITLE / DESCRIPTION" Binding="{Binding Title}" Width="240" Foreground="{StaticResource Cyan}"/>
                     <DataGridTextColumn Header="URL PATTERN" Binding="{Binding Pattern}" Width="320" FontFamily="Consolas"/>
                     <DataGridTextColumn Header="RESOURCE TYPE" Binding="{Binding ResourceType}" Width="130"/>
@@ -2630,27 +3016,110 @@
                     </ScrollViewer>
                 </Border>
 
-                <!-- Right Column: Past Investigations History -->
+                <!-- Right Column: Interactive Chat & Past Investigations -->
                 <Grid Grid.Column="1">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                        <Button x:Name="AiClearHistoryButton" DockPanel.Dock="Right" Content="Clear History" Padding="8,2" FontSize="11" Click="OnAiClearHistoryClick"/>
-                        <TextBlock x:Name="AiHistoryHeader" Text="Investigation History" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource Cyan}" VerticalAlignment="Center"/>
-                    </DockPanel>
+                    <!-- Header & Sub-Tab Switcher -->
+                    <Border Grid.Row="0" Background="{StaticResource Selected}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                <Button x:Name="AiClearChatButton" Content="Clear Chat" Padding="8,2" FontSize="11" Click="OnAiClearChatClick" Margin="0,0,6,0"/>
+                                <Button x:Name="AiClearHistoryButton" Content="Clear History" Padding="8,2" FontSize="11" Click="OnAiClearHistoryClick" Visibility="Collapsed"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <RadioButton x:Name="AiChatSubTab" Content="💬 Ask Spectra AI" GroupName="AiSubTabs" IsChecked="True"
+                                             FontWeight="SemiBold" Foreground="{StaticResource Cyan}" Margin="0,0,14,0" Checked="OnAiSubTabChanged"/>
+                                <RadioButton x:Name="AiHistorySubTab" Content="📜 Past Investigations" GroupName="AiSubTabs"
+                                             FontWeight="SemiBold" Foreground="{StaticResource Muted}" Checked="OnAiSubTabChanged"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
 
-                    <DataGrid x:Name="AiHistoryGrid" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnAiHistorySelectionChanged">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="TIME" Binding="{Binding TimestampDisplay}" Width="80"/>
-                            <DataGridTextColumn Header="PROCESS / TARGET" Binding="{Binding ProcessName}" Width="130" Foreground="{StaticResource Cyan}"/>
-                            <DataGridTextColumn Header="VERDICT" Binding="{Binding VerdictDisplay}" Width="85"/>
-                            <DataGridTextColumn Header="RISK" Binding="{Binding RiskScore}" Width="45"/>
-                            <DataGridTextColumn Header="ENGINE" Binding="{Binding ModelUsed}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <!-- View 1: Interactive Chat Panel -->
+                    <Grid x:Name="AiChatContainer" Grid.Row="1" Visibility="Visible">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Context Indicator -->
+                        <Border Grid.Row="0" Background="#141824" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3" Padding="8,4" Margin="0,0,0,6">
+                            <DockPanel>
+                                <TextBlock Text="🎯 TARGET CONTEXT:" FontWeight="Bold" FontSize="10" Foreground="{StaticResource Cyan}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock x:Name="AiChatContextText" Text="General Security Assistant (Select any program or connection to ask target-specific questions)" FontSize="11" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Chat Message Thread -->
+                        <Border Grid.Row="1" Background="{StaticResource Selected}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                            <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl x:Name="AiChatMessagesItemsControl" ItemsSource="{Binding AiChatMessages}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border HorizontalAlignment="{Binding BubbleAlignment}" Background="{Binding BubbleBackground}"
+                                                    BorderBrush="{Binding BubbleBorder}" BorderThickness="1" CornerRadius="6"
+                                                    Padding="10,8" Margin="0,3,0,4" MaxWidth="380">
+                                                <StackPanel>
+                                                    <DockPanel Margin="0,0,0,4">
+                                                        <TextBlock Text="{Binding TimestampDisplay}" DockPanel.Dock="Right" FontSize="9" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="{Binding SenderName}" FontSize="11" FontWeight="Bold" Foreground="{Binding SenderForeground}"/>
+                                                    </DockPanel>
+                                                    <TextBox Text="{Binding MessageText, Mode=OneWay}" TextWrapping="Wrap"
+                                                             Foreground="{StaticResource Text}" Background="Transparent"
+                                                             BorderThickness="0" IsReadOnly="True" FontSize="11.5"
+                                                             FontFamily="Segoe UI"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+
+                        <!-- Quick Prompt Suggestion Chips -->
+                        <StackPanel Grid.Row="2" Margin="0,0,0,6">
+                            <WrapPanel>
+                                <TextBlock Text="Quick questions:" FontSize="10" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,6,2"/>
+                                <Button Content="🛡️ Is this safe?" Click="OnQuickPromptIsSafe" FontSize="10" Padding="6,2" Margin="0,0,4,2"/>
+                                <Button Content="🌐 Why network access?" Click="OnQuickPromptNetwork" FontSize="10" Padding="6,2" Margin="0,0,4,2"/>
+                                <Button Content="🚫 Safe to block?" Click="OnQuickPromptBlock" FontSize="10" Padding="6,2" Margin="0,0,4,2"/>
+                                <Button Content="🔍 Explain publisher" Click="OnQuickPromptSigner" FontSize="10" Padding="6,2" Margin="0,0,0,2"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="AiChatTypingIndicator" Text="● Spectra AI is thinking..." Foreground="{StaticResource Amber}" FontSize="11" FontWeight="SemiBold" Visibility="Collapsed" Margin="4,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Chat Input Bar -->
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="AiChatInputBox" Grid.Column="0" Height="30" VerticalContentAlignment="Center"
+                                     KeyDown="OnAiChatInputKeyDown" ToolTip="Type your question for Spectra AI and press Enter" Margin="0,0,6,0"/>
+                            <Button x:Name="AiChatSendButton" Grid.Column="1" Content="Send" Width="60" Height="30"
+                                    Background="{StaticResource Cyan}" Foreground="#0D1117" FontWeight="SemiBold"
+                                    Click="OnAiChatSendClick"/>
+                        </Grid>
+                    </Grid>
+
+                    <!-- View 2: Investigation History DataGrid -->
+                    <Grid x:Name="AiHistoryContainer" Grid.Row="1" Visibility="Collapsed">
+                        <DataGrid x:Name="AiHistoryGrid" SelectionMode="Single" SelectionChanged="OnAiHistorySelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="TIME" Binding="{Binding TimestampDisplay}" Width="80"/>
+                                <DataGridTextColumn Header="PROCESS / TARGET" Binding="{Binding ProcessName}" Width="130" Foreground="{StaticResource Cyan}"/>
+                                <DataGridTextColumn Header="VERDICT" Binding="{Binding VerdictDisplay}" Width="85"/>
+                                <DataGridTextColumn Header="RISK" Binding="{Binding RiskScore}" Width="45"/>
+                                <DataGridTextColumn Header="ENGINE" Binding="{Binding ModelUsed}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>

@@ -257,6 +257,8 @@ public static class BrowserExtensionHost
                             guardManager.ToggleYouTubeAdRules(toggleOn);
                         else
                             guardManager.ToggleRule(toggleId, toggleOn);
+
+                        WindowsPipeSecurityHelper.TrySendSingleInstanceCommand("BROWSER_GUARD_CHANGED");
                     }
                     return JsonSerializer.Serialize(new { type = "ok" });
 
@@ -267,6 +269,8 @@ public static class BrowserExtensionHost
 
                     guardManager.Load();
                     bool autoApproved = guardManager.HandleElementPickerRequest(pUrl, pTitle, pDomain, out string rId);
+
+                    WindowsPipeSecurityHelper.TrySendSingleInstanceCommand("BROWSER_GUARD_CHANGED");
 
                     return JsonSerializer.Serialize(new
                     {

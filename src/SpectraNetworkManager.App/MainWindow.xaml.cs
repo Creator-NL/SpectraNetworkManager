@@ -11,6 +11,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -116,8 +117,11 @@ public partial class MainWindow : Window
     public ObservableCollection<ElementPickerBlockRequestRow> GuardPendingRequests { get; } = new();
     private readonly HashSet<string> _shownPendingRequestIds = new();
     public ObservableCollection<AiInvestigationViewModel> AiHistory { get; } = new();
+    public ObservableCollection<AiChatMessage> AiChatMessages { get; } = new();
     public ObservableCollection<QuarantineSnapshot> QuarantinedItems { get; } = new();
     private readonly BrowserGuardManager _browserGuardManager;
+    private System.IO.FileSystemWatcher? _browserGuardWatcher;
+    private CancellationTokenSource? _browserGuardDebounceCts;
     private readonly AiInvestigationDatabase _aiDb = new();
     private readonly AiInvestigationCoordinator _aiCoordinator;
     private InvestigationReport? _currentAiReport;
@@ -131,6 +135,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         _browserGuardManager = new BrowserGuardManager();
+        SingleInstanceManager.BrowserGuardChanged += OnBrowserGuardExternalSignalReceived;
         _aiCoordinator = new AiInvestigationCoordinator(
             _processResolver,
             _hashCache,
@@ -158,6 +163,7 @@ public partial class MainWindow : Window
         InitPacketCaptureInterfaces();
         InitTvMobileAndBrowserGuardUi();
         DataContext = this;
+        AiChatMessages.Add(new AiChatMessage("Spectra AI", "Hello! I am your Spectra AI security assistant. You can ask me questions about any inspected program, network telemetry, suspicious processes, or general security recommendations.", isUser: false));
         DnsAdaptersList.ItemsSource = DnsAdapters;
         _dnsSwitch.StateChanged += _ => Dispatcher.BeginInvoke(new Action(UpdateDnsSwitchUi));
 
@@ -222,6 +228,25 @@ public partial class MainWindow : Window
         _timer.Tick += async (_, _) => await TickAsync();
         Loaded += async (_, _) =>
         {
+            // Self-Healing: Reconcile and clear any orphaned or protected execution lockouts (IFEO)
+            if (_isAdmin)
+            {
+                try
+                {
+                    var healed = _quarantineManager.ReconcileAndHealOrphanedLockouts();
+                    if (healed.Count > 0)
+                    {
+                        string healedList = string.Join(", ", healed);
+                        StatusText.Text = $"Self-Healing: Restored execution lockout for {healedList}.";
+                        RotatingFileLogger.LogInfo($"Self-Healing: Automatically cleared orphaned/protected IFEO lockouts for: {healedList}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RotatingFileLogger.LogWarn($"Quarantine reconciliation error: {ex.Message}");
+                }
+            }
+
             await TryConnectEngineAsync();
             await RecoverStrictStateAsync();
             await RecoverDnsSwitchStateAsync();
@@ -1614,6 +1639,19 @@ public partial class MainWindow : Window
 
     private void RefreshQuarantineVault()
     {
+        if (_isAdmin)
+        {
+            try
+            {
+                var healed = _quarantineManager.ReconcileAndHealOrphanedLockouts();
+                if (healed.Count > 0)
+                {
+                    RotatingFileLogger.LogInfo($"Self-Healing: Cleared orphaned IFEO lockouts: {string.Join(", ", healed)}");
+                }
+            }
+            catch { }
+        }
+
         bool showRestored = QuarantineShowRestoredCheck?.IsChecked == true;
         var all = _quarantineVault.GetAll().OrderByDescending(s => s.QuarantinedAtUtc).ToList();
         var snapshots = showRestored ? all : all.Where(s => !s.IsRestored).ToList();
@@ -2164,6 +2202,373 @@ public partial class MainWindow : Window
         if (row is not null && TryForget(row.Rule, row.Name)) AfterDecision();
     }
 
+    private void OnRulesBlock(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        if (TryBlock(row.Path, row.Name, row.Rule)) AfterDecision();
+    }
+
+    private async void OnQuarantineRuleProgram(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        await PromptAndQuarantineAsync(row.Path, row.Name, "Quarantined from Rules Manager");
+        await RefreshRulesAsync();
+    }
+
+    private void OnCheckRuleVirusTotal(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Path))
+        {
+            CheckPathOnVirusTotal(row.Path, row.Name);
+        }
+    }
+
+    private void OnCopyRuleSha256(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is not null && !string.IsNullOrWhiteSpace(row.Path))
+        {
+            CopyPathSha256ToClipboard(row.Path, row.Name);
+        }
+    }
+
+    private void OnOpenRuleLocation(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+
+        try
+        {
+            if (File.Exists(row.Path))
+            {
+                Process.Start("explorer.exe", $"/select,\"{row.Path}\"");
+            }
+            else
+            {
+                Info($"The file was not found on disk:\n\n{row.Path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Error("Could not open file location", ex);
+        }
+    }
+
+    private void OnCopyRulePath(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null || string.IsNullOrWhiteSpace(row.Path)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(row.Path);
+            StatusText.Text = $"Copied path to clipboard: {row.Path}";
+        }
+        catch { }
+    }
+
+    private void OnCopyRuleDetails(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null) return;
+
+        var snap = !string.IsNullOrWhiteSpace(row.Path) ? _quarantineVault.FindByPath(row.Path) : null;
+        var sb = new StringBuilder();
+        sb.AppendLine("=== SpectraNetworkManager Rule Intelligence ===");
+        sb.AppendLine($"Program Name:    {row.Name}");
+        sb.AppendLine($"Decision:        {row.Decision}");
+        sb.AppendLine($"Traffic:         {row.Direction}");
+        sb.AppendLine($"Scope / Ports:   {row.Scope}");
+        sb.AppendLine($"Firewall Status: {row.Firewall}");
+        sb.AppendLine($"Since:           {row.Since}");
+        sb.AppendLine($"Executable Path: {row.Path}");
+        sb.AppendLine($"File Exists:     {(File.Exists(row.Path) ? "Yes" : "No (Orphaned)")}");
+        sb.AppendLine($"Quarantine:      {(snap != null && !snap.IsRestored ? "Quarantined in Active Defense Vault" : "Normal")}");
+        sb.AppendLine($"Situation:       {RuleInspectorCommentText?.Text}");
+        sb.AppendLine($"Timestamp:       {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+        try
+        {
+            System.Windows.Clipboard.SetText(sb.ToString());
+            StatusText.Text = $"Copied rule details for {row.Name} to clipboard.";
+        }
+        catch { }
+    }
+
+    private void OnToggleRuleInspectorDecision(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRule();
+        if (row is null) return;
+        if (string.Equals(row.Decision, "Allowed", StringComparison.OrdinalIgnoreCase))
+        {
+            OnRulesBlock(sender, e);
+        }
+        else
+        {
+            OnRulesAllow(sender, e);
+        }
+    }
+
+    private void OnInvestigateRuleInspectorAi(object sender, RoutedEventArgs e)
+    {
+        OnContextMenuInvestigateAi(sender, e);
+    }
+
+    private void OnRulesSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateRuleInspector(RulesGrid.SelectedItem as RuleRow);
+    }
+
+    private void OnRulesGridMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (RulesGrid.SelectedItem is RuleRow row)
+        {
+            UpdateRuleInspector(row);
+        }
+    }
+
+    private void OnRulesGridPreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var dep = e.OriginalSource as DependencyObject;
+        while (dep != null && dep is not DataGridRow)
+        {
+            dep = System.Windows.Media.VisualTreeHelper.GetParent(dep);
+        }
+        if (dep is DataGridRow row && row.Item is RuleRow rRow)
+        {
+            RulesGrid.SelectedItem = rRow;
+            UpdateRuleInspector(rRow);
+        }
+    }
+
+    private void OnDeselectRuleItem(object sender, RoutedEventArgs e)
+    {
+        RulesGrid.SelectedItem = null;
+        UpdateRuleInspector(null);
+    }
+
+    private void OnRulesContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var row = RulesGrid.SelectedItem as RuleRow;
+        if (row == null || string.IsNullOrWhiteSpace(row.Path))
+        {
+            if (RulesMenuQuarantine != null) RulesMenuQuarantine.IsEnabled = false;
+            if (RulesMenuRestoreQuarantine != null) RulesMenuRestoreQuarantine.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var snap = _quarantineVault.FindByPath(row.Path);
+        bool isQuarantined = snap != null && !snap.IsRestored;
+
+        if (RulesMenuQuarantine != null)
+        {
+            RulesMenuQuarantine.IsEnabled = !isQuarantined && File.Exists(row.Path);
+            RulesMenuQuarantine.Visibility = isQuarantined ? Visibility.Collapsed : Visibility.Visible;
+        }
+        if (RulesMenuRestoreQuarantine != null)
+        {
+            RulesMenuRestoreQuarantine.Visibility = isQuarantined ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (RulesMenuAllow != null)
+        {
+            RulesMenuAllow.Visibility = row.Decision != "Allowed" ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (RulesMenuBlock != null)
+        {
+            RulesMenuBlock.Visibility = row.Decision == "Allowed" ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateRuleInspector(RuleRow? row)
+    {
+        if (row == null)
+        {
+            if (RuleInspectorPlaceholder != null) RuleInspectorPlaceholder.Visibility = Visibility.Visible;
+            if (RuleInspectorDetails != null) RuleInspectorDetails.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (RuleInspectorPlaceholder != null) RuleInspectorPlaceholder.Visibility = Visibility.Collapsed;
+        if (RuleInspectorDetails != null) RuleInspectorDetails.Visibility = Visibility.Visible;
+
+        // Top Status & Identity
+        RuleInspectorNameText.Text = row.Name;
+        var sig = !string.IsNullOrWhiteSpace(row.Path) ? _signatures.TryGet(row.Path) : null;
+        RuleInspectorSignerText.Text = sig != null && sig.Status == SignatureStatus.Valid
+            ? sig.Describe()
+            : (!string.IsNullOrWhiteSpace(row.Path) && File.Exists(row.Path) ? "Unsigned / Unverified" : "⚠️ (file not found — orphaned)");
+
+        // Decision Badge
+        if (string.Equals(row.Decision, "Allowed", StringComparison.OrdinalIgnoreCase))
+        {
+            RuleInspectorDecisionBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x2D, 0xF5, 0x98));
+            RuleInspectorDecisionText.Text = "ALLOWED";
+            RuleInspectorDecisionText.Foreground = (Brush)FindResource("Green");
+            RuleInspectorToggleDecisionBtn.Content = "🚫 Block Program...";
+            RuleInspectorToggleDecisionBtn.Foreground = (Brush)FindResource("Magenta");
+        }
+        else if (string.Equals(row.Decision, "QUARANTINED", StringComparison.OrdinalIgnoreCase))
+        {
+            RuleInspectorDecisionBadge.Background = new SolidColorBrush(Color.FromArgb(0x2E, 0xFA, 0x2A, 0x55));
+            RuleInspectorDecisionText.Text = "🛡️ QUARANTINED";
+            RuleInspectorDecisionText.Foreground = (Brush)FindResource("Magenta");
+            RuleInspectorToggleDecisionBtn.Content = "🟢 Switch to Allow";
+            RuleInspectorToggleDecisionBtn.Foreground = (Brush)FindResource("Green");
+        }
+        else
+        {
+            RuleInspectorDecisionBadge.Background = new SolidColorBrush(Color.FromArgb(0x2E, 0xFA, 0x2A, 0x55));
+            RuleInspectorDecisionText.Text = "BLOCKED";
+            RuleInspectorDecisionText.Foreground = (Brush)FindResource("Magenta");
+            RuleInspectorToggleDecisionBtn.Content = "🟢 Switch to Allow";
+            RuleInspectorToggleDecisionBtn.Foreground = (Brush)FindResource("Green");
+        }
+
+        // Firewall Badge
+        if (string.Equals(row.Firewall, "active", StringComparison.OrdinalIgnoreCase) || row.Firewall.StartsWith("active", StringComparison.OrdinalIgnoreCase))
+        {
+            RuleInspectorFirewallBadge.Visibility = Visibility.Visible;
+            RuleInspectorFirewallBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x2D, 0xF5, 0x98));
+            RuleInspectorFirewallBadgeText.Text = "ACTIVE IN FW";
+            RuleInspectorFirewallBadgeText.Foreground = (Brush)FindResource("Green");
+            RuleInspectorFirewallSyncText.Text = "✓ Synchronized with Windows Firewall";
+            RuleInspectorFirewallSyncText.Foreground = (Brush)FindResource("Green");
+        }
+        else if (string.Equals(row.Firewall, "MISSING", StringComparison.OrdinalIgnoreCase) || row.Firewall.StartsWith("PARTIAL", StringComparison.OrdinalIgnoreCase))
+        {
+            RuleInspectorFirewallBadge.Visibility = Visibility.Visible;
+            RuleInspectorFirewallBadge.Background = new SolidColorBrush(Color.FromArgb(0x2E, 0xFA, 0x2A, 0x55));
+            RuleInspectorFirewallBadgeText.Text = "⚠️ FW DESYNC";
+            RuleInspectorFirewallBadgeText.Foreground = (Brush)FindResource("Magenta");
+            RuleInspectorFirewallSyncText.Text = $"⚠️ {row.Firewall} (Rules missing from Windows Firewall)";
+            RuleInspectorFirewallSyncText.Foreground = (Brush)FindResource("Magenta");
+        }
+        else
+        {
+            RuleInspectorFirewallBadge.Visibility = Visibility.Collapsed;
+            RuleInspectorFirewallSyncText.Text = "No OS block rules required (Allowed)";
+            RuleInspectorFirewallSyncText.Foreground = (Brush)FindResource("Muted");
+        }
+
+        // Decision Parameters
+        RuleInspectorStandingText.Text = row.Decision;
+        RuleInspectorDirectionText.Text = row.Direction;
+        RuleInspectorScopeText.Text = row.Scope;
+        RuleInspectorSinceText.Text = $"{row.Since} ({GetRelativeAge(row.Rule.Created)})";
+        RuleInspectorNoteText.Text = string.IsNullOrWhiteSpace(row.Rule.Note) ? "(No note recorded)" : row.Rule.Note;
+
+        // Executable & File
+        bool fileExists = !string.IsNullOrWhiteSpace(row.Path) && File.Exists(row.Path);
+        if (fileExists)
+        {
+            RuleInspectorFileStatusText.Text = "✓ Available on disk";
+            RuleInspectorFileStatusText.Foreground = (Brush)FindResource("Green");
+            try
+            {
+                var fi = new FileInfo(row.Path);
+                RuleInspectorFileInfoText.Text = $"{FormatFileSizeBytes(fi.Length)} · Modified {fi.LastWriteTime:yyyy-MM-dd HH:mm}";
+            }
+            catch
+            {
+                RuleInspectorFileInfoText.Text = "Accessible";
+            }
+        }
+        else
+        {
+            RuleInspectorFileStatusText.Text = "⚠️ File missing / Orphaned";
+            RuleInspectorFileStatusText.Foreground = (Brush)FindResource("Amber");
+            RuleInspectorFileInfoText.Text = "Executable file not found on disk";
+        }
+        RuleInspectorPathText.Text = row.Path;
+
+        // Live Runtime State
+        int runningCount = 0;
+        int samplePid = 0;
+        try
+        {
+            string exeName = Path.GetFileNameWithoutExtension(row.Path);
+            if (!string.IsNullOrWhiteSpace(exeName))
+            {
+                var procs = Process.GetProcessesByName(exeName);
+                runningCount = procs.Length;
+                if (runningCount > 0) samplePid = procs[0].Id;
+            }
+        }
+        catch { }
+
+        if (runningCount > 0)
+        {
+            int sockets = Rows.Count(c => c.Pid == samplePid || (!string.IsNullOrWhiteSpace(row.Path) && string.Equals(c.Path, row.Path, StringComparison.OrdinalIgnoreCase)));
+            string socketMsg = sockets > 0 ? $" · {sockets} active socket(s)" : "";
+            RuleInspectorRunningText.Text = $"● RUNNING ({runningCount} instance{(runningCount > 1 ? "s" : "")}, PID {samplePid}{socketMsg})";
+            RuleInspectorRunningText.Foreground = (Brush)FindResource("Green");
+        }
+        else
+        {
+            RuleInspectorRunningText.Text = "○ Not currently running";
+            RuleInspectorRunningText.Foreground = (Brush)FindResource("Muted");
+        }
+
+        // Quarantine Check
+        var snap = !string.IsNullOrWhiteSpace(row.Path) ? _quarantineVault.FindByPath(row.Path) : null;
+        bool isQuarantined = snap != null && !snap.IsRestored;
+
+        if (isQuarantined)
+        {
+            RuleInspectorQuarantineStatusText.Text = "🛡️ Quarantined in Active Defense Vault";
+            RuleInspectorQuarantineStatusText.Foreground = (Brush)FindResource("Magenta");
+            RuleInspectorRestoreQuarantineBtn.Visibility = Visibility.Visible;
+            RuleInspectorQuarantineBtn.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            RuleInspectorQuarantineStatusText.Text = "Normal (Not in Quarantine Vault)";
+            RuleInspectorQuarantineStatusText.Foreground = (Brush)FindResource("Text");
+            RuleInspectorRestoreQuarantineBtn.Visibility = Visibility.Collapsed;
+            RuleInspectorQuarantineBtn.Visibility = Visibility.Visible;
+        }
+
+        // Diagnostic Commentary
+        var commentary = new StringBuilder();
+        if (!fileExists)
+        {
+            commentary.Append("⚠️ Orphaned Decision: The executable file does not exist on disk. If this software was uninstalled, you can click 'Forget Decision' to safely remove this record.");
+        }
+        else if (isQuarantined)
+        {
+            commentary.Append("🛡️ 5-Stage Active Defense Quarantine: This program is completely isolated across process termination, kernel execution lockout (IFEO), disabled background services, neutralized auto-start entries, and bidirectional firewall blocks. 100% reversible.");
+        }
+        else if (string.Equals(row.Firewall, "MISSING", StringComparison.OrdinalIgnoreCase))
+        {
+            commentary.Append("⚠️ Firewall Desynchronization: SpectraNetworkManager has a Block decision recorded, but the required rules are missing from Windows Firewall. Click '⚡ Fix / Reapply Rules' in the toolbar to reinstate active blocking.");
+        }
+        else if (string.Equals(row.Decision, "Allowed", StringComparison.OrdinalIgnoreCase))
+        {
+            commentary.Append("Unrestricted network access granted. The program can establish inbound and outbound TCP/UDP connections.");
+            if (runningCount > 0) commentary.Append(" Currently active in memory.");
+        }
+        else
+        {
+            commentary.Append($"Windows Firewall actively enforces a block for {row.Direction} traffic targeting {row.Scope}.");
+            if (runningCount > 0) commentary.Append($" Currently active in memory (PID {samplePid}); network attempts are dropped.");
+        }
+        RuleInspectorCommentText.Text = commentary.ToString();
+    }
+
+    private static string GetRelativeAge(DateTimeOffset timestamp)
+    {
+        var span = DateTimeOffset.Now - timestamp;
+        if (span.TotalDays >= 2) return $"{(int)span.TotalDays} days ago";
+        if (span.TotalDays >= 1) return "1 day ago";
+        if (span.TotalHours >= 2) return $"{(int)span.TotalHours} hours ago";
+        if (span.TotalHours >= 1) return "1 hour ago";
+        if (span.TotalMinutes >= 2) return $"{(int)span.TotalMinutes} mins ago";
+        return "just now";
+    }
+
     private async Task RefreshRulesAsync()
     {
         IReadOnlyDictionary<string, int>? counts = null;
@@ -2176,6 +2581,8 @@ public partial class MainWindow : Window
             // Could not read the firewall: show "unknown" instead of guessing.
         }
 
+        string? selectedPath = (RulesGrid.SelectedItem as RuleRow)?.Path;
+
         RuleRows.Clear();
         foreach (var rule in _rules.All.OrderBy(r => r.Path, StringComparer.OrdinalIgnoreCase))
             RuleRows.Add(RuleRow.From(rule, FirewallStatus(rule, counts)));
@@ -2183,6 +2590,13 @@ public partial class MainWindow : Window
         Publishers.Clear();
         foreach (var name in _rules.TrustedPublishers.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
             Publishers.Add(new PublisherRow(name));
+
+        if (selectedPath != null)
+        {
+            RulesGrid.SelectedItem = RuleRows.FirstOrDefault(r => string.Equals(r.Path, selectedPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        UpdateRuleInspector(RulesGrid.SelectedItem as RuleRow);
 
         int missingCount = RuleRows.Count(r => r.Decision == "Blocked" && (r.Firewall == "MISSING" || r.Firewall.StartsWith("PARTIAL", StringComparison.OrdinalIgnoreCase)));
         if (missingCount > 0)
@@ -2323,6 +2737,7 @@ public partial class MainWindow : Window
 
             await _dnsSwitch.RestoreAllAsync();
             await _quarantineManager.RestoreAllActiveAsync();
+            QuarantineManager.RemoveAllExecutionLockouts();
             await BrowserDohGuard.DisableGuardAsync();
 
             int removed = await Task.Run(() => _enforcer.RemoveAll());
@@ -3992,7 +4407,9 @@ public partial class MainWindow : Window
         if (res == MessageBoxResult.Yes)
         {
             string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
-            if (ElevationHelper.StartProcessElevated(exe))
+            try { _sink.Stop(); } catch { }
+            SingleInstanceManager.PrepareForRestart();
+            if (ElevationHelper.StartProcessElevated(exe, $"--restart-from={Environment.ProcessId}"))
             {
                 _isExiting = true;
                 _promptToast?.Close();
@@ -4420,6 +4837,8 @@ public partial class MainWindow : Window
                 StartupGrid.SelectedItem = StartupItems.FirstOrDefault(r => r.Id == selectedId);
             }
 
+            UpdateStartupInspector(StartupGrid.SelectedItem as StartupRow);
+
             int enabledCount = StartupItems.Count(s => !s.IsDisabled);
             int disabledCount = StartupItems.Count(s => s.IsDisabled);
             int appxCount = StartupItems.Count(s => s.SourceKind == StartupSourceKind.AppxStartupTask);
@@ -4560,6 +4979,370 @@ public partial class MainWindow : Window
         {
             System.Windows.Clipboard.SetText(row.Command);
             StatusText.Text = $"Copied startup command to clipboard: {row.Command}";
+        }
+        catch { }
+    }
+
+    private void OnStartupSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateStartupInspector(StartupGrid.SelectedItem as StartupRow);
+    }
+
+    private void OnStartupGridMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (StartupGrid.SelectedItem is StartupRow row)
+        {
+            UpdateStartupInspector(row);
+        }
+    }
+
+    private void OnStartupGridPreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var dep = e.OriginalSource as DependencyObject;
+        while (dep != null && dep is not DataGridRow)
+        {
+            dep = System.Windows.Media.VisualTreeHelper.GetParent(dep);
+        }
+        if (dep is DataGridRow row && row.Item is StartupRow sRow)
+        {
+            StartupGrid.SelectedItem = sRow;
+            UpdateStartupInspector(sRow);
+        }
+    }
+
+    private void OnDeselectStartupItem(object sender, RoutedEventArgs e)
+    {
+        StartupGrid.SelectedItem = null;
+        UpdateStartupInspector(null);
+    }
+
+    private void OnStartupContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var row = StartupGrid.SelectedItem as StartupRow;
+        if (row == null || string.IsNullOrWhiteSpace(row.ExecutablePath))
+        {
+            if (StartupMenuQuarantine != null) StartupMenuQuarantine.IsEnabled = false;
+            if (StartupMenuRestoreQuarantine != null) StartupMenuRestoreQuarantine.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var snap = _quarantineVault.FindByPath(row.ExecutablePath);
+        bool isQuarantined = snap != null && !snap.IsRestored;
+
+        if (StartupMenuQuarantine != null)
+        {
+            StartupMenuQuarantine.IsEnabled = !isQuarantined && File.Exists(row.ExecutablePath);
+            StartupMenuQuarantine.Visibility = isQuarantined ? Visibility.Collapsed : Visibility.Visible;
+        }
+        if (StartupMenuRestoreQuarantine != null)
+        {
+            StartupMenuRestoreQuarantine.Visibility = isQuarantined ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateStartupInspector(StartupRow? row)
+    {
+        if (row == null)
+        {
+            if (StartupInspectorPlaceholder != null) StartupInspectorPlaceholder.Visibility = Visibility.Visible;
+            if (StartupInspectorDetails != null) StartupInspectorDetails.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (StartupInspectorPlaceholder != null) StartupInspectorPlaceholder.Visibility = Visibility.Collapsed;
+        if (StartupInspectorDetails != null) StartupInspectorDetails.Visibility = Visibility.Visible;
+
+        // Top Status & Identity
+        StartupInspectorNameText.Text = row.Name;
+        StartupInspectorPublisherText.Text = string.IsNullOrWhiteSpace(row.Publisher) ? "Unknown Publisher" : row.Publisher;
+
+        if (row.IsEnabled)
+        {
+            StartupInspectorStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0x2D, 0xF5, 0x98));
+            StartupInspectorStatusText.Text = "● ENABLED";
+            StartupInspectorStatusText.Foreground = (Brush)FindResource("Green");
+            StartupInspectorToggleBtn.Content = "⏸ Turn Off (Disable)";
+            StartupInspectorToggleBtn.Foreground = (Brush)FindResource("Amber");
+        }
+        else
+        {
+            StartupInspectorStatusBadge.Background = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xB0, 0x20));
+            StartupInspectorStatusText.Text = "○ DISABLED";
+            StartupInspectorStatusText.Foreground = (Brush)FindResource("Amber");
+            StartupInspectorToggleBtn.Content = "▶ Turn On (Enable)";
+            StartupInspectorToggleBtn.Foreground = (Brush)FindResource("Cyan");
+        }
+
+        // Quarantine Standing
+        var snap = !string.IsNullOrWhiteSpace(row.ExecutablePath) ? _quarantineVault.FindByPath(row.ExecutablePath) : null;
+        bool isQuarantined = snap != null && !snap.IsRestored;
+
+        if (isQuarantined)
+        {
+            StartupInspectorQuarantineBadge.Visibility = Visibility.Visible;
+            StartupInspectorQuarantineStatusText.Text = "🛡️ Quarantined in Active Defense Vault (Reversible)";
+            StartupInspectorQuarantineStatusText.Foreground = (Brush)FindResource("Magenta");
+            StartupInspectorRestoreQuarantineBtn.Visibility = Visibility.Visible;
+            StartupInspectorQuarantineBtn.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            StartupInspectorQuarantineBadge.Visibility = Visibility.Collapsed;
+            StartupInspectorQuarantineStatusText.Text = "Normal (Active / Not Quarantined)";
+            StartupInspectorQuarantineStatusText.Foreground = (Brush)FindResource("Text");
+            StartupInspectorRestoreQuarantineBtn.Visibility = Visibility.Collapsed;
+            StartupInspectorQuarantineBtn.Visibility = Visibility.Visible;
+        }
+
+        // Launch Mechanism & Location
+        StartupInspectorSourceText.Text = row.SourceKind switch
+        {
+            StartupSourceKind.AppxStartupTask => "Store / MSIX App (StartupTask)",
+            StartupSourceKind.HkcuRun or StartupSourceKind.HkcuRunOnce or StartupSourceKind.HkcuPoliciesRun => "Registry (Current User Run)",
+            StartupSourceKind.HklmRun or StartupSourceKind.HklmRunOnce or StartupSourceKind.HklmPoliciesRun => "Registry (System HKLM Run)",
+            StartupSourceKind.HklmWow64Run or StartupSourceKind.HklmWow64RunOnce => "Registry (32-bit WOW64 Run)",
+            StartupSourceKind.ScheduledTask => "Task Scheduler (Logon / Boot)",
+            StartupSourceKind.WindowsService => "Auto-Start Service (3rd-Party)",
+            StartupSourceKind.UserStartupFolder => "Startup Folder (Current User)",
+            StartupSourceKind.CommonStartupFolder => "Startup Folder (All Users)",
+            _ => row.SourceKind.ToString()
+        };
+        StartupInspectorLocationText.Text = row.Location;
+        StartupInspectorAdminText.Text = row.Entry.RequiresAdmin ? "Yes (Administrative privileges required)" : "No (Standard user)";
+        StartupInspectorCommandText.Text = row.Command;
+
+        // Executable & Digital Signature
+        bool fileExists = !string.IsNullOrWhiteSpace(row.ExecutablePath) && File.Exists(row.ExecutablePath);
+        if (fileExists)
+        {
+            StartupInspectorFileStatusText.Text = "✓ Available on disk";
+            StartupInspectorFileStatusText.Foreground = (Brush)FindResource("Green");
+            try
+            {
+                var fi = new FileInfo(row.ExecutablePath);
+                StartupInspectorFileInfoText.Text = $"{FormatFileSizeBytes(fi.Length)} · Modified {fi.LastWriteTime:yyyy-MM-dd HH:mm}";
+            }
+            catch
+            {
+                StartupInspectorFileInfoText.Text = "Accessible";
+            }
+        }
+        else
+        {
+            StartupInspectorFileStatusText.Text = "⚠️ File missing / Orphaned";
+            StartupInspectorFileStatusText.Foreground = (Brush)FindResource("Amber");
+            StartupInspectorFileInfoText.Text = "Executable file not found on disk";
+        }
+
+        StartupInspectorSignerText.Text = row.Publisher;
+        StartupInspectorPathText.Text = string.IsNullOrWhiteSpace(row.ExecutablePath) ? row.Command : row.ExecutablePath;
+
+        // Live Situation & Runtime State
+        int runningCount = 0;
+        int samplePid = 0;
+        try
+        {
+            string exeName = Path.GetFileNameWithoutExtension(row.ExecutablePath);
+            if (!string.IsNullOrWhiteSpace(exeName))
+            {
+                var procs = Process.GetProcessesByName(exeName);
+                runningCount = procs.Length;
+                if (runningCount > 0) samplePid = procs[0].Id;
+            }
+        }
+        catch { }
+
+        if (runningCount > 0)
+        {
+            int sockets = Rows.Count(c => c.Pid == samplePid || (!string.IsNullOrWhiteSpace(row.ExecutablePath) && string.Equals(c.Path, row.ExecutablePath, StringComparison.OrdinalIgnoreCase)));
+            string socketMsg = sockets > 0 ? $" · {sockets} active socket(s)" : "";
+            StartupInspectorRunningText.Text = $"● RUNNING ({runningCount} instance{(runningCount > 1 ? "s" : "")}, PID {samplePid}{socketMsg})";
+            StartupInspectorRunningText.Foreground = (Brush)FindResource("Green");
+        }
+        else
+        {
+            StartupInspectorRunningText.Text = "○ Not currently running";
+            StartupInspectorRunningText.Foreground = (Brush)FindResource("Muted");
+        }
+
+        // Firewall Status & Button
+        StartupInspectorFirewallText.Text = row.FirewallStatus;
+        if (string.Equals(row.FirewallStatus, "Allowed", StringComparison.OrdinalIgnoreCase))
+        {
+            StartupInspectorFirewallText.Foreground = (Brush)FindResource("Green");
+            StartupInspectorFirewallBtn.Content = "🚫 Block in Firewall...";
+            StartupInspectorFirewallBtn.Foreground = (Brush)FindResource("Magenta");
+        }
+        else if (string.Equals(row.FirewallStatus, "Blocked", StringComparison.OrdinalIgnoreCase))
+        {
+            StartupInspectorFirewallText.Foreground = (Brush)FindResource("Magenta");
+            StartupInspectorFirewallBtn.Content = "🟢 Allow in Firewall...";
+            StartupInspectorFirewallBtn.Foreground = (Brush)FindResource("Green");
+        }
+        else
+        {
+            StartupInspectorFirewallText.Foreground = (Brush)FindResource("Muted");
+            StartupInspectorFirewallBtn.Content = "🚫 Block in Firewall...";
+            StartupInspectorFirewallBtn.Foreground = (Brush)FindResource("Magenta");
+        }
+
+        // Situation Commentary
+        var situation = new StringBuilder();
+        if (!fileExists)
+        {
+            situation.Append("⚠️ Orphaned Auto-Start Entry: The target executable does not exist on disk. This entry consumes startup evaluation time and can be safely removed permanently using 'Remove Permanently'.");
+        }
+        else if (isQuarantined)
+        {
+            situation.Append("🛡️ Active Defense Quarantine: This program has been completely neutralized across all 5 defense layers (IFEO execution lockout, terminated processes/sockets, disabled services, disabled startup, and bidirectional firewall block). Use 'Restore from Quarantine' to undo.");
+        }
+        else
+        {
+            if (row.IsUnsigned)
+            {
+                situation.Append("⚠️ Unsigned Binary: This program does not have a verified digital signature. Unsigned auto-start applications are common targets for persistence and should be inspected with Spectra AI or VirusTotal. ");
+            }
+            else
+            {
+                situation.Append($"✓ Digitally Signed: Verified publisher identity. ");
+            }
+
+            if (row.SourceKind == StartupSourceKind.AppxStartupTask)
+            {
+                situation.Append("Runs via modern Store / MSIX StartupTask declaration. Isolated and managed by Windows Package Manager.");
+            }
+            else if (row.SourceKind == StartupSourceKind.WindowsService)
+            {
+                situation.Append("Runs as a persistent Windows Service under system credentials automatically during operating system initialization.");
+            }
+            else if (row.SourceKind == StartupSourceKind.ScheduledTask)
+            {
+                situation.Append("Managed by Windows Task Scheduler. Triggered at user logon or system boot schedule.");
+            }
+            else if (row.SourceKind == StartupSourceKind.UserStartupFolder || row.SourceKind == StartupSourceKind.CommonStartupFolder)
+            {
+                situation.Append("Launches automatically via shortcut or script in the Windows Startup folder.");
+            }
+            else
+            {
+                situation.Append("Executes during user desktop session initialization via standard Windows Registry Run registration.");
+            }
+
+            if (runningCount > 0)
+            {
+                situation.Append(" Currently active in memory.");
+            }
+        }
+        StartupInspectorSituationCommentText.Text = situation.ToString();
+    }
+
+    private static string FormatFileSizeBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F2} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F2} GB";
+    }
+
+    private async void OnQuarantineStartupItem(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        if (string.IsNullOrWhiteSpace(row.ExecutablePath) || !File.Exists(row.ExecutablePath))
+        {
+            Info($"Could not locate a valid executable file on disk for \"{row.Name}\":\n\n{row.Command}");
+            return;
+        }
+
+        await PromptAndQuarantineAsync(row.ExecutablePath, row.Name, "Quarantined from Startup Manager");
+        RefreshStartupItems();
+    }
+
+    private async void OnRestoreStartupItemQuarantine(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        if (string.IsNullOrWhiteSpace(row.ExecutablePath)) return;
+        await PromptAndRestoreQuarantineAsync(row.ExecutablePath, row.Name);
+        RefreshStartupItems();
+    }
+
+    private void OnToggleStartupInspector(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+        if (row.IsDisabled)
+        {
+            OnEnableStartupItem(sender, e);
+        }
+        else
+        {
+            OnDisableStartupItem(sender, e);
+        }
+    }
+
+    private void OnToggleStartupInspectorFirewall(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        if (string.IsNullOrWhiteSpace(row.ExecutablePath) || !File.Exists(row.ExecutablePath))
+        {
+            Info($"Could not locate a valid executable file on disk for \"{row.Name}\":\n\n{row.Command}");
+            return;
+        }
+
+        if (string.Equals(row.FirewallStatus, "Blocked", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryAllow(row.ExecutablePath, row.Name, _rules.Find(row.ExecutablePath)))
+            {
+                AfterDecision();
+                RefreshStartupItems();
+            }
+        }
+        else
+        {
+            if (TryBlock(row.ExecutablePath, row.Name, _rules.Find(row.ExecutablePath)))
+            {
+                AfterDecision();
+                RefreshStartupItems();
+            }
+        }
+    }
+
+    private void OnInvestigateStartupInspectorAi(object sender, RoutedEventArgs e)
+    {
+        OnContextMenuInvestigateAi(sender, e);
+    }
+
+    private void OnCopyStartupInspectorDetails(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedStartupItem();
+        if (row is null) return;
+
+        var snap = !string.IsNullOrWhiteSpace(row.ExecutablePath) ? _quarantineVault.FindByPath(row.ExecutablePath) : null;
+        var sb = new StringBuilder();
+        sb.AppendLine("=== SpectraNetworkManager Startup Intelligence ===");
+        sb.AppendLine($"Program Name:    {row.Name}");
+        sb.AppendLine($"Status:          {(row.IsEnabled ? "ENABLED" : "DISABLED")}");
+        sb.AppendLine($"Publisher:       {row.Publisher}");
+        sb.AppendLine($"Source Type:     {row.SourceKind}");
+        sb.AppendLine($"Registration:    {row.Location}");
+        sb.AppendLine($"Admin Required:  {(row.Entry.RequiresAdmin ? "Yes" : "No")}");
+        sb.AppendLine($"Executable Path: {row.ExecutablePath}");
+        sb.AppendLine($"Raw Command:     {row.Command}");
+        sb.AppendLine($"File Exists:     {(row.FileExists ? "Yes" : "No (Orphaned)")}");
+        sb.AppendLine($"Firewall Rule:   {row.FirewallStatus}");
+        sb.AppendLine($"Quarantine:      {(snap != null && !snap.IsRestored ? "Quarantined in Active Defense Vault" : "Normal")}");
+        sb.AppendLine($"Situation:       {StartupInspectorSituationCommentText?.Text}");
+        sb.AppendLine($"Timestamp:       {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+        try
+        {
+            System.Windows.Clipboard.SetText(sb.ToString());
+            StatusText.Text = $"Copied startup details for {row.Name} to clipboard.";
         }
         catch { }
     }
@@ -4934,6 +5717,9 @@ public partial class MainWindow : Window
         }
         _blockLog.Dispose();
         _trayIcon?.Dispose();
+        _browserGuardWatcher?.Dispose();
+        _browserGuardDebounceCts?.Cancel();
+        _browserGuardDebounceCts?.Dispose();
         base.OnClosing(e);
     }
 
@@ -5521,11 +6307,13 @@ public partial class MainWindow : Window
 
             if (res != MessageBoxResult.Yes) return;
 
-            if (ElevationHelper.StartProcessElevated(exe))
+            try { _sink.Stop(); } catch { }
+            SingleInstanceManager.PrepareForRestart();
+            if (ElevationHelper.StartProcessElevated(exe, $"--restart-from={Environment.ProcessId}"))
             {
                 _isExiting = true;
                 _promptToast?.Close();
-            _trayIcon?.Dispose();
+                _trayIcon?.Dispose();
                 System.Windows.Application.Current.Shutdown(0);
             }
         }
@@ -5548,21 +6336,25 @@ public partial class MainWindow : Window
                     ElevationHelper.SetAlwaysRunAsAdminRegistry(exe, false);
                     AlwaysAdminCheck.IsChecked = false;
 
-                    if (ElevationHelper.StartProcessUnelevated(exe))
+                    try { _sink.Stop(); } catch { }
+                    SingleInstanceManager.PrepareForRestart();
+                    if (ElevationHelper.StartProcessUnelevated(exe, $"--restart-from={Environment.ProcessId}"))
                     {
                         _isExiting = true;
                         _promptToast?.Close();
-            _trayIcon?.Dispose();
+                        _trayIcon?.Dispose();
                         System.Windows.Application.Current.Shutdown(0);
                     }
                 }
                 else if (res == MessageBoxResult.No)
                 {
-                    if (ElevationHelper.StartProcessUnelevated(exe, "--normal"))
+                    try { _sink.Stop(); } catch { }
+                    SingleInstanceManager.PrepareForRestart();
+                    if (ElevationHelper.StartProcessUnelevated(exe, $"--restart-from={Environment.ProcessId} --normal"))
                     {
                         _isExiting = true;
                         _promptToast?.Close();
-            _trayIcon?.Dispose();
+                        _trayIcon?.Dispose();
                         System.Windows.Application.Current.Shutdown(0);
                     }
                 }
@@ -5577,11 +6369,13 @@ public partial class MainWindow : Window
 
                 if (res != MessageBoxResult.Yes) return;
 
-                if (ElevationHelper.StartProcessUnelevated(exe))
+                try { _sink.Stop(); } catch { }
+                SingleInstanceManager.PrepareForRestart();
+                if (ElevationHelper.StartProcessUnelevated(exe, $"--restart-from={Environment.ProcessId}"))
                 {
                     _isExiting = true;
                     _promptToast?.Close();
-            _trayIcon?.Dispose();
+                    _trayIcon?.Dispose();
                     System.Windows.Application.Current.Shutdown(0);
                 }
             }
@@ -7675,7 +8469,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnCleanStoredDataClick(object sender, RoutedEventArgs e)
+    private async void OnCleanStoredDataClick(object sender, RoutedEventArgs e)
     {
         SettingsPopup.IsOpen = false;
         string dataDir = Path.Combine(
@@ -7765,6 +8559,8 @@ public partial class MainWindow : Window
                 // 6. Quarantine (if opted in)
                 if (opt.CleanQuarantine)
                 {
+                    await _quarantineManager.RestoreAllActiveAsync();
+                    QuarantineManager.RemoveAllExecutionLockouts();
                     foreach (var snap in _quarantineVault.GetAll())
                     {
                         _quarantineVault.DeleteSnapshot(snap.Id);
@@ -7915,6 +8711,11 @@ public partial class MainWindow : Window
             GuardInspectorPanel.Visibility = Visibility.Collapsed;
         }
 
+        SyncTopGuardCheckboxes();
+    }
+
+    private void SyncTopGuardCheckboxes()
+    {
         _isUpdatingGuardUi = true;
         try
         {
@@ -8732,8 +9533,7 @@ public partial class MainWindow : Window
 
             if (!_browserGuardManager.Config.AutoApproveElementPickerBlocks)
             {
-                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-                Activate();
+                BringToFront(showNotification: false);
 
                 var result = System.Windows.MessageBox.Show(
                     this,
@@ -8772,6 +9572,51 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnBrowserGuardExternalSignalReceived()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            DebounceReloadBrowserGuard();
+        });
+    }
+
+    private void DebounceReloadBrowserGuard()
+    {
+        _browserGuardDebounceCts?.Cancel();
+        _browserGuardDebounceCts?.Dispose();
+        _browserGuardDebounceCts = new CancellationTokenSource();
+        var ct = _browserGuardDebounceCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(150, ct);
+                if (ct.IsCancellationRequested) return;
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    _browserGuardManager.Load();
+                    RefreshBrowserGuardUi();
+
+                    var newRequests = _browserGuardManager.Config.PendingBlockRequests
+                        .Where(r => _shownPendingRequestIds.Add(r.Id))
+                        .ToList();
+
+                    foreach (var pending in newRequests)
+                    {
+                        OnElementPickerBlockRequestReceived(pending);
+                    }
+                });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                RotatingFileLogger.LogWarn($"Error reloading Browser Guard after external change: {ex.Message}");
+            }
+        }, ct);
+    }
+
     private void SetupBrowserGuardWatcher()
     {
         try
@@ -8790,31 +9635,22 @@ public partial class MainWindow : Window
                 _shownPendingRequestIds.Add(req.Id);
             }
 
-            var watcher = new System.IO.FileSystemWatcher(dir, fileName)
+            _browserGuardWatcher?.Dispose();
+            _browserGuardWatcher = new System.IO.FileSystemWatcher(dir, fileName)
             {
                 NotifyFilter = System.IO.NotifyFilters.LastWrite | System.IO.NotifyFilters.Size | System.IO.NotifyFilters.FileName,
+                IncludeSubdirectories = false,
                 EnableRaisingEvents = true
             };
-            watcher.Changed += (s, e) =>
-            {
-                Dispatcher.BeginInvoke(async () =>
-                {
-                    await System.Threading.Tasks.Task.Delay(150);
-                    _browserGuardManager.Load();
-                    RefreshBrowserGuardUi();
 
-                    var newRequests = _browserGuardManager.Config.PendingBlockRequests
-                        .Where(r => _shownPendingRequestIds.Add(r.Id))
-                        .ToList();
-
-                    foreach (var pending in newRequests)
-                    {
-                        OnElementPickerBlockRequestReceived(pending);
-                    }
-                });
-            };
+            _browserGuardWatcher.Changed += (s, e) => DebounceReloadBrowserGuard();
+            _browserGuardWatcher.Created += (s, e) => DebounceReloadBrowserGuard();
+            _browserGuardWatcher.Renamed += (s, e) => DebounceReloadBrowserGuard();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Failed to setup browser guard FileSystemWatcher: {ex.Message}");
+        }
     }
 
     private void OnInstallExtensionsDropdown(object sender, RoutedEventArgs e)
@@ -9164,11 +10000,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnBrowserRuleCheckboxClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.CheckBox cb && cb.DataContext is BrowserGuardRuleRow row)
+        {
+            row.IsEnabled = cb.IsChecked == true;
+        }
+    }
+
     private void OnRuleRowToggled(BrowserGuardRuleRow row, bool isEnabled)
     {
         if (_browserGuardManager == null || _isUpdatingGuardUi) return;
         _browserGuardManager.ToggleRule(row.Id, isEnabled);
-        RefreshBrowserGuardUi();
+        SyncTopGuardCheckboxes();
         if (BrowserGuardGrid?.SelectedItem is BrowserGuardRuleRow selected && selected.Id == row.Id)
         {
             UpdateGuardInspectorUi(selected);
@@ -9278,7 +10122,7 @@ public partial class MainWindow : Window
         AiFindingsHeader.Text = LocalizationManager.T("AiKeyFindings");
         AiCapabilitiesHeader.Text = LocalizationManager.T("AiCapabilities");
         AiUncertaintiesHeader.Text = LocalizationManager.T("AiUncertainties");
-        AiHistoryHeader.Text = LocalizationManager.T("AiHistory");
+        if (AiHistorySubTab != null) AiHistorySubTab.Content = "📜 " + LocalizationManager.T("AiHistory");
         AiClearHistoryButton.Content = LocalizationManager.T("AiClearHistory");
         AiAllowButton.Content = LocalizationManager.T("AiActionAllow");
         AiBlockButton.Content = LocalizationManager.T("AiActionBlock");
@@ -9596,6 +10440,17 @@ public partial class MainWindow : Window
         AiUncertaintiesText.Text = report.Uncertainties.Count > 0
             ? string.Join("\n", report.Uncertainties.Select(u => $"⚠ {u}"))
             : "None reported (high confidence).";
+
+        // Interactive Chat Target Context
+        if (AiChatContextText != null)
+        {
+            AiChatContextText.Text = $"{report.ProcessName} (Risk: {report.RiskScore}/100 — {report.Verdict})";
+        }
+        AiChatMessages.Add(new AiChatMessage(
+            "Spectra AI",
+            $"🎯 Active target: {report.ProcessName} (Verdict: {report.FormatVerdictBadge()}, Risk: {report.RiskScore}/100).\n{report.ExecutiveSummary}\n\nYou can ask follow-up questions about this target below.",
+            isUser: false));
+        AiChatScrollViewer?.ScrollToEnd();
     }
 
     private async void OnAiTestLlmClick(object sender, RoutedEventArgs e)
@@ -9816,6 +10671,272 @@ public partial class MainWindow : Window
             AiHistory.Clear();
             StatusText.Text = "Cleared all AI investigation history records.";
         }
+    }
+
+    private void OnAiSubTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (AiChatContainer == null || AiHistoryContainer == null) return;
+
+        if (AiChatSubTab.IsChecked == true)
+        {
+            AiChatContainer.Visibility = Visibility.Visible;
+            AiHistoryContainer.Visibility = Visibility.Collapsed;
+            if (AiClearChatButton != null) AiClearChatButton.Visibility = Visibility.Visible;
+            if (AiClearHistoryButton != null) AiClearHistoryButton.Visibility = Visibility.Collapsed;
+            AiChatSubTab.Foreground = (Brush)FindResource("Cyan");
+            AiHistorySubTab.Foreground = (Brush)FindResource("Muted");
+        }
+        else
+        {
+            AiChatContainer.Visibility = Visibility.Collapsed;
+            AiHistoryContainer.Visibility = Visibility.Visible;
+            if (AiClearChatButton != null) AiClearChatButton.Visibility = Visibility.Collapsed;
+            if (AiClearHistoryButton != null) AiClearHistoryButton.Visibility = Visibility.Visible;
+            AiChatSubTab.Foreground = (Brush)FindResource("Muted");
+            AiHistorySubTab.Foreground = (Brush)FindResource("Cyan");
+            _ = RefreshAiHistoryAsync();
+        }
+    }
+
+    private void OnAiClearChatClick(object sender, RoutedEventArgs e)
+    {
+        AiChatMessages.Clear();
+        AiChatMessages.Add(new AiChatMessage("Spectra AI", "Chat history cleared. Ask any security questions or select a process / domain to investigate.", isUser: false));
+    }
+
+    private void OnQuickPromptIsSafe(object sender, RoutedEventArgs e)
+    {
+        SendAiChatMessage("Is this program safe to run and allow on the network?");
+    }
+
+    private void OnQuickPromptNetwork(object sender, RoutedEventArgs e)
+    {
+        SendAiChatMessage("Why does this program need internet or network access?");
+    }
+
+    private void OnQuickPromptBlock(object sender, RoutedEventArgs e)
+    {
+        SendAiChatMessage("What will happen or break if I block this executable in the firewall?");
+    }
+
+    private void OnQuickPromptSigner(object sender, RoutedEventArgs e)
+    {
+        SendAiChatMessage("Can you explain the publisher signature and verification details?");
+    }
+
+    private void OnAiChatInputKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            e.Handled = true;
+            SendAiChatMessage(AiChatInputBox.Text);
+        }
+    }
+
+    private void OnAiChatSendClick(object sender, RoutedEventArgs e)
+    {
+        SendAiChatMessage(AiChatInputBox.Text);
+    }
+
+    private async void SendAiChatMessage(string question)
+    {
+        if (string.IsNullOrWhiteSpace(question)) return;
+
+        string trimmedQuestion = question.Trim();
+        AiChatInputBox.Text = string.Empty;
+
+        AiChatMessages.Add(new AiChatMessage("You", trimmedQuestion, isUser: true));
+        AiChatScrollViewer?.ScrollToEnd();
+
+        AiChatSendButton.IsEnabled = false;
+        AiChatInputBox.IsEnabled = false;
+        AiChatTypingIndicator.Visibility = Visibility.Visible;
+
+        try
+        {
+            string answer = await GenerateAiAnswerAsync(trimmedQuestion);
+            AiChatMessages.Add(new AiChatMessage("Spectra AI", answer, isUser: false));
+            AiChatScrollViewer?.ScrollToEnd();
+        }
+        catch (Exception ex)
+        {
+            AiChatMessages.Add(new AiChatMessage("Spectra AI", $"Error generating response: {ex.Message}", isUser: false));
+        }
+        finally
+        {
+            AiChatTypingIndicator.Visibility = Visibility.Collapsed;
+            AiChatSendButton.IsEnabled = true;
+            AiChatInputBox.IsEnabled = true;
+            AiChatInputBox.Focus();
+        }
+    }
+
+    private async Task<string> GenerateAiAnswerAsync(string question)
+    {
+        try
+        {
+            bool ready = await _aiCoordinator.Ollama.IsAvailableAsync();
+            if (ready)
+            {
+                string systemPrompt = BuildAiSystemPrompt();
+                var history = AiChatMessages
+                    .TakeLast(6)
+                    .Select(m => (m.IsUser ? "user" : "assistant", m.MessageText))
+                    .ToList();
+
+                string? modelOverride = AiModelText?.Text?.Trim();
+                string? llmAnswer = await _aiCoordinator.Ollama.AskQuestionAsync(systemPrompt, history, modelOverride);
+                if (!string.IsNullOrWhiteSpace(llmAnswer))
+                {
+                    return llmAnswer.Trim();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"Ollama chat failed: {ex.Message}");
+        }
+
+        return GenerateDeterministicSecurityAnswer(question);
+    }
+
+    private string BuildAiSystemPrompt()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You are Spectra AI, an elite cybersecurity and network traffic analysis assistant integrated into SpectraNetworkManager.");
+        sb.AppendLine("Provide clear, authoritative, concise, and actionable advice to the user about Windows network security, firewall rules, and process behavior.");
+        sb.AppendLine("Format your response cleanly in readable text or markdown.");
+
+        if (_currentAiReport != null)
+        {
+            var r = _currentAiReport;
+            sb.AppendLine();
+            sb.AppendLine("CURRENTLY INSPECTED TARGET:");
+            sb.AppendLine($"- Target: {r.ProcessName} (PID: {r.Pid}, Target Type: {r.TargetType})");
+            bool isTargetSigned = r.Evidence?.SignatureStatus == SignatureStatus.Valid;
+            bool isTargetOs = r.Evidence?.IsOsBinary == true;
+            sb.AppendLine($"- Executable Path: {r.Evidence?.ExecutablePath ?? "N/A"}");
+            sb.AppendLine($"- Publisher: {r.Evidence?.Publisher ?? "Unsigned"} (Signed: {isTargetSigned})");
+            sb.AppendLine($"- System Binary: {isTargetOs}");
+            sb.AppendLine($"- Verdict: {r.Verdict} (Risk Score: {r.RiskScore}/100)");
+            sb.AppendLine($"- Summary: {r.ExecutiveSummary}");
+            if (r.KeyFindings.Count > 0)
+                sb.AppendLine($"- Key Findings: {string.Join("; ", r.KeyFindings)}");
+            if (r.IdentifiedCapabilities.Count > 0)
+                sb.AppendLine($"- Capabilities: {string.Join(", ", r.IdentifiedCapabilities)}");
+            sb.AppendLine($"- Recommendation: {r.FormatActionRecommendation()}");
+        }
+
+        return sb.ToString();
+    }
+
+    private string GenerateDeterministicSecurityAnswer(string question)
+    {
+        var report = _currentAiReport;
+        string qLower = question.ToLowerInvariant();
+
+        if (report == null)
+        {
+            return "I am currently in general assistant mode with no active investigation report loaded. " +
+                   "You can select any active connection, startup entry, or program and click 'Investigate with Spectra AI' " +
+                   "to inspect its network behavior, digital signature, and security verdict.\n\n" +
+                   "💡 General Security Tip: Use 'Strict Mode' when on public Wi-Fi to auto-block unknown inbound and outbound connections until verified.";
+        }
+
+        string name = report.ProcessName;
+        string path = report.Evidence?.ExecutablePath ?? "Unknown path";
+        string publisher = report.Evidence?.Publisher ?? "Unsigned / Unknown publisher";
+        bool isSigned = report.Evidence?.SignatureStatus == SignatureStatus.Valid;
+        bool isSystem = report.Evidence?.IsOsBinary == true;
+        int risk = report.RiskScore;
+        var verdict = report.Verdict;
+        string recommendation = report.FormatActionRecommendation();
+        string findings = report.KeyFindings.Count > 0 ? string.Join("; ", report.KeyFindings) : "Standard telemetry profile";
+        string caps = report.IdentifiedCapabilities.Count > 0 ? string.Join(", ", report.IdentifiedCapabilities) : "None specifically flagged";
+
+        if (qLower.Contains("safe") || qLower.Contains("malicious") || qLower.Contains("threat") || qLower.Contains("virus") || qLower.Contains("danger"))
+        {
+            string assessment = verdict switch
+            {
+                ThreatVerdict.Safe => $"✅ **{name} is assessed as SAFE** (Risk Score: {risk}/100).",
+                ThreatVerdict.LowRisk => $"🟢 **{name} is LOW RISK** (Risk Score: {risk}/100). Normal software behavior detected.",
+                ThreatVerdict.Suspicious => $"⚠️ **{name} is SUSPICIOUS** (Risk Score: {risk}/100). Unusual attributes or location detected.",
+                ThreatVerdict.Malicious => $"🚨 **{name} is flagged as MALICIOUS** (Risk Score: {risk}/100). Immediate action recommended.",
+                _ => $"ℹ️ **{name} has an Unknown threat assessment** (Risk Score: {risk}/100)."
+            };
+
+            string sigInfo = isSigned
+                ? $"It is digitally signed by **{publisher}**."
+                : "⚠️ The executable is **unsigned**, meaning its origin and integrity cannot be cryptographically verified.";
+
+            string locInfo = isSystem
+                ? "It is running from a protected Windows system directory (`System32`)."
+                : $"It is located at `{path}`.";
+
+            return $"{assessment}\n\n" +
+                   $"- **Digital Identity:** {sigInfo}\n" +
+                   $"- **Location:** {locInfo}\n" +
+                   $"- **Identified Telemetry:** {findings}\n" +
+                   $"- **Action Advice:** {recommendation}\n\n" +
+                   (isSigned && risk < 25 ? "You can safely allow this program." : "If you did not initiate this network activity, consider blocking it or quarantining it.");
+        }
+
+        if (qLower.Contains("network") || qLower.Contains("internet") || qLower.Contains("connect") || qLower.Contains("port") || qLower.Contains("why") || qLower.Contains("traffic"))
+        {
+            string capList = report.IdentifiedCapabilities.Count > 0
+                ? string.Join(", ", report.IdentifiedCapabilities)
+                : "basic outbound communications";
+
+            return $"🌐 **Network Activity Analysis for {name}**:\n\n" +
+                   $"- **Detected Capabilities:** {capList}\n" +
+                   $"- **Findings:** {findings}\n" +
+                   $"- **Target Executable:** `{path}`\n\n" +
+                   "Programs typically initiate outbound network connections for:\n" +
+                   "1. Software update checks and version manifests.\n" +
+                   "2. Cloud synchronization, telemetry diagnostics, or license validation.\n" +
+                   "3. API communication or media streaming.\n\n" +
+                   (risk > 50 ? "⚠️ This application exhibits telemetry traits that warrant caution. If unexpected, block its outbound network access in Windows Firewall." : $"The observed telemetry matches expected behavior for software signed by {publisher}.");
+        }
+
+        if (qLower.Contains("block") || qLower.Contains("break") || qLower.Contains("firewall") || qLower.Contains("quarantine") || qLower.Contains("consequence"))
+        {
+            return $"🚫 **Firewall Blocking Impact for {name}**:\n\n" +
+                   $"If you click **'Block Program in Firewall'**:\n" +
+                   $"- Inbound and outbound socket traffic for `{name}` will be intercepted and dropped at the Windows Filtering Platform (WFP) kernel level.\n" +
+                   $"- Local offline features of the software will continue to function normally, but online synchronization, updates, and telemetry will cease.\n" +
+                   $"- If this is an updater or telemetry agent (such as EdgeUpdate or GoogleCrashHandler), blocking it is harmless and prevents phone-home activity.\n\n" +
+                   "🛡️ **5-Stage Quarantine Alternative:**\n" +
+                   "If you suspect this program is persistent malware or adware, use **5-Stage Quarantine** from the action buttons above. That terminates its active processes, applies an Image File Execution Options (IFEO) debugger block, disables its Windows Service and startup entries, and blocks all network sockets.";
+        }
+
+        if (qLower.Contains("publisher") || qLower.Contains("signer") || qLower.Contains("cert") || qLower.Contains("sign") || qLower.Contains("who"))
+        {
+            string signStatus = isSigned
+                ? $"✅ The binary possesses a valid Authenticode signature from **{publisher}**."
+                : "❌ The executable is **unsigned** (no digital signature found on disk).";
+
+            return $"🔍 **Publisher & Certificate Profile**:\n\n" +
+                   $"- **Subject / Publisher:** {publisher}\n" +
+                   $"- **Signature Status:** {signStatus}\n" +
+                   $"- **Path:** `{path}`\n" +
+                   $"- **System File:** {(isSystem ? "Yes (Protected Windows component)" : "No (Third-party application)")}\n" +
+                   $"- **SHA-256 Hash:** `{(report.Evidence?.Sha256 ?? "Calculated on demand")}`\n\n" +
+                   (isSigned
+                       ? "A valid digital signature verifies that the binary was created by the publisher and has not been altered or infected by malware since signing."
+                       : "⚠️ Unsigned binaries should be treated with caution unless they originate from open-source or internal tools you compiled yourself.");
+        }
+
+        // Default conversational summary
+        return $"📋 **Investigation Summary for {name}**:\n\n" +
+               $"- **Threat Verdict:** {verdict} (Risk: {risk}/100)\n" +
+               $"- **Publisher:** {publisher}\n" +
+               $"- **Summary:** {report.ExecutiveSummary}\n" +
+               $"- **Recommendation:** {recommendation}\n\n" +
+               "Feel free to ask:\n" +
+               "• *Is this safe?*\n" +
+               "• *Why network access?*\n" +
+               "• *Safe to block?*\n" +
+               "• *Explain publisher*";
     }
 
     private void OnContextMenuInvestigateAi(object sender, RoutedEventArgs e)

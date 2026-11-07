@@ -1,11 +1,19 @@
-# SpectraNetworkManager
+# SpectraNetworkManager v2.0.0
 
-Windows network monitor + per-application firewall + DNS sinkhole, written in C# / .NET 8 (works in Visual Studio 2022 17.8+).
+[![Release](https://img.shields.io/badge/Release-v2.0.0-00E676?style=flat-square&logo=github)](https://github.com/Creator-NL/SpectraNetworkManager/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-00D4FF?style=flat-square&logo=windows)](https://github.com/Creator-NL/SpectraNetworkManager)
+[![Framework](https://img.shields.io/badge/.NET-8.0%20(Self--Contained)-7928CA?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+[![License](https://img.shields.io/badge/License-MIT-F5A623?style=flat-square)](LICENSE)
+[![Zero Telemetry](https://img.shields.io/badge/Privacy-100%25%20Local%20%7C%20Zero%20Telemetry-22E8FF?style=flat-square)](docs/PRIVACY.md)
+
+**SpectraNetworkManager** is an elite, open-source Windows network security platform combining **real-time socket monitoring**, **per-application outbound firewall control**, an **in-memory DNS sinkhole (Pi-hole style)**, a **5-stage active defense quarantine vault**, a **zero-driver packet inspector**, a **browser-level declarative guard (Manifest V3)**, and a **local AI threat intelligence engine with interactive chat (`💬 Ask Spectra AI`)**.
 
 > [!TIP]
-> **Try the Interactive Online Demo:** Test core functions right in your web browser before downloading or installing!  
+> **Try the Interactive Online Demo:** Test core functions right in your browser before downloading or installing!  
 > 🌐 **[https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html)**  
 > 🏠 Official Hub: **[https://biohazard-corp.nl](https://biohazard-corp.nl)**
+
+---
 
 ## 🌐 Live Interactive Demo & Official Website
 
@@ -17,162 +25,210 @@ You can test SpectraNetworkManager directly in your browser without installing a
   - **Strict Mode Simulation**: Experience the 60-second safety rollback countdown mechanism.
 - 🏠 **Official Website**: [https://biohazard-corp.nl](https://biohazard-corp.nl) — explore more software, updates, and community projects.
 
-## Status: Phase 4 - Release Readiness & Packaging Complete
+---
 
-| Project / Component | Purpose |
-|---|---|
-| `SpectraNetworkManager.App` | **WPF UI front-end**: Real-time traffic, Programs, Rules, DNS sinkhole, Firewall blocks, First-Run Wizard, Update Checker |
-| `SpectraNetworkManager.Core` | Platform-independent models, rule planners (IPv4 + IPv6), DNS engine, IPC protocol, update checker, logging, settings |
-| `SpectraNetworkManager.Platform.Windows` | Native IP Helper, native Authenticode verification (WinVerifyTrust + CryptCATAdmin), real-time WFP drop events, Firewall enforcer |
-| `SpectraNetworkManager.Engine` | **Windows Service**: Background LocalSystem coordinator for firewall enforcement, WFP events, and DNS sinkholing |
-| `installer/` | Inno Setup production installer script (`SpectraNetworkManager.iss`) and automated `build-package.ps1` pipeline |
-| `docs/` | User documentation: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md), [FAQ.md](docs/FAQ.md) |
-| Community | [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [ACCESSIBILITY.md](ACCESSIBILITY.md) |
+## 🚀 What's New in Version 2.0.0
 
-## Run it
-Open `SpectraNetworkManager.sln` in Visual Studio 2022. **`SpectraNetworkManager.App` must be the startup project** (right-click it in
-Solution Explorer -> *Set as Startup Project*); class libraries such as Core cannot be started directly.
-Then press F5.
+Version 2.0.0 represents a massive evolution into a complete, enterprise-grade personal cybersecurity center:
 
-For the full picture run Visual Studio (or the built `SpectraNetworkManager.exe`) **as Administrator**: system services then show
-their program names, and the Firewall blocks view can read the Security log.
+* **💬 Spectra AI Threat Intelligence & Chat**: Dual-engine forensics powered by local **Ollama** LLMs (with smart offline deterministic fallback). Inspects any binary, calculates a **0–100 Risk Score**, surfaces Authenticode signatures, and includes an interactive **`💬 Ask Spectra AI`** chat thread with quick prompt chips (`🛡️ Is this safe?`, `🌐 Why network access?`, `🚫 Safe to block?`, `🔍 Explain publisher`).
+* **🛡️ 5-Stage Active Defense Quarantine Vault**: Complete containment of suspicious or hostile executables across 5 defense rings: (1) Process & socket kill, (2) Image File Execution Options (IFEO) debugger lockout, (3) Windows Service termination, (4) Auto-start removal, and (5) Kernel WFP socket blocking — with 1-click safe reversible restore and automatic self-healing.
+* **🌐 Spectra Browser Guard (Manifest V3 Extension + Native Messaging Host)**: Zero-latency in-browser declarative request blocking for Chrome, Edge, and Firefox. Blocks YouTube pre-roll/mid-roll ads, tracking beacons, and telemetry; includes an optional YouTube Shorts toggle and an in-browser visual element picker.
+* **📺 Smart TV & Mobile LAN Protection Hub**: Pair phones and smart TVs via an instant on-screen QR code; includes a local companion dashboard, a 3-in-1 Smart Proxy / L3 Gateway Router with TLS SNI inspection, and separate Phone & TV domain blocking rules.
+* **🚀 Startup & Auto-Start Intelligence Manager**: Deep enumeration of Registry Run/RunOnce, Startup folders, Task Scheduler tasks, and Store/MSIX StartupTasks. Features dynamic red/green firewall status coloring (`Blocked` in red, `Allowed` in green) and 1-click 5-stage quarantine.
+* **📋 Rules & Firewall Blocks Forensic Split Views**: Side-by-side diagnostic inspector drawers with deep caller attribution, SHA-256 hash tracking, and one-click firewall actions.
+* **🔍 Zero-Driver Packet Inspector**: High-speed promiscuous and raw socket capture with built-in dissectors for HTTP, TLS SNI, DNS, QUIC, ARP, and ICMP, plus hex stream inspection and Wireshark PCAPNG export.
+* **🌍 Multi-Language Localization**: Instant runtime switching between **English**, **Nederlands (Dutch)**, and **Auto (System Culture)**.
+* **⚡ Single-Instance Resilience**: Mutex-guarded single instance management with cross-elevation named pipe IPC and window activation.
 
-Console spike: `dotnet run --project src/SpectraNetworkManager.Spike -- --watch` (also `--all`, `--blocks`, `--blocks --packets`).
+---
 
-## Learning mode, Ask mode and decisions
-- Nothing is blocked automatically. Programs that reach the internet without a decision are marked **NEW** (magenta) in the Programs view and announced once in the live events list (amber `!`).
-- **Ask mode** (checkbox, on by default): when such a program appears, a bar at the top asks **Allow / Block... / Later** and the taskbar button flashes.
-  SpectraNetworkManager cannot pause the program's very first connection (that would need a kernel driver), so the question comes right after it. Programs already running when SpectraNetworkManager starts are not asked about, and Windows' own programs are listed but never asked about.
-- **Allow** records "this program is OK" (Windows already allows it; nothing changes in the firewall).
-- **Block...** lets you choose *incoming + outgoing*, *outgoing only* or *incoming only*, then adds Windows Firewall rules for that exact exe. Needs Administrator.
-- **Rules view** lists every decision, including for programs that are not running, and checks that the Windows Firewall really has the matching rules (**MISSING** = they were removed outside SpectraNetworkManager). Use it to switch a decision to Allow or to Forget it.
-- **Forget decision** removes your decision and, for a block, the firewall rules.
-- **PANIC: undo all SpectraNetworkManager changes**: switches strict mode off, deletes every firewall rule SpectraNetworkManager created, and restores original system DNS.
-- **Safe Recovery Mode (`--safe`)**: start with `SpectraNetworkManager.exe --safe` (or via the Start Menu shortcut "SpectraNetworkManager (Safe Recovery Mode)") to immediately restore firewall defaults, remove all rules, and restore system DNS offline without opening the main window.
-- **Windows System Tray**: right-click the shield tray icon for quick access to pause/resume DNS blocking, check for updates, or trigger Panic restore.
-- Windows system programs (anything under the Windows folder) cannot be blocked from here yet.
-- Careful with shared components: blocking something like `msedgewebview2.exe` also breaks every app that uses it (for example the new Outlook).
-- Every rule SpectraNetworkManager creates is in the Windows Firewall group **SpectraNetworkManager** (visible in "Windows Defender Firewall with Advanced Security"; the name starts with `SpectraNetworkManager block`). Deleting that group by hand also undoes everything.
-- Your decisions and settings are stored in `%ProgramData%\SpectraNetworkManager` (with automatic migration from `%LocalAppData%\SpectraNetworkManager`).
+## 🧭 Comprehensive Feature Tour (14 Dedicated Tabs)
 
-## Blocking exactly what you want (Block... dialog)
-- **Direction**: incoming and outgoing, outgoing only, or incoming only.
-- **What to block**:
-  - *Everything*: the program gets no network access in that direction.
-  - *Only traffic that matches*: block only the protocol / ports / addresses you list (e.g. TCP port 25 so a program cannot send mail; or one address range).
-  - *Allow ONLY traffic that matches*: block everything except what you list (e.g. "only port 443" for a program that should only browse the web).
-- **Ports** mean the service port: the remote port for outgoing traffic, your own local port for incoming traffic. Examples: `443`, `80,443,8000-8100`.
-- **Addresses** are always the other side: `203.0.113.7`, `10.0.0.0/8`, `198.51.100.1-198.51.100.50`, or IPv6 equivalents (e.g. `2001:db8::/32`, `fe80::1-fe80::ff`). Both IPv4 and IPv6 can be used with *Only traffic that matches* and *Allow ONLY* (inverted using 128-bit address math). Dynamic Windows keywords (`LocalSubnet`, `DNS`, `DHCP`, `DefaultGateway`, `WINS`) work with *Only traffic that matches*, but cannot be inverted for *Allow ONLY* because their dynamic boundaries are managed by Windows at runtime.
-- **Keep my local network reachable** (Allow ONLY): traffic to your own PC, router and LAN devices (private, loopback, multicast ranges) is never blocked.
-- Windows Firewall lets a block override an allow, so "Allow ONLY" is built as blocks for everything *else* (the complement of your ports/addresses). The dialog shows how many firewall rules that creates.
-  An "Allow ONLY" restriction on protocol covers TCP and UDP; other protocols such as ICMP are not touched.
-- **Rules view**: the BLOCKS column shows the scope; **Edit block...** changes it; the FIREWALL column compares the number of rules that should exist with what Windows really has (`active`, `PARTIAL 1/3`, `MISSING`).
-- If creating the rules fails half-way, the ones already created are removed again, so a program is never left half-blocked.
+### 1. 🔌 Connections (Live Socket Activity)
+- Inspects every established, listening, and closing TCP and UDP socket in real time.
+- Maps connections directly to process name, PID, executable icon, full disk path, and Authenticode signature status.
+- Shows live upload and download speeds per process.
+- Resolves remote IP hostnames via background reverse DNS and looks up Country / Autonomous System Number (ASN) metadata.
+- Context menu actions: Allow, Block in Firewall, 5-Stage Quarantine, Investigate with Spectra AI, Open File Location, and End Process.
 
-## DNS sinkhole (DNS tab) - the Pi-hole part
-A high-performance DNS sinkhole and resolver inside SpectraNetworkManager: it intercepts DNS lookups from your PC (and optionally other devices on your home network), **blocks** ads, trackers, and telemetry before they reach your network, caches responses in memory, and forwards legitimate requests to encrypted upstream resolvers.
+### 2. 📦 Programs (Application Catalog & Policy)
+- Comprehensive view of every program that has ever communicated on your network.
+- Visual badge indicators for verified publishers (`✔ Publisher`), system components (`(Windows)`), untrusted signatures (`✘ untrusted`), and unsigned binaries (`not signed`).
+- Tracks total lifetime bytes sent and received.
+- Distinguishes newly discovered programs (**NEW** in magenta) awaiting a decision.
 
-### Key Capabilities:
-- **Instant Startup & Local Cache**: Downloaded blocklists are stored persistently in `%ProgramData%\SpectraNetworkManager\blocklists` and parsed into memory immediately on startup (83,000+ domains ready in milliseconds with zero re-downloading required across app updates).
-- **Interactive Domain Intelligence Inspector**:
-  - Click any row in the DNS log (or right-click) to open the domain intelligence panel.
-  - Automatically classifies domains into: **Advertising & Trackers**, **Operating System Telemetry**, **Media Streaming**, **CDN Infrastructure**, **Social Media Trackers**, or **Core System & Security**.
-  - Provides actionable safety advice: **Safe to Block** (Magenta), **Caution: May Break Features** (Amber - e.g. `googlevideo.com` carries video stream segments), **Essential: Keep Allowed** (Cyan - e.g. Cloudflare / Akamai / SSL CAs), or **Manually Blocked by You**.
-  - Direct 1-click actions: `[ 🚫 Always Block ]`, `[ 🛡️ Always Allow ]`, `[ ✕ Remove from Blocklist (Undo) ]`, `[ 🌐 Search Online (VirusTotal) ]`, and `[ 📋 Copy Domain ]`.
-- **Dedicated Custom Rules & Blocklist Manager**:
-  - Click **`[ 🛡️ Custom Rules ]`** on the DNS toolbar to open the full manager window.
-  - View, search, and manage all domains you have personally blocked or allowed.
-  - 1-click `[ ✕ Remove ]` button to undo any accidental block immediately.
-  - Quick-add input box to block or whitelist any domain.
-  - Subscription lists inspector showing local file paths, file sizes, last modified times, and a 1-click `[ 📁 Open Folder in Explorer ]` button.
-- **1-Click System DNS Switch with 60-Second Safety Rollback**:
-  - One-click configuration points selected network adapters (Wi-Fi, Ethernet) to SpectraNetworkManager (`127.0.0.1` / `::1`).
-  - Automatically backs up your previous DNS settings and starts a 60-second safety rollback timer: if unconfirmed or connectivity drops, your original DNS configuration is automatically restored!
-- **Encrypted DNS Upstreams (DoH / DoT)**:
-  - Supports modern encrypted upstreams via DNS-over-HTTPS (`https://...`) and DNS-over-TLS (`tls://...`).
-  - 1-click presets for Quad9 DoH, Cloudflare DoH, Google DoH, Quad9 DoT, and standard IP resolvers.
-  - Real-time upstream health checks, latency measurement (in ms), and automatic failover.
-- **Persistent SQLite Query History & CSV Export**:
-  - High-throughput background SQLite database (`dns-history.db`) recording queries without slowing DNS lookups.
-  - Export query history to CSV with custom date-range filters.
-  - Configurable retention auto-pruning (e.g. keep logs for 7, 30, or 90 days).
-  - Privacy controls: Anonymize client IP addresses (masking last octet) and redact sensitive domain names (`[redacted]`).
-  - Working **`Clear log`** button that wipes the displayed table, memory counters, and database cleanly for testing.
-- **Browser DoH Bypass Protection**:
-  - Automatically answers Firefox's canary query (`use-application-dns.net`) with NXDOMAIN, instructing Firefox not to bypass local DNS.
-  - Includes settings guidance for Chrome and Edge to ensure browser queries flow through the sinkhole.
-- **Network-Wide Protection**:
-  - Set listen address to `0.0.0.0` and click *Allow local network* to let other devices (phones, tablets, smart TVs, or your router) use this PC as their network-wide ad blocker.
-- **Headless & Linux Console**:
-  - `SpectraNetworkManager.Spike --dns` runs the exact same DNS sinkhole engine in a console (with options `--port`, `--listen`, `--upstream`, `--block`, `--update`), fully supported on both Windows and Linux.
+### 3. 🚀 Startup (Auto-Start Intelligence)
+- Enumerate auto-start entries across all Windows persistence points:
+  - Windows Registry (`HKLM`, `HKCU`, and 32-bit `WOW6432Node` Run / RunOnce)
+  - User and Common Startup folders
+  - Windows Task Scheduler (Active logon and scheduled triggers)
+  - Windows Store / MSIX packaged `StartupTask` contracts (e.g. ChatGPT, Claude, Spotify, Windows Terminal)
+  - 3rd-Party Auto-Start Services
+- 1:1 synchronization with Windows Task Manager `StartupApproved` registry keys.
+- **Dynamic Firewall Status**: Blocked items turn **Bold Red**, Allowed items turn **Bold Green**, and unconfigured entries remain muted.
+- Immediate 1-click `[ 🛡️ 5-Stage Quarantine... ]` containment for suspicious startup programs.
 
-## Strict mode (block by default) - opt-in
-Strict mode switches Windows Firewall's default for *outgoing* connections to BLOCK on all profiles. Only programs with an allow rule can connect out:
-your own Allow decisions, verified programs from publishers you trust, and a short list of Windows basics (the Windows kernel "System", `svchost.exe`,
-`lsass.exe`, the Windows Defender services and SpectraNetworkManager itself). Windows' built-in Core Networking rules (DHCP, DNS, IPv6) stay in place.
-Incoming connections are not changed (Windows already blocks them by default).
+### 4. 📈 Traffic & Top Talkers
+- Visual bandwidth consumption graphs and top bandwidth-consuming processes.
+- Protocol distribution breakdown (TCP, UDP, DNS, HTTPS).
+- Persistent SQLite traffic history tracking hourly and daily bandwidth trends.
 
-**Safety net**
-- Before anything changes, the previous firewall defaults and a "pending" marker are saved to `%LocalAppData%\SpectraNetworkManager\strict-mode.json`.
-- After switching on you have **60 seconds to confirm** that your network works ("Keep strict mode"). A connection check runs automatically (it fetches Microsoft's
-  tiny connect-test page, the same one Windows uses). Pressing Enter, closing the window or letting the time run out all switch strict mode **off** again.
-- If SpectraNetworkManager crashes or is closed before you confirm, strict mode is switched off at the next start (as Administrator).
-- If a basic rule cannot be created, everything is rolled back and strict mode is not switched on.
-- **PANIC** (Programs and Rules views): switches strict mode off first, then removes every firewall rule SpectraNetworkManager created.
-- Manual way out, in an administrator command prompt: `netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound`
+### 5. 📡 Port Scanner & LAN Device Discovery
+- High-speed multithreaded LAN subnet sweep.
+- Identifies active IP addresses, MAC addresses, NIC vendors, hostnames, and open TCP/UDP ports.
+- Special detection and tagging for Smart TVs (Samsung, LG webOS, Android TV), game consoles, and IoT devices.
 
-**How it works day to day**
-- When enabling you can allow all programs that are online right now (recommended) so nothing you use stops at once.
-- A program without permission is blocked. SpectraNetworkManager reads the block from the Security log (needs auditing, see below) and shows it in the Ask bar:
-  **Allow** creates the allow rule (the program has to retry), **Later** leaves it blocked, **Block...** adds an explicit block.
-- Programs with a decision "Allowed" or from a trusted publisher get their allow rule automatically when they are first blocked.
-- Allow rules are per exe path: a program that updates into a new folder is asked about again unless its publisher is trusted.
-- Microsoft Store apps and some Windows components may behave differently. If something stops working, look in the Ask bar and the events list.
-- Turning strict mode off removes the allow rules it created (it restores the defaults it saw before, so a PC that already blocked outgoing traffic keeps doing so).
+### 6. 🔬 Packets (Zero-Driver Packet Inspector)
+- Capture live packets directly without installing WinPcap or Npcap drivers.
+- Correlates captured packets directly to the originating local process.
+- **Protocol Dissectors**: Automatically parses HTTP requests/responses, TLS Client Hello (Server Name Indication / SNI), DNS queries and answers, QUIC handshakes, ARP announcements, and ICMP messages.
+- Real-time Hex and ASCII stream inspector.
+- **PCAPNG Export**: Export selected packets or the full capture to standard `.pcapng` format for deep analysis in Wireshark.
 
-## Signatures and trust
-- **SIGNER** is now *verified* by Windows' own Authenticode check (it understands embedded signatures and the catalog signatures most system files use),
-  run in the background in small batches and remembered in `%LocalAppData%\SpectraNetworkManager\signature-cache.json` (re-checked when the file changes or after 14 days).
-  Certificate revocation is not queried (no network calls).
-  - `✔ Publisher` = valid signature. `(Windows)` = signed as part of Windows itself.
-  - `not signed` = nobody vouches for it (normal for small tools and your own builds).
-  - `✘ untrusted signature` / `✘ SIGNATURE BROKEN` = signed, but the certificate is not trusted, or the file was changed after signing. These raise a WARNING in the events list and in the Ask bar.
-  - `checking...` = result not in yet; `unknown` = the check itself did not work.
-- **Trust publisher** (Ask bar, Programs view): stop asking about programs with a *verified* signature from that publisher. Your own Block decisions always win.
-  Manage the list under **Rules > Trusted publishers**. Trust only publishers you really mean to trust: it covers everything they sign.
-- **Protected** (cannot be blocked from here): everything under the Windows folder, Windows Defender's folders, and any file verified as signed by Windows itself. They are also never asked about.
-- Ask mode waits for the signature result (up to 20 s) before asking, so trusted or Windows programs do not interrupt you.
+### 7. 📺 TV & Mobile (LAN Protection Hub)
+- Network-wide protection for smartphones, tablets, smart TVs, and IoT appliances.
+- **QR-Code Mobile Dashboard**: Scan an on-screen QR code to open the lightweight local web companion on your phone.
+- **3-in-1 Network Hub**:
+  - Smart HTTP/HTTPS Proxy (Port 8888 with WPAD auto-discovery support)
+  - L3 Gateway Router with transparent TLS SNI extraction
+  - Built-In DHCP Server for automated client configuration
+- **Independent Rules**: Block telemetry or ads specifically on Smart TVs and phones without affecting PC browsing rules (`tv-mobile-rules.json`).
 
-## Notes on the other columns
-- **HOST**: reverse-DNS name of the remote IP. These lookups are DNS queries sent to your DNS server; untick *Resolve host names* to stop them.
-- **Programs view / Internet peers**: distinct remote addresses outside your machine and LAN. Loopback traffic (program talking to itself) does not count.
+### 8. 🛡️ Browser Guard (Manifest V3 Extension)
+- Native companion extension for **Google Chrome**, **Microsoft Edge**, and **Mozilla Firefox**.
+- Powered by a local Native Messaging Host (`SpectraNetworkManager.BrowserHost.exe`).
+- Zero-latency declarative blocking via Manifest V3 `declarativeNetRequest`.
+- Pre-built shields for YouTube ads, video trackers, promo cards, and annotation popups.
+- **YouTube Shorts Switch**: Optional toggle to suppress distracting YouTube Shorts feeds (defaults to off/unblocked).
+- **Element Picker DOM Shield**: Right-click any annoying web element in your browser to permanently block it with 1 click.
 
-## Firewall blocks (one-time setup)
-Windows only records blocked connections if auditing is on. The Strict mode tab has a button for it, or from an elevated prompt (these use the
-subcategory GUIDs, so they work on every Windows language; the English names such as "Filtering Platform Connection" are translated on other languages):
+### 9. 🧠 Spectra AI (Threat Intelligence & Chat Assistant)
+- Deep forensic inspection of executables, network telemetry, and suspicious behavior.
+- **Evidence-Based Security Engine**:
+  - Authenticode digital signature verification
+  - Windows System directory validation (`System32`, `SysWOW64`)
+  - Executable SHA-256 hash calculation and VirusTotal correlation
+  - Telemetry capability extraction (listening ports, remote endpoints, DNS queries)
+- **0–100 Risk Score & Verdicts**: Automatically categorizes targets as `🟢 SAFE`, `🔵 LOW RISK`, `🟡 SUSPICIOUS`, or `🔴 MALICIOUS`.
+- **Local Ollama Integration**: Connects to your local Ollama instance (defaulting to `127.0.0.1:11434` with models like `llama3`, `mistral`, or `phi3`) for private neural reasoning.
+- **Deterministic Offline Fallback**: Fully functional even when Ollama is offline or not installed.
+- **💬 Interactive Chat (`Ask Spectra AI`)**:
+  - Sub-tab switcher to toggle between interactive chat and past investigation records.
+  - Contextual awareness of the currently selected target.
+  - Quick prompt suggestions: `🛡️ Is this safe?`, `🌐 Why network access?`, `🚫 Safe to block?`, and `🔍 Explain publisher`.
+
+### 10. 📋 Rules (Firewall Policy Manager)
+- Centralized manager for all persistent application firewall rules.
+- Side-by-side details inspector displaying executable metadata, disk footprint, SHA-256 hash, and active firewall state.
+- Supports granular rule specifications:
+  - Direction: Incoming, Outgoing, or Both.
+  - Protocol: TCP, UDP, or Any.
+  - Port Filtering: Single ports, comma-separated lists, and port ranges (e.g. `80,443,8000-8100`).
+  - IP Address Filtering: Single IPs, subnets (`10.0.0.0/8`), CIDR blocks, or IP ranges in both IPv4 and IPv6.
+- Automatically verifies that created rules exist in Windows Firewall (`active`, `PARTIAL`, `MISSING`).
+
+### 11. ☣️ Quarantine (5-Stage Active Defense Vault)
+- Military-grade isolation for untrusted, tampered, or hostile software:
+  1. **Process & Socket Kill**: Forcefully terminates all running process instances and severs active TCP connections.
+  2. **Execution Lockout (IFEO)**: Registers an Image File Execution Options debugger redirect preventing the binary from spawning again.
+  3. **Service Disabling**: Detects and stops any Windows Services hosted by the executable and sets their startup type to `Disabled`.
+  4. **Auto-Start Removal**: Disables matching entries in the Registry, Startup folder, and Task Scheduler.
+  5. **Firewall Drop**: Adds inbound and outbound Windows Firewall block rules.
+- **Safe Reversible Restore**: 1-click restoration reverses all 5 layers, restoring the program to normal operation.
+- **Self-Healing Reconciliation**: Automatically detects and heals orphaned lockouts or attempts to lock protected system components (WebView2, Ollama, Windows components).
+
+### 12. 🔒 Strict Mode ("Block Outbound by Default")
+- Switches Windows Firewall's outbound default policy to BLOCK on all network profiles.
+- Only programs with an explicit Allow rule or trusted publisher signature can communicate.
+- **60-Second Safety Rollback**: Requires user confirmation and automatic connectivity testing; if unconfirmed or connectivity drops, strict mode automatically reverts within 60 seconds.
+
+### 13. 🛡️ DNS Sinkhole (Ad & Tracker Blocker)
+- Local high-speed multithreaded DNS server preloaded with 83,000+ ad and tracking domains.
+- Pre-parsed in-memory cache ready in milliseconds on boot.
+- **1-Click System DNS Switch**: Reconfigures selected network adapters to `127.0.0.1` / `::1` with automatic backup and 60-second safety rollback.
+- Supports encrypted upstreams via **DNS-over-HTTPS (DoH)** and **DNS-over-TLS (DoT)** with health checking and automatic failover.
+- Persistent SQLite query logging (`dns-history.db`) with CSV export, domain classification, and privacy IP masking.
+- Firefox canary protection (`use-application-dns.net`) preventing browser DoH bypass.
+
+### 14. 🚫 Firewall Blocks (Diagnostic WFP Event Monitor)
+- Real-time monitor listening to Windows Filtering Platform (WFP) drop events.
+- Side-by-side forensic drawer detailing event timestamps, source and destination ports, protocols, and smart caller identification.
+- Filters out kernel loopback and noise events to highlight real application blocks.
+- 1-click buttons to immediately allow the blocked executable or launch a Spectra AI investigation.
+
+---
+
+## 🛑 Emergency Recovery & Safety Mechanisms
+
+SpectraNetworkManager is built with zero-lockout safety principles:
+
+1. **PANIC Emergency Reset Button**: Available on the top bar and in the system tray menu. Instantly restores Windows Firewall outbound policy to Allow, deletes all SpectraNetworkManager firewall rules, and restores original adapter DNS configurations.
+2. **Safe Recovery Mode (`--safe`)**: Run `SpectraNetworkManager.exe --safe` (or click "SpectraNetworkManager (Safe Recovery Mode)" in the Start Menu) to immediately reset all firewall and DNS configurations offline without opening the UI.
+3. **Manual Command Prompt Recovery**:
+   ```cmd
+   netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound
+   ```
+4. **Emergency IFEO Cleaner Script**: Located at [`scripts/Unlock-QuarantineLockouts.ps1`](scripts/Unlock-QuarantineLockouts.ps1) to clear any orphaned execution debugger lockouts.
+
+---
+
+## 📦 Installation & System Requirements
+
+### Requirements
+- **OS**: Windows 10 (version 1809 or higher) or Windows 11 (64-bit x64).
+- **Privileges**: Administrator rights (required for Windows Filtering Platform, firewall rules, and network adapter settings).
+- **Runtime**: Self-contained (no external .NET installation required).
+
+### Installation Methods
+1. **Production Installer**:
+   Download and run `SpectraNetworkManager-v2.0.0-Setup.exe`. Follow the guided wizard.
+2. **Portable Package**:
+   Download `SpectraNetworkManager-v2.0.0-Portable.zip`, extract to any folder, and run `SpectraNetworkManager.exe` as Administrator.
+
+### Automated Package Build
+To compile and package the installer and portable ZIP locally:
+```powershell
+powershell -ExecutionPolicy Bypass -File build-package.ps1 -SkipTests
 ```
-auditpol /set /subcategory:"{0CCE9226-69AE-11D9-BED3-505054503030}" /failure:enable
-auditpol /set /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}" /failure:enable
-```
-The first one (blocked connections) is what SpectraNetworkManager needs; the second (individual dropped packets) is only for `--packets`.
-Blocked attempts are written to the Security log, so a program that retries all the time makes the log busier.
+The output artifacts are written directly to `installer\output\`:
+- `SpectraNetworkManager-v2.0.0-Setup.exe`
+- `SpectraNetworkManager-v2.0.0-Portable.zip`
 
-## Roadmap
-0. Spike: connections + owning process - done
-1a. Live monitor window, Programs view, host names, signer, firewall block view - done
-1b. Engine as a Windows service + local API, per-process bandwidth (ETW), SQLite history (after Phase 2)
-2a. Learning mode, per-program allow/block via Windows Firewall rules, panic button - done
-2b. Ask mode, Rules view, block direction - done
-2c-1. Verified signatures, trusted publishers, wider protection - done
-2c-2. Rules with protocol, ports and addresses - done
-2c-3. Strict mode: block by default with a safety net - done (tested)
-2c-4. Native WFP filters + direct block events (no audit policy needed) - postponed: it needs hand-written native structs that cannot be verified without a Windows test machine
-3a. DNS sinkhole: resolver, block lists, cache, query log, LAN permission - **you are here**
-3b. One-click system DNS switch (with restore), per-adapter backup
-3c. DoH/DoT upstreams, persistent query history, per-client rules
-4. Polish: signature trust, profiles, installer, code signing
-5. Remote/LAN: web dashboard, multi-machine view
+---
 
-## Safety rules for the firewall phases
-- Develop and test blocking in a Windows VM with snapshots.
-- Learning mode by default, an allowlist for DHCP/DNS/Windows Update/time sync, and a panic button.
+## 💻 Building from Source
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Creator-NL/SpectraNetworkManager.git
+   cd SpectraNetworkManager
+   ```
+2. Open `SpectraNetworkManager.sln` in **Visual Studio 2022** (v17.8 or newer with *.NET desktop development* workload).
+3. Ensure **`SpectraNetworkManager.App`** is set as the startup project.
+4. Or build via the .NET CLI:
+   ```powershell
+   dotnet build SpectraNetworkManager.sln -c Release
+   ```
+5. Run automated unit tests:
+   ```powershell
+   dotnet test tests/SpectraNetworkManager.Tests/SpectraNetworkManager.Tests.csproj -c Release
+   ```
+
+---
+
+## 🔒 Privacy & Security Commitments
+
+* **100% Local Execution**: All network inspections, DNS sinkhole operations, packet dissections, and AI analyses run entirely on your PC.
+* **Zero Telemetry**: SpectraNetworkManager contains no tracking code, telemetry pings, advertising SDKs, or cloud dependencies.
+* **Encrypted DNS**: Outbound DNS queries use DNS-over-HTTPS or DNS-over-TLS directly with your chosen independent upstream resolver.
+* Review our complete policies in [docs/PRIVACY.md](docs/PRIVACY.md) and [docs/SECURITY.md](docs/SECURITY.md).
+
+---
+
+## 📄 License & Credits
+
+- Developed by **Biohazard Corp / Creator-NL**.
+- Licensed under the open-source **[MIT License](LICENSE)**.
+- Official Website: [https://biohazard-corp.nl](https://biohazard-corp.nl)
+- Interactive Online Demo: [https://biohazard-corp.nl/spectranetworkmanager.html](https://biohazard-corp.nl/spectranetworkmanager.html)

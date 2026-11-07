@@ -102,4 +102,51 @@ YouTube serves both advertisements and the actual video/audio stream segments fr
 ### 15. How does the 60-second safety rollback protect my network connection?
 Whenever you point your network adapters (Wi-Fi, Ethernet) to SpectraNetworkManager or enable Strict Mode, SpectraNetworkManager creates a backup of your current working configuration and starts a 60-second safety timer while testing internet connectivity. If you do not click Confirm, if connectivity is lost, or if the application closes unexpectedly, all DNS and firewall settings are automatically rolled back to your previous working state.
 
+---
+
+### 16. What is the 5-Stage Active Quarantine Vault?
+The 5-Stage Quarantine Vault is an active defense capability that neutralizes hostile, unauthorized, or suspicious software across five consecutive containment rings:
+1. **Process & Socket Kill:** Forcefully terminates all active process instances and drops all active TCP/UDP sockets immediately.
+2. **Execution Lockout (IFEO):** Configures an Image File Execution Options debugger redirect (`systray.exe`), preventing Windows from ever launching the executable again even if a user or script double-clicks it.
+3. **Service Disabling:** Discovers and stops any Windows Services hosted by the executable and disables their startup type.
+4. **Auto-Start Removal:** Disables matching auto-start entries in the Registry, Startup folders, and Task Scheduler.
+5. **Firewall Block:** Registers Windows Firewall rules dropping all inbound and outbound traffic.
+
+Every quarantined item is safely recorded in the **Quarantine** tab with full reversible 1-click restore.
+
+---
+
+### 17. How does the Spectra AI Threat Intelligence Engine and Chat work?
+Spectra AI analyzes running processes, startup items, or network sockets by extracting cryptographic evidence (Authenticode digital signature verification, publisher certificate, system directory validation, and SHA-256 hash calculation) combined with observed network telemetry (ports, remote endpoints, DNS lookups). It assigns a **0–100 Risk Score** and a clear threat verdict (`Safe`, `Low Risk`, `Suspicious`, `Malicious`).
+
+You can also use the interactive **`💬 Ask Spectra AI`** chat thread to ask follow-up questions (e.g. *"Is this safe to run?"*, *"Why does this program connect to the internet?"*, *"What happens if I block it?"*). If you run **Ollama** locally (`127.0.0.1:11434`), Spectra AI leverages your local neural model for conversational analysis. If Ollama is offline or not installed, Spectra AI's built-in **Deterministic Security Engine** delivers instant, factual offline answers based on the audited evidence.
+
+---
+
+### 18. What does Spectra Browser Guard do and how does it block YouTube ads?
+Spectra Browser Guard is a lightweight Manifest V3 extension for **Google Chrome**, **Microsoft Edge**, and **Mozilla Firefox** paired with a local Native Messaging Host (`SpectraNetworkManager.BrowserHost.exe`). It intercepts web requests inside the browser with zero network latency using declarative rules (`declarativeNetRequest`), suppressing:
+* YouTube pre-roll, mid-roll, and banner advertisements.
+* Video ad-tracking telemetry beacons.
+* In-video promo cards and annotations.
+* Distracting YouTube Shorts feeds (optional toggle).
+* Custom elements blocked via the in-page visual Element Picker.
+
+---
+
+### 19. How do I protect Smart TVs, phones, or IoT devices on my local network?
+Open the **TV & Mobile** tab in SpectraNetworkManager:
+1. **QR-Code Pairing:** Scan the on-screen QR code with your smartphone to open the mobile companion dashboard.
+2. **DNS Protection:** Set your TV or phone's DNS server to your PC's local LAN IP address (or enable the built-in DHCP server in the TV & Mobile settings).
+3. **3-in-1 Hub:** You can route device traffic through the built-in HTTP/HTTPS Proxy (port 8888) or the L3 Gateway Router.
+4. **Independent Rules:** Manage phone and smart TV blocking rules separately (`tv-mobile-rules.json`), ensuring aggressive ad blocking on your TV never interferes with PC browsing or gaming.
+
+---
+
+### 20. What is Self-Healing & Protected Programs?
+Certain critical system components (such as Microsoft Edge WebView2, local Ollama runtime, and core Windows binaries) are essential for operating system stability and the SpectraNetworkManager UI itself. SpectraNetworkManager includes automated self-healing guards:
+* Protected binaries can never be accidentally locked out via IFEO or quarantined.
+* On startup, the application automatically scans and heals any orphaned or stale IFEO execution redirects left behind by uninstalled software.
+* The uninstaller automatically sweeps and removes all execution lockouts cleanly.
+
+
 

@@ -20,19 +20,58 @@ internal static class SingleInstanceManager
     private static CancellationTokenSource? _cts;
     private static Task? _listenerTask;
 
-    private static string PipeName =>
-        $"SpectraNetworkManager.App.SingleInstance.{Environment.UserName}.Session{Process.GetCurrentProcess().SessionId}";
+    private static string PipeName => WindowsPipeSecurityHelper.SingleInstancePipeName;
 
     private static string MutexName =>
         $@"Local\SpectraNetworkManager_{Environment.UserName}_SingleInstance_Mutex";
+
+    /// <summary>
+    /// Event fired when a native messaging host or external component notifies that Browser Guard rules changed.
+    /// </summary>
+    public static event Action? BrowserGuardChanged;
 
     /// <summary>
     /// Initializes single-instance enforcement.
     /// Returns true if this process is the primary (first) instance;
     /// returns false if an instance is already running (and signals that instance to activate).
     /// </summary>
-    public static bool InitializeAsFirstInstance(Action onActivateRequested)
+    public static bool InitializeAsFirstInstance(Action onActivateRequested, string[]? args = null)
     {
+        // 1. Check for intentional restart handoff from an exiting instance
+        int restartPid = 0;
+        if (args != null)
+        {
+            foreach (var arg in args)
+            {
+                if (arg.StartsWith("--restart-from=", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = int.TryParse(arg["--restart-from=".Length..], out restartPid);
+                    break;
+                }
+            }
+        }
+
+        if (restartPid > 0)
+        {
+            try
+            {
+                var parentProc = Process.GetProcessById(restartPid);
+                if (!parentProc.HasExited)
+                {
+                    RotatingFileLogger.LogInfo($"SingleInstanceManager: Waiting for previous instance PID {restartPid} to exit...");
+                    parentProc.WaitForExit(5000); // Wait up to 5 seconds
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Process already exited, perfectly fine
+            }
+            catch (Exception ex)
+            {
+                RotatingFileLogger.LogWarn($"SingleInstanceManager: Error waiting for PID {restartPid}: {ex.Message}");
+            }
+        }
+
         bool isFirstInstance = false;
         try
         {
@@ -46,8 +85,9 @@ internal static class SingleInstanceManager
             {
                 try
                 {
-                    // Check if the existing mutex is actively held or was abandoned by a crashed process
-                    if (_mutex.WaitOne(0, false))
+                    // Check if the existing mutex is actively held or was abandoned by a crashed/exiting process
+                    int waitTimeout = restartPid > 0 ? 3000 : 250;
+                    if (_mutex.WaitOne(waitTimeout, false))
                     {
                         isFirstInstance = true;
                         _mutexOwned = true;
@@ -160,6 +200,17 @@ internal static class SingleInstanceManager
                         RotatingFileLogger.LogError("Error in single instance activation handler", ex);
                     }
                 }
+                else if (string.Equals(command, "BROWSER_GUARD_CHANGED", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        BrowserGuardChanged?.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        RotatingFileLogger.LogError("Error in single instance BrowserGuardChanged handler", ex);
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -171,6 +222,34 @@ internal static class SingleInstanceManager
                 RotatingFileLogger.LogWarn($"SingleInstanceManager listener loop error: {ex.Message}");
                 await Task.Delay(500, ct);
             }
+        }
+    }
+
+    /// <summary>
+    /// Releases mutex ownership and terminates pipe listener immediately ahead of an intentional elevation/restart handoff.
+    /// This prevents the newly spawned instance from falsely detecting an already-running instance.
+    /// </summary>
+    public static void PrepareForRestart()
+    {
+        try
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = null;
+
+            if (_mutexOwned && _mutex != null)
+            {
+                _mutex.ReleaseMutex();
+                _mutexOwned = false;
+            }
+            _mutex?.Dispose();
+            _mutex = null;
+
+            RotatingFileLogger.LogInfo("SingleInstanceManager: Mutex and pipe listener cleanly released for restart handoff.");
+        }
+        catch (Exception ex)
+        {
+            RotatingFileLogger.LogWarn($"SingleInstanceManager: Exception in PrepareForRestart ({ex.Message}).");
         }
     }
 
@@ -188,6 +267,7 @@ internal static class SingleInstanceManager
             if (_mutexOwned && _mutex != null)
             {
                 _mutex.ReleaseMutex();
+                _mutexOwned = false;
             }
             _mutex?.Dispose();
             _mutex = null;

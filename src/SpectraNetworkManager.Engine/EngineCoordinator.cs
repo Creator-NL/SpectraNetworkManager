@@ -455,6 +455,16 @@ public sealed class EngineCoordinator : IAsyncDisposable, IDisposable
             Console.Error.WriteLine($"[Panic] Firewall rule removal error: {ex.Message}");
         }
 
+        // 4. Remove all IFEO execution lockouts (Active Defense Quarantine)
+        try
+        {
+            QuarantineManager.RemoveAllExecutionLockouts();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Panic] IFEO removal error: {ex.Message}");
+        }
+
         return IpcMessage.CreateResponse(request, new { Message = "All SpectraNetworkManager firewall rules and DNS alterations have been restored to Windows defaults." });
     }
 

@@ -54,7 +54,7 @@ public sealed class QuarantineManager
             return (false, "Cannot quarantine SpectraNetworkManager itself.", null);
         }
 
-        // Pre-Check 2: Critical OS component & Windows Defender safety guard
+        // Pre-Check 2: Critical OS component & Shared Runtime (WebView2, Ollama) safety guard
         SignatureInfo? sig = null;
         try
         {
@@ -62,7 +62,7 @@ public sealed class QuarantineManager
         }
         catch { }
 
-        if (ProtectedPrograms.IsProtected(cleanPath, sig, out string protectReason))
+        if (ProtectedPrograms.IsExecutionLockoutProtected(cleanPath, out string protectReason))
         {
             return (false, $"Quarantine blocked: {protectReason}", null);
         }
@@ -354,6 +354,98 @@ public sealed class QuarantineManager
         @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
         @"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
     };
+
+    /// <summary>
+    /// Scans the Windows Registry IFEO trees (both 64-bit and 32-bit hives) for any program names hijacked with "Debugger = systray.exe".
+    /// Returns the list of executable names currently locked out at the kernel level.
+    /// </summary>
+    public static List<string> GetActiveExecutionLockouts()
+    {
+        var list = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ifeoRoot in IfeoPaths)
+        {
+            try
+            {
+                using var root = Registry.LocalMachine.OpenSubKey(ifeoRoot);
+                if (root == null) continue;
+                foreach (var subName in root.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var sub = root.OpenSubKey(subName);
+                        if (sub == null) continue;
+                        string? dbg = sub.GetValue("Debugger") as string;
+                        if (!string.IsNullOrEmpty(dbg) && dbg.Contains("systray.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            list.Add(subName);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                RotatingFileLogger.LogWarn($"GetActiveExecutionLockouts error for root '{ifeoRoot}': {ex.Message}");
+            }
+        }
+        return list.ToList();
+    }
+
+    /// <summary>
+    /// Clears execution lockout (IFEO) for all programs that were redirected to systray.exe.
+    /// </summary>
+    public static int RemoveAllExecutionLockouts()
+    {
+        int count = 0;
+        var locked = GetActiveExecutionLockouts();
+        foreach (var prog in locked)
+        {
+            if (SetExecutionLockout(prog, false))
+            {
+                count++;
+                RotatingFileLogger.LogInfo($"Removed execution lockout (IFEO) for '{prog}'.");
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Reconciles the system IFEO registry state against active QuarantineVault records.
+    /// If an IFEO lockout exists that is:
+    ///   1. For a protected runtime (e.g. msedgewebview2.exe, ollama.exe), or
+    ///   2. Orphaned (no active snapshot exists in the QuarantineVault due to uninstall, clear data, or crash),
+    /// it automatically removes the execution lockout to prevent silent process launch crashes and cache permission errors.
+    /// </summary>
+    public List<string> ReconcileAndHealOrphanedLockouts()
+    {
+        var healed = new List<string>();
+        var activeSnapshots = _vault.GetActive();
+        var lockouts = GetActiveExecutionLockouts();
+
+        foreach (var prog in lockouts)
+        {
+            bool isProtected = ProtectedPrograms.DisallowedExecutionLockoutBinaries.Contains(prog);
+            bool hasActiveSnapshot = activeSnapshots.Any(s => string.Equals(s.ProgramName, prog, StringComparison.OrdinalIgnoreCase));
+
+            if (isProtected || !hasActiveSnapshot)
+            {
+                try
+                {
+                    if (SetExecutionLockout(prog, false))
+                    {
+                        healed.Add(prog);
+                        RotatingFileLogger.LogInfo($"Self-Healing: Automatically cleared {(isProtected ? "protected component" : "orphaned")} IFEO execution lockout for '{prog}'.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RotatingFileLogger.LogError($"Self-Healing: Failed to remove IFEO lockout for '{prog}'", ex);
+                }
+            }
+        }
+
+        return healed;
+    }
 
     /// <summary>
     /// Enforces or removes kernel-level execution lockout via Image File Execution Options (IFEO).

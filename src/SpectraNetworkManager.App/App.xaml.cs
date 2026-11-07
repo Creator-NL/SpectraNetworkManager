@@ -70,7 +70,7 @@ public partial class App : System.Windows.Application
                     }
                 }
             });
-        });
+        }, e.Args);
 
         if (!isFirstInstance)
         {
@@ -102,7 +102,9 @@ public partial class App : System.Windows.Application
         if (!forceStandard && settingsStore.Settings.AlwaysStartAsAdministrator && !ElevationHelper.IsAdministrator())
         {
             string exe = Environment.ProcessPath ?? "SpectraNetworkManager.exe";
-            if (ElevationHelper.StartProcessElevated(exe, string.Join(" ", e.Args)))
+            SingleInstanceManager.PrepareForRestart();
+            var restartArgs = $"--restart-from={Environment.ProcessId} {string.Join(" ", e.Args)}".Trim();
+            if (ElevationHelper.StartProcessElevated(exe, restartArgs))
             {
                 Shutdown(0);
                 return;
@@ -218,6 +220,7 @@ public partial class App : System.Windows.Application
         }
 
         int removedRules = 0;
+        int removedLockouts = 0;
         if (!restoredViaIpc)
         {
             if (!IsAdministrator())
@@ -296,6 +299,17 @@ public partial class App : System.Windows.Application
             {
                 RotatingFileLogger.LogError("Safe Recovery: Failed to clear block decisions", ex);
             }
+
+            // Clear all IFEO execution lockouts (unblocks any quarantined programs)
+            try
+            {
+                removedLockouts = QuarantineManager.RemoveAllExecutionLockouts();
+                RotatingFileLogger.LogInfo($"Safe Recovery: Removed {removedLockouts} IFEO execution lockouts.");
+            }
+            catch (Exception ex)
+            {
+                RotatingFileLogger.LogError("Safe Recovery: Failed to remove IFEO execution lockouts", ex);
+            }
         }
 
         MessageBox.Show(
@@ -303,6 +317,7 @@ public partial class App : System.Windows.Application
             (restoredViaIpc
                 ? "• All defaults and network configurations restored via SpectraNetworkManager Engine service.\n"
                 : $"• Removed {removedRules} SpectraNetworkManager firewall rules.\n" +
+                  $"• Cleared {removedLockouts} kernel execution lockouts (IFEO).\n" +
                   "• Firewall outbound default restored to Allow.\n" +
                   "• System DNS restored to original network adapter configuration.\n" +
                   "• Temporary block decisions cleared.\n\n") +

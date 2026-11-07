@@ -689,3 +689,31 @@ public sealed class ElementPickerBlockRequestRow
         Request = request;
     }
 }
+
+
+/// <summary>One message in the interactive Spectra AI chat thread.</summary>
+public sealed class AiChatMessage
+{
+    public string SenderName { get; }
+    public string MessageText { get; set; }
+    public string TimestampDisplay { get; }
+    public bool IsUser { get; }
+    public System.Windows.HorizontalAlignment BubbleAlignment => IsUser ? System.Windows.HorizontalAlignment.Right : System.Windows.HorizontalAlignment.Left;
+    public System.Windows.Media.Brush BubbleBackground => IsUser
+        ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x16, 0x2A, 0x48))
+        : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14, 0x18, 0x28));
+    public System.Windows.Media.Brush BubbleBorder => IsUser
+        ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x22, 0xE8, 0xFF))
+        : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x24, 0x30, 0x55));
+    public System.Windows.Media.Brush SenderForeground => IsUser
+        ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x22, 0xE8, 0xFF))
+        : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xE6, 0x76));
+
+    public AiChatMessage(string senderName, string text, bool isUser)
+    {
+        SenderName = senderName;
+        MessageText = text;
+        IsUser = isUser;
+        TimestampDisplay = DateTime.Now.ToString("HH:mm:ss");
+    }
+}

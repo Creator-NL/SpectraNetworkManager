@@ -119,4 +119,54 @@ public sealed class OllamaClient
 
         return null;
     }
+
+    public async Task<string?> AskQuestionAsync(
+        string systemPrompt,
+        IEnumerable<(string Role, string Content)> conversationHistory,
+        string? modelOverride = null,
+        CancellationToken ct = default)
+    {
+        string model = !string.IsNullOrWhiteSpace(modelOverride) ? modelOverride : DefaultModel;
+
+        var messagesList = new List<object>
+        {
+            new { role = "system", content = systemPrompt }
+        };
+
+        foreach (var (role, text) in conversationHistory)
+        {
+            messagesList.Add(new { role = role, content = text });
+        }
+
+        var payload = new
+        {
+            model = model,
+            stream = false,
+            messages = messagesList
+        };
+
+        string requestJson = JsonSerializer.Serialize(payload);
+        using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+        try
+        {
+            using var resp = await Http.PostAsync($"{EndpointUrl}/api/chat", content, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+
+            string responseJson = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(responseJson);
+            if (doc.RootElement.TryGetProperty("message", out var msgProp) &&
+                msgProp.TryGetProperty("content", out var contentProp))
+            {
+                return contentProp.GetString();
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return null;
+    }
 }

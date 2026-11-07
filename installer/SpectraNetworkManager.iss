@@ -203,13 +203,50 @@ begin
   end;
 end;
 
+procedure CleanIfeoRoot(RootKey: Integer; BaseKey: String);
+var
+  Names: TArrayOfString;
+  I: Integer;
+  SubKey: String;
+  DbgVal: String;
+begin
+  if RegGetSubkeyNames(RootKey, BaseKey, Names) then
+  begin
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      SubKey := BaseKey + '\' + Names[I];
+      if RegQueryStringValue(RootKey, SubKey, 'Debugger', DbgVal) then
+      begin
+        if Pos('systray.exe', Lowercase(DbgVal)) > 0 then
+        begin
+          RegDeleteValue(RootKey, SubKey, 'Debugger');
+          RegDeleteKeyIfEmpty(RootKey, SubKey);
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure CleanAllIfeoQuarantineLockouts();
+begin
+  CleanIfeoRoot(HKLM64, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options');
+  CleanIfeoRoot(HKLM, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options');
+  CleanIfeoRoot(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options');
+end;
+
 // After file removal, prompt user whether to clean up data in ProgramData
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ProgramDataDir: String;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    CleanAllIfeoQuarantineLockouts();
+  end;
+
   if CurUninstallStep = usPostUninstall then
   begin
+    CleanAllIfeoQuarantineLockouts();
     ProgramDataDir := ExpandConstant('{commonappdata}\SpectraNetworkManager');
     if DirExists(ProgramDataDir) then
     begin

@@ -103,7 +103,7 @@ public sealed class BrowserGuardManager
                 Description = "Blocks YouTube Shorts feeds and short-form video reels.",
                 Action = GuardAction.Block,
                 ResourceType = "main_frame",
-                Enabled = true,
+                Enabled = false,
                 IsBuiltIn = true
             },
             new()
