@@ -110,7 +110,7 @@ public sealed class NetworkScannerAndClassificationTests
         Assert.Equal("HTTPS", WellKnownPorts.GetServiceName(443, Protocol.Tcp));
         Assert.Equal("DNS", WellKnownPorts.GetServiceName(53, Protocol.Udp));
         Assert.Equal("SSH", WellKnownPorts.GetServiceName(22, Protocol.Tcp));
-        Assert.Equal("MS-RDP", WellKnownPorts.GetServiceName(3389, Protocol.Tcp));
+        Assert.Equal("RDP / Remote Desktop", WellKnownPorts.GetServiceName(3389, Protocol.Tcp));
     }
 
     [Fact]

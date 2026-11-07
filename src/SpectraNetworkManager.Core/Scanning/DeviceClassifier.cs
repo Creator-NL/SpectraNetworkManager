@@ -93,6 +93,7 @@ public static class DeviceClassifier
 
         // Router & Gateways
         { "00040E", new OuiEntry("AVM Audiovisuelles (FRITZ!Box)", DeviceKind.RouterOrGateway) },
+        { "C02506", new OuiEntry("AVM Fritz!Box (Audiovisuelles)", DeviceKind.RouterOrGateway) },
         { "001A4F", new OuiEntry("AVM Audiovisuelles (FRITZ!Box)", DeviceKind.RouterOrGateway) },
         { "0896D7", new OuiEntry("AVM Audiovisuelles (FRITZ!Box)", DeviceKind.RouterOrGateway) },
         { "3431C4", new OuiEntry("AVM Audiovisuelles (FRITZ!Box)", DeviceKind.RouterOrGateway) },

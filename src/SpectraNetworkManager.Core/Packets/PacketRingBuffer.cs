@@ -24,7 +24,7 @@ public sealed class PacketRingBuffer
 
     public PacketRingBuffer(int capacity = 10000)
     {
-        Capacity = Math.Max(100, capacity);
+        Capacity = Math.Max(10, capacity);
         _buffer = new CapturedPacket?[Capacity];
     }
 

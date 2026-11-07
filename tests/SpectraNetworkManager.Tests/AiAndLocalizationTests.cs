@@ -15,9 +15,9 @@ public class AiAndLocalizationTests
         string malicious = "\x1B[31mDangerous\x1B[0m\0\u202Ereversed_name.exe";
         string sanitized = PromptSanitizer.Sanitize(malicious, 50);
 
-        Assert.DoesNotContain("\x1B", sanitized);
-        Assert.DoesNotContain("\0", sanitized);
-        Assert.DoesNotContain("\u202E", sanitized);
+        Assert.DoesNotContain("\x1B", sanitized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\0", sanitized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u202E", sanitized, StringComparison.Ordinal);
         Assert.Contains("Dangerous", sanitized);
         Assert.Contains("reversed_name.exe", sanitized);
     }

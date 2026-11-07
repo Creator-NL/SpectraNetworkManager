@@ -10518,7 +10518,7 @@ public partial class MainWindow : Window
     private async void OnAiAllowProgramClick(object sender, RoutedEventArgs e)
     {
         if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+            !string.IsNullOrWhiteSpace(_currentAiReport?.TargetIdentifier))
         {
             string dom = _currentAiReport.TargetIdentifier;
             if (_lastInvestigatedDomainIsTvMobile)
@@ -10551,7 +10551,7 @@ public partial class MainWindow : Window
     private async void OnAiBlockProgramClick(object sender, RoutedEventArgs e)
     {
         if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+            !string.IsNullOrWhiteSpace(_currentAiReport?.TargetIdentifier))
         {
             string dom = _currentAiReport.TargetIdentifier;
             if (_lastInvestigatedDomainIsTvMobile)
@@ -10597,7 +10597,7 @@ public partial class MainWindow : Window
     private void OnAiVirusTotalClick(object sender, RoutedEventArgs e)
     {
         if (string.Equals(_currentAiReport?.TargetType, "Domain", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(_currentAiReport.TargetIdentifier))
+            !string.IsNullOrWhiteSpace(_currentAiReport?.TargetIdentifier))
         {
             OpenDomainOnlineLookup(_currentAiReport.TargetIdentifier);
             return;

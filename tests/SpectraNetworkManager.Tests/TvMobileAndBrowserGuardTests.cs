@@ -133,10 +133,10 @@ public class TvMobileAndBrowserGuardTests
             var mgr = new BrowserGuardManager(tempConfig);
             Assert.NotEmpty(mgr.Config.CustomRules);
 
-            // Check built-in YouTube Shorts rule
+            // Check built-in YouTube Shorts rule (disabled by default so Shorts are not blocked unless user opts in)
             var shorts = mgr.Config.CustomRules.FirstOrDefault(r => r.Id == "yt-shorts");
             Assert.NotNull(shorts);
-            Assert.True(shorts.Enabled);
+            Assert.False(shorts.Enabled);
             Assert.Contains("youtube.com/shorts", shorts.Pattern);
 
             // Add custom rule
